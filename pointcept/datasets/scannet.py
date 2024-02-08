@@ -202,3 +202,8 @@ class ScanNet200Dataset(ScanNetDataset):
             data_dict["segment"] = segment
             data_dict["sampled_index"] = sampled_index
         return data_dict
+
+
+if __name__ == '__main__':
+    ds = ScanNetDataset()
+    print(len(ds))

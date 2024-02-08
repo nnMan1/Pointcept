@@ -555,12 +555,15 @@ The original PTv1 is also available in our Pointcept codebase. I haven't run PTv
 
 ```bash
 # ScanNet
-sh scripts/train.sh -g 4 -d scannet -c semseg-pt-v1-0-base -n semseg-pt-v1-0-base
+sh scripts/train.sh -g 1 -d scannet -c semseg-pt-v1-0-base -n semseg-pt-v1-0-base
 # ScanNet200
 sh scripts/train.sh -g 4 -d scannet200 -c semseg-pt-v1-0-base -n semseg-pt-v1-0-base
 # S3DIS
 sh scripts/train.sh -g 4 -d s3dis -c semseg-pt-v1-0-base -n semseg-pt-v1-0-base
 ```
+
+sh scripts/train.sh -g 1 -d partnet -c semseg-pt-v1-0-base -n semseg-pt-v1-0-base
+
 
 
 #### Stratified Transformer

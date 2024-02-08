@@ -5,6 +5,9 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
 
+import sys
+sys.path.append('/home')
+
 from pointcept.engines.defaults import (
     default_argument_parser,
     default_config_parser,
@@ -19,9 +22,18 @@ def main_worker(cfg):
     trainer = TRAINERS.build(dict(type=cfg.train.type, cfg=cfg))
     trainer.train()
 
+class Args:
+    def __init__(self):
+        self.config_file = 'configs/partnet/semseg-pt-v1-0-base.py'
+        self.num_gpus = 1
+        self.num_machines = 1
+        self.machine_rank = 0 
+        self.dist_url = 'auto'
+        self.options={'save_path': 'exp/partnet/semseg-pt-v1-0-base'}
 
 def main():
-    args = default_argument_parser().parse_args()
+    # args = default_argument_parser().parse_args()
+    args = Args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(
