@@ -24,12 +24,12 @@ def main_worker(cfg):
 
 class Args:
     def __init__(self):
-        self.config_file = 'configs/partnet/semseg-pt-v1-0-base.py'
+        self.config_file = 'configs/partnet/semseg-pt-v2-0-base.py'
         self.num_gpus = 1
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/partnet/semseg-pt-v1-0-base'}
+        self.options={'save_path': 'exp/partnet/semseg-pt-v2-0-base'}
 
 def main():
     # args = default_argument_parser().parse_args()
