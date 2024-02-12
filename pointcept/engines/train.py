@@ -181,6 +181,16 @@ class Trainer(TrainerBase):
         with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
             output_dict = self.model(input_dict)
             loss = output_dict["loss"]
+            
+        if torch.isnan(loss):            
+            if any(torch.isnan(input_dict['coords'])) or any(torch.isinf(input_dict['coords'])):
+                print('invalid input detected at iteration ')                
+
+            if self.cfg.empty_cache:
+                torch.cuda.empty_cache()
+                
+            return 
+        
         self.optimizer.zero_grad()
         if self.cfg.enable_amp:
             self.scaler.scale(loss).backward()
