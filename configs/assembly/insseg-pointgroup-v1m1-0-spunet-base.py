@@ -2,43 +2,24 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 8  # bs: total bs in all gpus
-num_worker = 8
+num_worker = 1
 mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
 
 class_names = [
-    "wall",
-    "floor",
-    "cabinet",
-    "bed",
-    "chair",
-    "sofa",
-    "table",
-    "door",
-    "window",
-    "bookshelf",
-    "picture",
-    "counter",
-    "desk",
-    "curtain",
-    "refridgerator",
-    "shower curtain",
-    "toilet",
-    "sink",
-    "bathtub",
-    "otherfurniture",
+    "assembly",
 ]
-num_classes = 20
-segment_ignore_index = (-1, 0, 1)
+num_classes = 1
+segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="PG-v1m1",
+    type="PG-v2m1",
     backbone=dict(
         type="SpUNet-v1m1",
-        in_channels=6,
+        in_channels=3,
         num_classes=0,
         channels=(32, 64, 128, 256, 256, 128, 96, 96),
         layers=(2, 3, 4, 6, 2, 2, 2, 2),
@@ -60,8 +41,8 @@ optimizer = dict(type="SGD", lr=0.1, momentum=0.9, weight_decay=0.0001, nesterov
 scheduler = dict(type="PolyLR")
 
 # dataset settings
-dataset_type = "ScanNetDataset"
-data_root = "data/scannet"
+dataset_type = "Assembly"
+data_root = "data/assembly"
 
 data = dict(
     num_classes=num_classes,
@@ -84,22 +65,16 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
-            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
-            dict(type="ChromaticTranslation", p=0.95, ratio=0.1),
-            dict(type="ChromaticJitter", p=0.95, std=0.05),
-            # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
-            # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
+            dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.5,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "normal", "segment", "instance"),
+                keys=("coord", "segment", "instance"),
             ),
             dict(type="SphereCrop", sample_rate=0.8, mode="random"),
-            dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
@@ -116,7 +91,7 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=("grid_coord"),
             ),
         ],
         test_mode=False,
@@ -141,11 +116,10 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "normal", "segment", "instance"),
+                keys=("coord", "segment", "instance"),
             ),
             # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
-            dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
@@ -165,7 +139,7 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],

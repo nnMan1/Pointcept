@@ -9,7 +9,7 @@ enable_amp = False
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
-    num_classes=39,
+    num_classes=51,
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
@@ -66,10 +66,10 @@ param_dicts = [dict(keyword="block", lr=0.0006)]
 # dataset settings
 dataset_type = "PartNet"
 data_root = "data/Partnet"
-categories=('Chair-3'),
+categories=('Table-3'),
 
 data = dict(
-    num_classes=40,
+    num_classes=51,
     ignore_index=-1,
     names=range(150),
     train=dict(
