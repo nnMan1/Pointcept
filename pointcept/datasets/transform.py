@@ -1137,7 +1137,16 @@ class InstanceParser(object):
         data_dict["bbox"] = bbox
         return data_dict
 
+@TRANSFORMS.register_module()
+class RandomSeed(object):
+    def __init__(self, n_points):
+        self.n_points = n_points
 
+    def __call__(self, data_dict):
+        ids = np.random.choice(np.arange(len(data_dict['coord'])), self.n_points)
+        data_dict['seed_ids'] = ids.reshape(1, -1)
+        return data_dict
+    
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []

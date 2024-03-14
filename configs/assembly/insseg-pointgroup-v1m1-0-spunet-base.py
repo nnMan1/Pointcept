@@ -16,7 +16,7 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="PG-v1m1",
+    type="PG-v2m1",
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
@@ -80,6 +80,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            dict(type='RandomSeed', n_points = 50),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -90,6 +91,7 @@ data = dict(
                     "instance",
                     "instance_centroid",
                     "bbox",
+                    "seed_ids"
                 ),
                 feat_keys=("grid_coord"),
             ),
@@ -125,6 +127,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            dict(type='RandomSeed', n_points = 50),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -138,6 +141,7 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
+                    "seed_ids"
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
