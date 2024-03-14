@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 8  # bs: total bs in all gpus
-num_worker = 1
+num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = True
@@ -16,7 +16,7 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="PG-v2m1",
+    type="PG-v1m1",
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
@@ -65,7 +65,7 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
+            # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
                 grid_size=0.5,
