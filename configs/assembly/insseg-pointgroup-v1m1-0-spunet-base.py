@@ -1,11 +1,11 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8  # bs: total bs in all gpus
+batch_size = 6  # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
-enable_amp = True
+enable_amp = False
 evaluate = True
 
 class_names = [
@@ -63,7 +63,7 @@ data = dict(
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
-            dict(type="RandomFlip", p=0.5),
+            dict(type="RandomFlip", p=0.8),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
@@ -80,7 +80,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 50),
+            dict(type='RandomSeed', n_points = 5),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -114,7 +114,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.5,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -127,7 +127,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 50),
+            dict(type='RandomSeed', n_points = 25),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -156,10 +156,10 @@ hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(
-        type="InsSegEvaluator",
-        segment_ignore_index=segment_ignore_index,
-        instance_ignore_index=-1,
-    ),
+    # dict(
+    #     type="InsSegEvaluator",
+    #     segment_ignore_index=segment_ignore_index,
+    #     instance_ignore_index=-1,
+    # ),
     dict(type="CheckpointSaver", save_freq=None),
 ]
