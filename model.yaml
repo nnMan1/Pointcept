@@ -1,0 +1,54 @@
+Mask3D(
+
+  (pooling): MinkowskiAvgPooling(kernel_size=[2, 2, 2], stride=[2, 2, 2], dilation=[1, 1, 1])
+  (pos_enc): PositionEmbeddingCoordsSine(type=fourier, scale=6.283185307179586, normalize=True, gaussB=torch.Size([3, 48]), gaussBsum=20.371591567993164)
+  (query_projection): GenericMLP(
+    (layers): Sequential(
+      (0): Conv1d(96, 96, kernel_size=(1,), stride=(1,))
+      (1): ReLU()
+      (2): Conv1d(96, 96, kernel_size=(1,), stride=(1,))
+      (3): ReLU()
+    )
+  )
+  (masked_transformer_decoder): ModuleList()
+  (cross_attention): ModuleList(
+    (0): ModuleList(
+      (0-3): 4 x CrossAttentionLayer(
+        (multihead_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=96, out_features=96, bias=True)
+        )
+        (norm): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+        (dropout): Dropout(p=0.0, inplace=False)
+      )
+    )
+  )
+  (self_attention): ModuleList(
+    (0): ModuleList(
+      (0-3): 4 x SelfAttentionLayer(
+        (self_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=96, out_features=96, bias=True)
+        )
+        (norm): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+        (dropout): Dropout(p=0.0, inplace=False)
+      )
+    )
+  )
+  (ffn_attention): ModuleList(
+    (0): ModuleList(
+      (0-3): 4 x FFNLayer(
+        (linear1): Linear(in_features=96, out_features=1024, bias=True)
+        (dropout): Dropout(p=0.0, inplace=False)
+        (linear2): Linear(in_features=1024, out_features=96, bias=True)
+        (norm): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+      )
+    )
+  )
+  (lin_squeeze): ModuleList(
+    (0): ModuleList(
+      (0-1): 2 x Linear(in_features=256, out_features=96, bias=True)
+      (2): Linear(in_features=128, out_features=96, bias=True)
+      (3): Linear(in_features=96, out_features=96, bias=True)
+    )
+  )
+  (decoder_norm): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+)

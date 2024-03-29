@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8  # bs: total bs in all gpus
+batch_size = 2  # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
@@ -16,23 +16,29 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="PG-v2m1",
+    type="Mask-3D",
     backbone=dict(
-        type="SpUNet-v1m1",
-        in_channels=3,
-        num_classes=0,
-        channels=(32, 64, 128, 256, 256, 128, 96, 96),
-        layers=(2, 3, 4, 6, 2, 2, 2, 2),
+        type="MinkUNet34C",
+        in_channels = 3,
+        out_channels = 0,
+        out_fpn=True, #return intermidiate features
     ),
-    backbone_out_channels=96,
-    semantic_num_classes=num_classes,
-    semantic_ignore_index=-1,
-    segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
-    cluster_thresh=1.5,
-    cluster_closed_points=300,
-    cluster_propose_points=100,
-    cluster_min_points=50,
+    position_encoding=dict(
+        type='PositionEmbeddingCoordsSine',
+        pos_type="fourier",
+        d_pos=96,
+        gauss_scale=1,
+        normalize=True,
+    ),
+    mask_module_config=dict(
+        num_classes=1, 
+        return_attn_masks=True, 
+        use_seg_masks=False
+    ),
+    num_decoders=1,
+    dim_feedforward=1024,
+    hidden_dim=128,
+    mask_dim=128
 )
 
 # scheduler settings
@@ -68,7 +74,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.5,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -80,7 +86,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 50),
+            dict(type="FPSSeed", n_points=10),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -127,7 +133,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 50),
+            dict(type="FPSSeed", n_points=100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",

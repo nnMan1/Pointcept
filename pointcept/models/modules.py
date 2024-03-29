@@ -4,7 +4,6 @@ import spconv.pytorch as spconv
 from collections import OrderedDict
 from pointcept.models.utils.structure import Point
 
-
 class PointModule(nn.Module):
     r"""PointModule
     placeholder, all module subclass from this will take Point in PointSequential.

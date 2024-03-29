@@ -503,7 +503,7 @@ FlashAttention force disables RPE and forces the accuracy reduced to fp16. If yo
 Detailed instructions and experiment records (containing weights) are available on the [project repository](https://github.com/Pointcept/PointTransformerV3). Example running scripts are as follows:
 ```bash
 # Scratched Settings
-sh scripts/train.sh -g 4 -d scannet -c semseg-pt-v3m1-0-base -n semseg-pt-v3m1-0-base
+sh scripts/train.sh -g 1 -d scannet -c semseg-pt-v3m1-0-base -n semseg-pt-v3m1-0-base
 sh scripts/train.sh -g 4 -d scannet200 -c semseg-pt-v3m1-0-base -n semseg-pt-v3m1-0-base
 
 # More configs and exp records for PTv3 will be available soon. (Before Feb 2024) 
@@ -586,8 +586,8 @@ cd ../..
 # PTv2m2: Stratified Transformer mode2, My rewrite version (recommend).
 
 # ScanNet
-sh scripts/train.sh -g 4 -d scannet -c semseg-st-v1m2-0-refined -n semseg-st-v1m2-0-refined
-sh scripts/train.sh -g 4 -d scannet -c semseg-st-v1m1-0-origin -n semseg-st-v1m1-0-origin
+sh scripts/train.sh -g 1 -d scannet -c semseg-st-v1m2-0-refined -n semseg-st-v1m2-0-refined
+sh scripts/train.sh -g 1 -d scannet -c semseg-st-v1m1-0-origin -n semseg-st-v1m1-0-origin
 # ScanNet200
 sh scripts/train.sh -g 4 -d scannet200 -c semseg-st-v1m2-0-refined -n semseg-st-v1m2-0-refined
 # S3DIS
@@ -694,7 +694,7 @@ cd ../..
 3. Training with the following example scripts:
 ```bash
 # ScanNet
-sh scripts/train.sh -g 4 -d scannet -c insseg-pointgroup-v1m1-0-spunet-base -n insseg-pointgroup-v1m1-0-spunet-base
+sh scripts/train.sh -g 1 -d assembly -c insseg-pointgroup-v1m1-0-spunet-base -n insseg-pointgroup-v1m1-0-spunet-base
 # S3DIS
 sh scripts/train.sh -g 4 -d scannet -c insseg-pointgroup-v1m1-0-spunet-base -n insseg-pointgroup-v1m1-0-spunet-base
 ```

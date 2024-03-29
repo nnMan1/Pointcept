@@ -10,6 +10,10 @@ docker run -d -ti \
           	  -v /media/velibor/Data/PhD_data/STL_Data/artefacts/:/home/data/LEAP_synth/raw/artefacts \
           	  -v /media/velibor/Data/PhD_data/STL_Data/contexts/:/home/data/LEAP_synth/raw/contexts \
           	  -v /media/velibor/Data/PhD_data/theoreticalPoses/:/home/data/LEAP_synth/raw/theoretical_poses \
+          	  -v '/media/velibor/Data/PhD_data/ABC dataset/chunks':'/home/data/ABCDataset/raw' \
+          	  -v '/media/velibor/Data/PhD_data/AssemblyRepository/processed/':'/home/data/ABCDataset/processed' \
           	  -v /media/velibor/Data/PhD_data/metadata/:/home/data/LEAP/raw \
+  		  -v /media/velibor/Data/PhD_data/AssemblyRepository/scans/:/home/data/assembly/raw \
+    		  -v /media/velibor/Data/PhD_data/AssemblyRepository/processed/:/home/data/assembly/scanns \
 		  --gpus all -it --rm --name "pointcept" pointcept/pointcept:pytorch2.0.1-cuda11.7-cudnn8-devel
 		  

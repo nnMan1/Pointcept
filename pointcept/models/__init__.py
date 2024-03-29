@@ -21,3 +21,5 @@ from .point_group import *
 # Pretraining
 from .masked_scene_contrast import *
 from .point_prompt_training import *
+
+from .mask_3d import *

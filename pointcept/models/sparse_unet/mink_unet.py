@@ -163,13 +163,16 @@ class MinkUNetBase(nn.Module):
     INIT_DIM = 32
     OUT_TENSOR_STRIDE = 1
 
-    def __init__(self, in_channels, out_channels, dimension=3):
+    def __init__(self, in_channels, out_channels, dimension=3, out_fpn=False):
         super().__init__()
         assert ME is not None, "Please follow `README.md` to install MinkowskiEngine.`"
         self.D = dimension
+        self.out_fpn = out_fpn
+
         assert self.BLOCK is not None
         # Output of the first conv concated to conv6
         self.inplanes = self.INIT_DIM
+        
         self.conv0p1s1 = ME.MinkowskiConvolution(
             in_channels, self.inplanes, kernel_size=5, dimension=self.D
         )
@@ -265,6 +268,7 @@ class MinkUNetBase(nn.Module):
                 ),
                 ME.MinkowskiBatchNorm(planes * block.expansion),
             )
+        
         layers = []
         layers.append(
             block(
@@ -276,6 +280,7 @@ class MinkUNetBase(nn.Module):
                 dimension=self.D,
             )
         )
+        
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
             layers.append(
@@ -287,10 +292,14 @@ class MinkUNetBase(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, data_dict):
+        
+        feature_maps = []
+
         grid_coord = data_dict["grid_coord"]
         feat = data_dict["feat"]
         offset = data_dict["offset"]
         batch = offset2batch(offset)
+
         in_field = ME.TensorField(
             feat,
             coordinates=torch.cat([batch.unsqueeze(-1).int(), grid_coord.int()], dim=1),
@@ -298,6 +307,7 @@ class MinkUNetBase(nn.Module):
             minkowski_algorithm=ME.MinkowskiAlgorithm.SPEED_OPTIMIZED,
             device=feat.device,
         )
+                
         x = in_field.sparse()
 
         out = self.conv0p1s1(x)
@@ -324,6 +334,7 @@ class MinkUNetBase(nn.Module):
         out = self.bn4(out)
         out = self.relu(out)
         out = self.block4(out)
+        feature_maps.append(out)
 
         # tensor_stride=8
         out = self.convtr4p16s2(out)
@@ -332,6 +343,7 @@ class MinkUNetBase(nn.Module):
 
         out = ME.cat(out, out_b3p8)
         out = self.block5(out)
+        feature_maps.append(out)
 
         # tensor_stride=4
         out = self.convtr5p8s2(out)
@@ -340,6 +352,7 @@ class MinkUNetBase(nn.Module):
 
         out = ME.cat(out, out_b2p4)
         out = self.block6(out)
+        feature_maps.append(out)
 
         # tensor_stride=2
         out = self.convtr6p4s2(out)
@@ -348,6 +361,7 @@ class MinkUNetBase(nn.Module):
 
         out = ME.cat(out, out_b1p2)
         out = self.block7(out)
+        feature_maps.append(out)
 
         # tensor_stride=1
         out = self.convtr7p2s2(out)
@@ -356,8 +370,14 @@ class MinkUNetBase(nn.Module):
 
         out = ME.cat(out, out_p1)
         out = self.block8(out)
-
-        return self.final(out).slice(in_field).F
+        feature_maps.append(out)
+        
+        out = self.final(out) #.slice(in_field).F
+        
+        if self.out_fpn:
+            return out, feature_maps
+        
+        return out
 
 
 @MODELS.register_module()

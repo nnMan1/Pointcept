@@ -20,6 +20,8 @@ from collections.abc import Sequence, Mapping
 
 from pointcept.utils.registry import Registry
 
+from torch_geometric import nn
+
 TRANSFORMS = Registry("transforms")
 
 
@@ -1145,6 +1147,20 @@ class RandomSeed(object):
     def __call__(self, data_dict):
         ids = np.random.choice(np.arange(len(data_dict['coord'])), self.n_points)
         data_dict['seed_ids'] = ids.reshape(1, -1)
+        return data_dict
+
+@TRANSFORMS.register_module()
+class FPSSeed(object):
+    def __init__(self, n_points):
+        self.n_points = n_points
+
+    def __call__(self, data_dict):
+
+        points = torch.tensor(data_dict['coord'])
+        batch = torch.zeros(len(points)).long()
+        ids = nn.fps(points, batch, ratio=(self.n_points + 1)/len(points))[:self.n_points]
+
+        data_dict['seed_ids'] = ids.reshape(1, -1).numpy()
         return data_dict
     
 class Compose(object):
