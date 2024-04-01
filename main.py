@@ -74,7 +74,7 @@ pcd2 = {
     'coord': np.random.random([2048, 3]),
 }
 
-gs = GridSample(grid_size=0.02,
+gs = GridSample(grid_size=0.01,
                 keys=('coord', ),
                 return_grid_coord=True)
 
@@ -99,8 +99,16 @@ data['feat'] = data['coord']
 t = time.time()
 out = model(data)
 
+print(out.keys())
+
+out = out['final_prediction']
+
 for key in out.keys():
-    print(key, out[key].shape, out[key].dtype)
+    print(key)
+    try:
+        print(key, out[key].shape, out[key].dtype, torch.isnan(out[key]).sum())
+    except:
+        pass
 
 print(time.time() - t)
 

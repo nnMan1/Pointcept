@@ -39,13 +39,14 @@ class Mask3D(nn.Module):
                 hidden_use_bias=True,
             )
 
+        sample_sizes = [200, 800, 3200, 12800, 51200]
         sizes = self.backbone.PLANES[-5:]
        
         self.mask_module = MaskModule(hidden_dim, **mask_module_config)
         self.query_refinement = nn.ModuleList()
 
         for i, hlevel in enumerate(self.hlevels):
-            self.query_refinement.append(QueryRefinement(dim_feedforward, mask_dim, sample_size=sizes[i], **query_refinement_config))
+            self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
 
     def __get_pos_encs(self, coords):
 
@@ -283,7 +284,7 @@ class MaskModule(nn.Module):
 
 class QueryRefinement(nn.Module):
 
-    def __init__(self, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
+    def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
 
         super().__init__()
 
@@ -301,7 +302,7 @@ class QueryRefinement(nn.Module):
                     normalize_before=self.pre_norm,
                 )
         
-        self.lin_squeez = nn.Linear(sample_size, self.mask_dim)
+        self.lin_squeez = nn.Linear(in_channels, self.mask_dim)
 
         self.self_attention = SelfAttentionLayer(
                     d_model=self.mask_dim,
@@ -356,7 +357,7 @@ class QueryRefinement(nn.Module):
                     idx = torch.randperm( pcd_size,
                                         device = data.device
                                         )[:max_size]
-                    midx = torch.ones(max_size,
+                    midx = torch.zeros(max_size,
                                     dtype=bool,
                                     device=data.device)
                     
