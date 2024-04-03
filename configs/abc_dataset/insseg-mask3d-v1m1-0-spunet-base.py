@@ -135,7 +135,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 25),
+            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
