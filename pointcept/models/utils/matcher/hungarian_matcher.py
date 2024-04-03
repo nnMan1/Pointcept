@@ -9,6 +9,9 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.cuda.amp import autocast
 
+# from detectron2.projects.point_rend.point_features import point_sample
+
+
 def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
     Compute the DICE loss, similar to generalized IOU for masks
@@ -77,7 +80,7 @@ class HungarianMatcher(nn.Module):
         cost_class: float = 1,
         cost_mask: float = 1,
         cost_dice: float = 1,
-        num_points: int = -1,
+        num_points: int = 0,
     ):
         """Creates the matcher
 
@@ -98,18 +101,15 @@ class HungarianMatcher(nn.Module):
         self.num_points = num_points
 
     @torch.no_grad()
-    def memory_efficient_forward(self, outputs, targets, mask_type, offset):
+    def memory_efficient_forward(self, outputs, targets, mask_type):
         """More memory-friendly matching"""
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
-        batch_start = torch.cat([torch.tensor([0]), offset])
+        indices = []
 
         # Iterate through batch size
         for b in range(bs):
 
-            mask_pred = outputs[batch_start[b]: offset[b]]
-            mask_gt = outputs[batch_start[b]: offset[b]]
-            
             out_prob = outputs["pred_logits"][b].softmax(
                 -1
             )  # [num_queries, num_classes]
@@ -127,8 +127,12 @@ class HungarianMatcher(nn.Module):
                 -1.0
             )  # for ignore classes pretend perfect match ;) TODO better worst class match?
 
-            out_mask = outputs["pred_masks"][b].T  
-            tgt_mask = F.one_hot(mask_type)
+            out_mask = outputs["pred_masks"][
+                b
+            ].T  # [num_queries, H_pred, W_pred]
+            # gt masks are already padded when preparing target
+            tgt_mask = targets[b][mask_type].to(out_mask)
+
             if self.num_points != -1:
                 point_idx = torch.randperm(
                     tgt_mask.shape[1], device=tgt_mask.device
@@ -169,6 +173,7 @@ class HungarianMatcher(nn.Module):
                 cost_dice = batch_dice_loss_jit(
                     out_mask[:, point_idx], tgt_mask[:, point_idx]
                 )
+
             # Final cost matrix
             C = (
                 self.cost_mask * cost_mask
@@ -186,9 +191,62 @@ class HungarianMatcher(nn.Module):
             )
             for i, j in indices
         ]
+    
+    @torch.no_grad()
+    def my_optimized_forward(self, ouptups, targets, offset):
+
+        batch_start = 0
+
+        indices = []
+        matched_outputs = []
+        matched_targets = []
+
+        for batch_end in offset:
+
+            out_mask = ouptups['outputs_mask'][batch_start:batch_end].T
+            tgt_mask = targets['instance'][batch_start:batch_end]
+            tgt_mask = F.one_hot(tgt_mask).T
+
+            with autocast(enabled=False):
+                out_mask = out_mask.float()
+                tgt_mask = tgt_mask.float()
+                # Compute the focal loss between masks
+                cost_mask = batch_sigmoid_ce_loss_jit(
+                    out_mask, tgt_mask
+                )
+
+                # Compute the dice loss betwen masks
+                cost_dice = batch_dice_loss_jit(
+                    out_mask, tgt_mask
+                )
+
+            C = (
+                self.cost_mask * cost_mask
+                # + self.cost_class * cost_class
+                + self.cost_dice * cost_dice
+            )
+
+            C = C.cpu()
+            # C = C.reshape(num_queries, -1).cpu()
+            indices.append(linear_sum_assignment(C))
+
+            pred_ids, tgt_ids = indices[-1]
+
+            p = out_mask.T
+            g = tgt_mask.T
+
+            p = p[:, pred_ids]
+            g = g[:, tgt_ids].argmax(-1)
+            
+            matched_outputs.append(p)
+            matched_outputs.append(g)
+
+            batch_start = batch_end
+            
+        return matched_outputs, matched_targets, indices
 
     @torch.no_grad()
-    def forward(self, outputs, targets, mask_type, offset):
+    def forward(self, outputs, targets, offset):
         """Performs the matching
 
         Params:
@@ -208,7 +266,8 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        return self.memory_efficient_forward(outputs, targets, mask_type)
+        return self.my_optimized_forward(outputs, targets, offset)
+        # return self.memory_efficient_forward(outputs, targets, mask_type)
 
     def __repr__(self, _repr_indent=4):
         head = "Matcher " + self.__class__.__name__
@@ -222,12 +281,33 @@ class HungarianMatcher(nn.Module):
 
 if __name__ == '__main__':
 
-    pred = {
-        "pred_masks": torch.rand([2, 2048, 20], device='cuda')
-    }
-
-    target=torch.randint(0, 20, [2,2024])
 
     matcher = HungarianMatcher()
-    matcher(pred, target, 'pred_masks')
+
+    pred = torch.rand([4096, 500])
+    gt = torch.randint(0, 2000, [4096])
+    offset = torch.tensor([2040, 4096], dtype=torch.int32)
+
+    matched_masks, matched_targets, ids = matcher({'output_mask':pred}, 
+                                                  {'instance': gt}, 
+                                                   offset)
+    
+    batch_start = 0
+    
+    # for b in ids:
+    #     print(len(b[0]))
+
+    # print(list(zip(ids[0][0], ids[0][1])))
+
+    # for p in zip(*mapping):
+    #     print(p)
+
+    # pred = {
+    #     "pred_masks": torch.rand([2, 2048, 20], device='cuda')
+    # }
+
+    # target=torch.randint(0, 20, [2,2024])
+
+    # matcher = HungarianMatcher()
+    # matcher(pred, target, 'pred_masks')
 

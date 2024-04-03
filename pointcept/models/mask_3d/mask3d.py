@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from pointcept.models.builder import MODELS, build_model
 from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
+from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 
 @MODELS.register_module("Mask-3D")
 class Mask3D(nn.Module):
@@ -47,6 +48,12 @@ class Mask3D(nn.Module):
 
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
+
+        self.matcher = HungarianMatcher()
+
+        self.loss_ce = nn.CrossEntropyLoss()
+        self.loss_dice = DiceLoss()
+        self.loss_focal = FocalLoss()
 
     def __get_pos_encs(self, coords):
 
@@ -90,6 +97,8 @@ class Mask3D(nn.Module):
                 coords.append(self.pooling(coords[-1]))
 
             coords.reverse()
+
+            
 
         pos_encodings_pcd = self.__get_pos_encs(coords)
 
@@ -144,8 +153,15 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': len(self.hlevels) - i 
                 })
 
-                pos_encoding=torch.cat(pos_encodings_pcd[i])
+                matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+                axiliary_losses.append(0)
 
+                for mask, target in zip(matched_outputs, matched_targets):
+                    axiliary_losses[-1] += self.loss_ce(mask, target) + self.loss_focal(mask, target) + self.loss_dice(mask, target)
+
+                axiliary_losses[-1] /= len(matched_outputs)
+
+                pos_encoding=torch.cat(pos_encodings_pcd[i])
 
                 queries = self.query_refinement[i](
                                                    aux[i].features,
@@ -163,7 +179,14 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': 0
                 })
         
+        matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+        axiliary_losses.append(0)
+
+        for mask, target in zip(matched_outputs, matched_targets):
+            axiliary_losses[-1] += self.loss_ce(mask, target) + self.loss_focal(mask, target) + self.loss_dice(mask, target)
+
         return {
+            'loss': torch.tensor(axiliary_losses).mean(),
             'final_prediction': masks,
             'axiliary_losses': axiliary_losses
         }
