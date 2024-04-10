@@ -137,7 +137,9 @@ class PointGroup(nn.Module):
             proposals_pred = torch.zeros(
                 (proposals_offset.shape[0] - 1, center_pred.shape[0]), dtype=torch.int
             )
+            
             proposals_pred[proposals_idx[:, 0].long(), proposals_idx[:, 1].long()] = 1
+            
             instance_pred = segment_pred[
                 proposals_idx[:, 1][proposals_offset[:-1].long()].long()
             ]
@@ -149,6 +151,7 @@ class PointGroup(nn.Module):
             pred_scores = []
             pred_classes = []
             pred_masks = proposals_pred.detach().cpu()
+            
             for proposal_id in range(len(proposals_pred)):
                 segment_ = proposals_pred[proposal_id]
                 confidence_ = logit_pred[

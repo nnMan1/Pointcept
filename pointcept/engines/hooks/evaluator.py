@@ -101,6 +101,41 @@ class ClsEvaluator(HookBase):
             "Best {}: {:.4f}".format("allAcc", self.trainer.best_metric_value)
         )
 
+@HOOKS.register_module()
+class MyInsSegEvaluator(HookBase):
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.model.eval()
+        losses = []
+
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict.keys():
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+                losses.append(output_dict['loss'])
+
+        loss_avg = torch.tensor(losses).mean() 
+
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+            # self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            # self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
+            # self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+            
+        self.trainer.comm_info["current_metric_value"] = torch.tensor(losses).mean()  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "loss"  # save for saver
+
+    def after_train(self):
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format("mIoU", self.trainer.best_metric_value)
+        )
 
 @HOOKS.register_module()
 class SemSegEvaluator(HookBase):

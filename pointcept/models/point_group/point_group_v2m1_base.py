@@ -143,7 +143,7 @@ class Attention(nn.Module):
         _, _, c_per_head = q.shape
         attn = q * k  # B x N_heads x N_tokens x N_tokens
         attn = attn / math.sqrt(c_per_head)
-        attn = torch.cat([torch.softmax(attn[batch == i], dim = 0) for i in torch.arange(0, batch[-1] + 1)])
+        # attn = torch.cat([torch.softmax(attn[batch == i], dim = 0) for i in torch.arange(0, batch[-1] + 1)])
 
         # Get output
         out = attn * v
@@ -184,8 +184,8 @@ class PointGroupV2(nn.Module):
         self.attn1 = Attention(embedding_dim = backbone_out_channels,
                                num_heads=8)
         
-        self.attn2 = Attention(embedding_dim = backbone_out_channels,
-                               num_heads=8)
+        # self.attn2 = Attention(embedding_dim = backbone_out_channels,
+        #                        num_heads=8)
 
         self.seg_head = nn.Sequential(
             nn.Linear(backbone_out_channels, backbone_out_channels),
@@ -214,36 +214,43 @@ class PointGroupV2(nn.Module):
         feat = self.backbone(data_dict)
 
         masks = []
-        loss_dice = []
-        loss_focal = []
+        loss_dice = 0
+        loss_focal = 0
+
+        print(coord.shape)
+
 
         for ids in seed_ids.T:
-            ids[1:] += offset[:-1]
+            # ids[1:] += offset[:-1]
+            # ids = torch.detach(ids)
+            ids = torch.tensor([ids[0], *(ids[1:] + offset[:-1])])
             k = feat[ids]
             v = k
 
             q = feat
             q = q + nn.ReLU()(self.attn1(q, k, v, batch))
-            q = q + nn.ReLU()(self.attn2(q, q, v, batch))
+            # q = q + nn.ReLU()(self.attn2(q, q, v, batch))
 
             mask = self.seg_head(q)
 
             gt = torch.zeros_like(instance, dtype=torch.int32)
             gt[instance == instance[batch.clone().detach()]] = 1
 
-            loss_dice.append(self.mask_dice_criteria(mask, gt))
-            loss_focal.append(self.mask_foc_criteria(mask, gt))
+            loss_dice = loss_dice + self.mask_dice_criteria(mask, gt)
+            loss_focal = loss_focal + self.mask_foc_criteria(mask, gt)
 
             masks.append(mask)
             
-        loss_dice = torch.mean(loss_dice)
-        loss_focal = torch.mean(loss_focal)
+        loss_dice = loss_dice / seed_ids.shape[-1]
+        loss_focal = loss_focal / seed_ids.shape[-1]
+
         loss = loss_focal + loss_dice
-        
+
+       
         return_dict = {
             'loss': loss,
             'loss_dice': loss_dice,
-            'loss_dice': loss_dice,
+            'loss_focal': loss_focal,
         }
 
         return return_dict

@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 64 # bs: total bs in all gpus
+batch_size = 6 # bs: total bs in all gpus
 num_worker = 12
 mix_prob = 0
 empty_cache = True
@@ -81,11 +81,11 @@ data = dict(
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
-            dict(type="RandomJitter", sigma=0.001, clip=0.02),
+            dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.05,
+                grid_size=0.01,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -133,7 +133,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.05,
+                grid_size=0.01,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

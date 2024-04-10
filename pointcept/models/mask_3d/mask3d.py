@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from pointcept.models.builder import MODELS, build_model
 from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
+from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 
 @MODELS.register_module("Mask-3D")
@@ -50,10 +51,11 @@ class Mask3D(nn.Module):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
 
         self.matcher = HungarianMatcher()
+        # self.matcher = MyMatcher()
 
         self.loss_ce = nn.CrossEntropyLoss()
         self.loss_dice = DiceLoss()
-        self.loss_focal = FocalLoss()
+        # self.loss_focal = BinaryFocalLoss()
 
     def __get_pos_encs(self, coords):
 
@@ -71,6 +73,9 @@ class Mask3D(nn.Module):
                         input_range=[scene_min, scene_max],
                     )
 
+                if tmp.sum().isnan():
+                    pass
+
                 pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
 
         return pos_encodings_pcd
@@ -78,15 +83,19 @@ class Mask3D(nn.Module):
     def forward(self, data):
         
         raw_coordinates = data['coord']
+        grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
+
+        # for p in data:
+        #     print(data['path'])
         
         mask_features, aux = self.backbone(data)
         pcd_features = aux[-1]
         
         with torch.no_grad():
             coordinates = me.SparseTensor(
-                features=raw_coordinates,
+                features=data['grid_coord'].float(),
                 coordinate_manager=aux[-1].coordinate_manager,
                 coordinate_map_key=aux[-1].coordinate_map_key,
                 device=aux[-1].device,
@@ -114,7 +123,7 @@ class Mask3D(nn.Module):
         sampled_coords = []
         batch_start = 0
         for i, batch_end in enumerate(offset):
-            points = raw_coordinates[batch_start:batch_end]
+            points = grid_coordinates[batch_start:batch_end].float()
             sampled_coords.append(points[seed_ids[i]])
 
         mins = torch.stack(
@@ -154,12 +163,16 @@ class Mask3D(nn.Module):
                 })
 
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-                axiliary_losses.append(0)
+                # axiliary_losses.append(0)
 
                 for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses[-1] += self.loss_ce(mask, target) + self.loss_focal(mask, target) + self.loss_dice(mask, target)
+                    axiliary_losses.append(0.5*self.loss_ce(mask, target) + self.loss_dice(mask, target))
 
-                axiliary_losses[-1] /= len(matched_outputs)
+                if torch.stack(axiliary_losses).mean().isnan():
+                    pass
+
+
+                # axiliary_losses[-1] /= len(matched_outputs)
 
                 pos_encoding=torch.cat(pos_encodings_pcd[i])
 
@@ -180,17 +193,26 @@ class Mask3D(nn.Module):
                 })
         
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-        axiliary_losses.append(0)
+        # axiliary_losses.append(0)
 
         for mask, target in zip(matched_outputs, matched_targets):
-            axiliary_losses[-1] += self.loss_ce(mask, target) + self.loss_focal(mask, target) + self.loss_dice(mask, target)
+            axiliary_losses.append(0.5*self.loss_ce(mask, target)  + self.loss_dice(mask, target))
 
-        return {
-            'loss': torch.tensor(axiliary_losses).mean(),
-            'final_prediction': masks,
-            'axiliary_losses': axiliary_losses
+        if torch.stack(axiliary_losses).mean().isnan():
+            pass
+
+        # masks['loss'] = torch.stack(axiliary_losses).mean()
+
+        return_dict = {
+            'loss': torch.stack(axiliary_losses).mean()            
         }
 
+        if not self.training: 
+            return_dict['matched_masks'] = matched_outputs
+            return_dict['masks'] = masks['outputs_mask']
+
+        return return_dict
+    
 class BatchNormDim1Swap(nn.BatchNorm1d):
     """
     Used for nn.Transformer that uses a HW x N x C rep
@@ -295,6 +317,8 @@ class MaskModule(nn.Module):
             for _ in range(data['num_pooling_steps']):
                 attn_mask = self.pooling(attn_mask.float())
 
+            # print([m.shape for m in attn_mask.decomposed_features])
+
             attn_mask = me.SparseTensor(
                 features=(attn_mask.F.detach().sigmoid() < 0.5),
                 coordinate_manager=attn_mask.coordinate_manager,
@@ -325,8 +349,8 @@ class QueryRefinement(nn.Module):
                     normalize_before=self.pre_norm,
                 )
         
-        self.lin_squeez = nn.Linear(in_channels, self.mask_dim)
-
+        self.lin_squeez =  nn.Linear(in_channels, self.mask_dim)
+            
         self.self_attention = SelfAttentionLayer(
                     d_model=self.mask_dim,
                     nhead=self.num_heads,
@@ -395,7 +419,7 @@ class QueryRefinement(nn.Module):
         batch_start = 0
 
         for i, batch_end in enumerate(offset):
-            batched_data.append(data[batch_start:batch_end][rand_idx[i]])
+            batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
             batch_start = batch_end
             
         batched_data = torch.stack(batched_data)
@@ -416,7 +440,6 @@ class QueryRefinement(nn.Module):
         m = torch.stack(mask_idx)
         attn_mask = torch.logical_or(attn_mask, m[..., None])
 
-
         src_pcd = self.lin_squeez(
                             point_features.permute((1, 0, 2))
                         )
@@ -432,6 +455,9 @@ class QueryRefinement(nn.Module):
                     query_pos=query_pos_encoding,
                 )
         
+        if output.isnan().sum() > 0:
+            pass
+        
         output = self.self_attention(
                     output,
                     tgt_mask=None,
@@ -439,10 +465,13 @@ class QueryRefinement(nn.Module):
                     query_pos=query_pos_encoding,
                 )
         
+        if output.isnan().sum() > 0:
+            pass
+        
         queries = self.ffn_attention(
                     output
                 ).permute((1, 0, 2))
-        
+                
         return queries
 
 class GenericMLP(nn.Module):
@@ -545,6 +574,10 @@ class SelfAttentionLayer(nn.Module):
     def forward_post(
         self, tgt, tgt_mask=None, tgt_key_padding_mask=None, query_pos=None
     ):
+        
+        if tgt.isnan().sum() > 0:
+            pass
+
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(
             q,
@@ -553,6 +586,10 @@ class SelfAttentionLayer(nn.Module):
             attn_mask=tgt_mask,
             key_padding_mask=tgt_key_padding_mask,
         )[0]
+
+        if tgt2.isnan().sum() > 0:
+            pass
+    
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
 
@@ -631,6 +668,8 @@ class CrossAttentionLayer(nn.Module):
             attn_mask=memory_mask,
             key_padding_mask=memory_key_padding_mask,
         )[0]
+        if tgt2.isnan().sum() > 0:
+            pass
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
 
