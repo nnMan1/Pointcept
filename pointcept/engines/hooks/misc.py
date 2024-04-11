@@ -224,7 +224,7 @@ class CheckpointLoader(HookBase):
             weight = OrderedDict()
             for key, value in checkpoint["state_dict"].items():
                 if not key.startswith("module."):
-                    if comm.get_world_size() > 1:
+                    if comm.get_world_size() == 1:
                         key = "module." + key  # xxx.xxx -> module.xxx.xxx
                 # Now all keys contain "module." no matter DDP or not.
                 if self.keywords in key:

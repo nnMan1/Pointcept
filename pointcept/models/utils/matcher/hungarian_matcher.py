@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.cuda.amp import autocast
+from multiprocessing import Pool
 
 # from detectron2.projects.point_rend.point_features import point_sample
 
@@ -100,11 +101,14 @@ class HungarianMatcher(nn.Module):
 
         self.num_points = num_points
 
+        self.p = Pool(128)
+
     @torch.no_grad()
     def memory_efficient_forward(self, outputs, targets, mask_type):
         """More memory-friendly matching"""
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
+        Cs = []
         indices = []
 
         # Iterate through batch size
@@ -182,7 +186,10 @@ class HungarianMatcher(nn.Module):
             )
             C = C.reshape(num_queries, -1).cpu()
 
-            indices.append(linear_sum_assignment(C))
+            Cs.append(C)
+            
+        with Pool(5) as p:
+            indices = p.map(linear_sum_assignment, Cs)
 
         return [
             (
@@ -200,6 +207,8 @@ class HungarianMatcher(nn.Module):
         indices = []
         matched_outputs = []
         matched_targets = []
+
+        Cs = []
 
         for batch_end in offset:
 
@@ -228,15 +237,17 @@ class HungarianMatcher(nn.Module):
                 )
 
                 C = C.cpu()
-                # print(C.sum())
-                # C = C.reshape(num_queries, -1).cpu()
-                try:
-                    indices.append(linear_sum_assignment(C))
-                except Exception as e:
-                    print(e)
-                    print(C.shape)
+                Cs.append(C)
 
-            pred_ids, tgt_ids = indices[-1]
+            batch_start = batch_end
+
+        
+        indices = self.p.map(linear_sum_assignment, Cs)
+ 
+        batch_start = 0
+
+        for i, batch_end in enumerate(offset):
+            pred_ids, tgt_ids,  = indices[i]
 
             p = ouptups['outputs_mask'][batch_start:batch_end]
             g = F.one_hot(targets['instance'][batch_start:batch_end])
@@ -248,7 +259,7 @@ class HungarianMatcher(nn.Module):
             matched_targets.append(g)
 
             batch_start = batch_end
-            
+                
         return matched_outputs, matched_targets, indices
 
     # @torch.no_grad()
