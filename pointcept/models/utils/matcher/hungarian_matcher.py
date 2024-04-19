@@ -9,6 +9,7 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.cuda.amp import autocast
 from multiprocessing import Pool
+import time
 
 # from detectron2.projects.point_rend.point_features import point_sample
 
@@ -169,12 +170,12 @@ class HungarianMatcher(nn.Module):
                 out_mask = out_mask.float()
                 tgt_mask = tgt_mask.float()
                 # Compute the focal loss between masks
-                cost_mask = batch_sigmoid_ce_loss_jit(
+                cost_mask = batch_sigmoid_ce_loss(
                     out_mask[:, point_idx], tgt_mask[:, point_idx]
                 )
 
                 # Compute the dice loss betwen masks
-                cost_dice = batch_dice_loss_jit(
+                cost_dice = batch_dice_loss(
                     out_mask[:, point_idx], tgt_mask[:, point_idx]
                 )
 
@@ -202,6 +203,7 @@ class HungarianMatcher(nn.Module):
     # @torch.no_grad()
     def my_optimized_forward(self, ouptups, targets, offset):
 
+        start_time = time.time()
         batch_start = 0
 
         indices = []
@@ -217,18 +219,17 @@ class HungarianMatcher(nn.Module):
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_mask = F.one_hot(tgt_mask).T
                 
-                with autocast(enabled=False):
-                    out_mask = out_mask.float()
-                    tgt_mask = tgt_mask.float()
-                    # Compute the focal loss between masks
-                    cost_mask = batch_sigmoid_ce_loss_jit(
-                        out_mask, tgt_mask
-                    )
+                out_mask = out_mask.float()
+                tgt_mask = tgt_mask.float()
+                # Compute the focal loss between masks
+                cost_mask = batch_sigmoid_ce_loss_jit(
+                    out_mask, tgt_mask
+                )
 
-                    # Compute the dice loss betwen masks
-                    cost_dice = batch_dice_loss_jit(
-                        out_mask, tgt_mask
-                    )
+                # Compute the dice loss betwen masks
+                cost_dice = batch_dice_loss_jit(
+                    out_mask, tgt_mask
+                )
 
                 C = (
                     self.cost_mask * cost_mask
@@ -236,15 +237,20 @@ class HungarianMatcher(nn.Module):
                     + self.cost_dice * cost_dice
                 )
 
-                C = C.cpu()
+                C = C.cpu().numpy()
                 Cs.append(C)
 
             batch_start = batch_end
 
-        
+        # print(len(C))
+
+        # matching_start = time.time()
         indices = self.p.map(linear_sum_assignment, Cs)
- 
+        # print('Matching time: ', time.time() - matching_start)
+
         batch_start = 0
+
+        mapping_start = time.time()
 
         for i, batch_end in enumerate(offset):
             pred_ids, tgt_ids,  = indices[i]
@@ -259,7 +265,10 @@ class HungarianMatcher(nn.Module):
             matched_targets.append(g)
 
             batch_start = batch_end
-                
+            
+        # print('Mapping time: ', time.time() - mapping_start)      
+        # print('HM time: ', time.time() - start_time)      
+        # print('Data_len: ', len(Cs))      
         return matched_outputs, matched_targets, indices
 
     # @torch.no_grad()

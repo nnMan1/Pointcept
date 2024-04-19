@@ -164,7 +164,8 @@ class FocalLoss(nn.Module):
         loss = (
             F.binary_cross_entropy_with_logits(pred, target, reduction="none")
             * focal_weight
-        )
+        ).mean(0)
+                
         if self.reduction == "mean":
             loss = loss.mean()
         elif self.reduction == "sum":
@@ -201,23 +202,15 @@ class DiceLoss(nn.Module):
         target = target[valid_mask]
         pred = pred[valid_mask]
 
-        pred = F.softmax(pred, dim=1)
+        pred = F.sigmoid(pred)
         num_classes = pred.shape[1]
         target = F.one_hot(
             torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
         )
+        
+        numerator = 2 * (pred * target).sum(0) + self.smooth
+        denominator = pred.sum(0) + pred.sum(0) + self.smooth
 
-        total_loss = 0
-        for i in range(num_classes):
-            if i != self.ignore_index:
-                num = torch.sum(torch.mul(pred[:, i], target[:, i])) * 2 + self.smooth
-                den = (
-                    torch.sum(
-                        pred[:, i].pow(self.exponent) + target[:, i].pow(self.exponent)
-                    )
-                    + self.smooth
-                )
-                dice_loss = 1 - num / den
-                total_loss += dice_loss
-        loss = total_loss / num_classes
-        return self.loss_weight * loss
+        loss = 1 - numerator / denominator
+        
+        return self.loss_weight * loss.mean()

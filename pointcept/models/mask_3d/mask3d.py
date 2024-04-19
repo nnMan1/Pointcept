@@ -13,6 +13,8 @@ from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 
+import time
+
 @MODELS.register_module("Mask-3D")
 class Mask3D(nn.Module):
     
@@ -53,9 +55,9 @@ class Mask3D(nn.Module):
         self.matcher = HungarianMatcher()
         # self.matcher = MyMatcher()
 
-        self.loss_ce = nn.CrossEntropyLoss()
+        self.loss_ce = nn.BCEWithLogitsLoss()
         self.loss_dice = DiceLoss()
-        # self.loss_focal = BinaryFocalLoss()
+        self.loss_focal = BinaryFocalLoss()
 
     def __get_pos_encs(self, coords):
 
@@ -151,7 +153,7 @@ class Mask3D(nn.Module):
 
         query_pos = query_pos.permute((2, 0, 1))
 
-        axiliary_losses = []
+        axiliary_losses = [], [], []
 
         for _ in range(3):
             for i in self.hlevels:
@@ -166,11 +168,9 @@ class Mask3D(nn.Module):
                 # axiliary_losses.append(0)
 
                 for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses.append(0.5*self.loss_ce(mask, target) + self.loss_dice(mask, target))
-
-                if torch.stack(axiliary_losses).mean().isnan():
-                    pass
-
+                    axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+                    axiliary_losses[1].append(self.loss_dice(mask, target))
+                    axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
 
                 # axiliary_losses[-1] /= len(matched_outputs)
 
@@ -195,22 +195,27 @@ class Mask3D(nn.Module):
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
         # axiliary_losses.append(0)
 
+        start_time = time.time()
         for mask, target in zip(matched_outputs, matched_targets):
-            axiliary_losses.append(0.5*self.loss_ce(mask, target)  + self.loss_dice(mask, target))
+            axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+            axiliary_losses[1].append(self.loss_dice(mask, target))
+            axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
 
-        if torch.stack(axiliary_losses).mean().isnan():
-            pass
-
-        # masks['loss'] = torch.stack(axiliary_losses).mean()
+        
 
         return_dict = {
-            'loss': torch.stack(axiliary_losses).mean()            
+            'bce_loss': torch.stack(axiliary_losses[0]).mean(),
+            'focal_loss': torch.stack(axiliary_losses[2]).mean(),
+            'dice_loss': torch.stack(axiliary_losses[1]).mean()
         }
+        return_dict['loss'] = 0.5 * return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss']
 
         if not self.training: 
             return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
+            return_dict['matched_targets'] = matched_targets
 
+        torch.cuda.empty_cache()
         return return_dict
     
 class BatchNormDim1Swap(nn.BatchNorm1d):
@@ -447,10 +452,10 @@ class QueryRefinement(nn.Module):
         output = self.cross_attention(
                     queries.permute((1, 0, 2)),
                     src_pcd,
-                    memory_mask=attn_mask.repeat_interleave(
-                        self.num_heads, dim=0
-                    ).permute((0, 2, 1)),
-                    memory_key_padding_mask=None,  # here we do not apply masking on padded region
+                    # memory_mask=attn_mask.repeat_interleave(
+                    #     self.num_heads, dim=0
+                    # ).permute((0, 2, 1)),
+                    # memory_key_padding_mask=None,  # here we do not apply masking on padded region
                     pos=pos_encoding.permute((1, 0, 2)),
                     query_pos=query_pos_encoding,
                 )

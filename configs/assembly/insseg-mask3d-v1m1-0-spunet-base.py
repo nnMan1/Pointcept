@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6 # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume = True
-weight='/home/exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base6/model/model_last.pth'
+resume = False
+weight='/home/exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base5/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -50,18 +50,18 @@ model = dict(
 
 # scheduler settings
 epoch = 800
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.000)
+optimizer = dict(type="Adam", lr=0.0001, weight_decay=0.000)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
-    pct_start=0.01,
+    pct_start=0.05,
     anneal_strategy="cos",
     div_factor=10.0,
     final_div_factor=1000.0,
 )
 
 # dataset settings
-dataset_type = "ABCDataset"
+dataset_type = "Assembly"
 
 data = dict(
     num_classes=num_classes,

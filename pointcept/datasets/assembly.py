@@ -88,6 +88,8 @@ class Assembly(Dataset):
             'coord': np.asarray(data['coord'])[::3],
             'instance': np.asarray(data['instance'])[::3],
             'segment': np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)[::3],
+            'id': idx,
+            'path': self.data_list[idx]
         } 
 
     def get_data_name(self, idx):
