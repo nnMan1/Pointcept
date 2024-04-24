@@ -181,22 +181,28 @@ class Trainer(TrainerBase):
         with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
             output_dict = self.model(input_dict)
             loss = output_dict["loss"]
-                    
-        self.optimizer.zero_grad()
+
+        loss = loss / 1
+
         if self.cfg.enable_amp:
             self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-
-            # When enable amp, optimizer.step call are skipped if the loss scaling factor is too large.
-            # Fix torch warning scheduler step before optimizer step.
-            scaler = self.scaler.get_scale()
-            self.scaler.update()
-            if scaler <= self.scaler.get_scale():
-                self.scheduler.step()
-        else:
+        else:                
             loss.backward()
-            self.optimizer.step()
-            self.scheduler.step()
+
+        if self.comm_info['iter'] % 1 == 0 or self.comm_info['iter'] + 1 == len(self.train_loader):
+            print('grad_updated')
+            if self.cfg.enable_amp:
+                self.scaler.step(self.optimizer)
+                scaler = self.scaler.get_scale()
+                self.scaler.update()
+                if scaler <= self.scaler.get_scale():
+                    self.scheduler.step()
+            else:
+                self.optimizer.step()
+                self.scheduler.step()
+
+            self.optimizer.zero_grad()
+       
         if self.cfg.empty_cache:
             torch.cuda.empty_cache()
         self.comm_info["model_output_dict"] = output_dict

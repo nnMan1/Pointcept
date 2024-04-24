@@ -46,18 +46,18 @@ class Mask3D(nn.Module):
         sample_sizes = [200, 800, 3200, 12800, 51200]
         sizes = self.backbone.PLANES[-5:]
        
-        self.mask_module = MaskModule(hidden_dim, **mask_module_config)
+        self.mask_module = MaskModule(hidden_dim, **mask_module_config, num_masks=3)
         self.query_refinement = nn.ModuleList()
 
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
 
-        self.matcher = HungarianMatcher()
-        # self.matcher = MyMatcher()
+        # self.matcher = HungarianMatcher()
+        self.matcher = MyMatcher()
 
-        self.loss_ce = nn.BCEWithLogitsLoss()
+        self.loss_ce = nn.BCEWithLogitsLoss(reduction='none')
         self.loss_dice = DiceLoss()
-        self.loss_focal = BinaryFocalLoss()
+        self.loss_focal = BinaryFocalLoss(reduce=None)
 
     def __get_pos_encs(self, coords):
 
@@ -123,10 +123,13 @@ class Mask3D(nn.Module):
         #         )
 
         sampled_coords = []
+        sampled_features = []
         batch_start = 0
         for i, batch_end in enumerate(offset):
             points = grid_coordinates[batch_start:batch_end].float()
+            features = mask_features.features[batch_start:batch_end]
             sampled_coords.append(points[seed_ids[i]])
+            sampled_features.append(features[seed_ids[i]])
 
         mins = torch.stack(
                 [
@@ -150,6 +153,7 @@ class Mask3D(nn.Module):
         query_pos = self.query_projection(query_pos)
 
         queries = torch.zeros_like(query_pos).permute((0, 2, 1))
+        # queries = torch.stack(sampled_features)
 
         query_pos = query_pos.permute((2, 0, 1))
 
@@ -168,9 +172,14 @@ class Mask3D(nn.Module):
                 # axiliary_losses.append(0)
 
                 for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
-                    axiliary_losses[1].append(self.loss_dice(mask, target))
-                    axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
+                    axiliary_losses[0].append(torch.stack([(self.loss_ce(m, target)).mean(0) for m in mask]).min(0)[0].mean())
+                    axiliary_losses[2].append(torch.stack([(self.loss_focal(m, target)).mean(0) for m in mask]).min(0)[0].mean())
+
+                    # axiliary_losses[0]torch.stack(([self.loss_ce(m, target).mean(0) for m in mask])).min(0)[0].mean()
+                    
+                    # axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+                    # axiliary_losses[1].append(self.loss_dice(mask, target))
+                    # axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
 
                 # axiliary_losses[-1] /= len(matched_outputs)
 
@@ -197,23 +206,33 @@ class Mask3D(nn.Module):
 
         start_time = time.time()
         for mask, target in zip(matched_outputs, matched_targets):
-            axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
-            axiliary_losses[1].append(self.loss_dice(mask, target))
-            axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
 
-        
+            axiliary_losses[0].append(torch.stack([(self.loss_ce(m, target)).mean(0) for m in mask]).min(0)[0].mean())
+            axiliary_losses[2].append(torch.stack([(self.loss_focal(m, target)).mean(0) for m in mask]).min(0)[0].mean())
 
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            'dice_loss': torch.stack(axiliary_losses[1]).mean()
+            # 'dice_loss': torch.stack(axiliary_losses[1]).mean()
         }
-        return_dict['loss'] = 0.5 * return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss']
+        return_dict['loss'] = return_dict['bce_loss'] + return_dict['focal_loss']
 
-        if not self.training: 
-            return_dict['matched_masks'] = matched_outputs
-            return_dict['masks'] = masks['outputs_mask']
-            return_dict['matched_targets'] = matched_targets
+        # if not self.training: 
+            # m = masks['outputs_mask'].clone()
+            # return_dict['pred_score'] = torch.zeros(len(offset), m.shape[-1])
+       
+            # batch_start = 0
+
+            # for i, batch_end in enumerate(offset):
+            #     m = masks['outputs_mask'][batch_start:batch_end]
+            #     m = F.sigmoid(m)
+                
+            #     return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
+            #     batch_start = batch_end
+
+            # return_dict['matched_masks'] = matched_outputs
+            # return_dict['masks'] = masks['outputs_mask']
+            # return_dict['matched_targets'] = matched_targets
 
         torch.cuda.empty_cache()
         return return_dict
@@ -252,21 +271,22 @@ ACTIVATION_DICT = {
 WEIGHT_INIT_DICT = {
     "xavier_uniform": nn.init.xavier_uniform_,
 }
-                 
+      
 class MaskModule(nn.Module):
 
-    def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False):
+    def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False, num_masks=1):
 
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
+        self.num_masks = num_masks
 
         self.decoder_norm = nn.LayerNorm(hidden_dim)
         self.mask_embed_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, num_masks * hidden_dim),
         )
         self.class_embed_head = nn.Linear(hidden_dim, num_classes)
         self.use_seg_masks = use_seg_masks
@@ -304,30 +324,35 @@ class MaskModule(nn.Module):
             # return_dict['output_segments'] = output_segments
         else:
             for i in range(mask_features.C[-1, 0] + 1):
+                embeddings = mask_embed[i]
+                embeddings = embeddings.reshape(embeddings.shape[0], -1, self.num_masks).permute(2, 1, 0)
+
                 output_masks.append(
-                    mask_features.decomposed_features[i] @ mask_embed[i].T
+                    torch.stack([mask_features.decomposed_features[i] @ embedding for embedding in embeddings]).permute(1, 0, 2)
                 )
 
-        output_masks = torch.cat(output_masks)
-        outputs_mask = me.SparseTensor(
-            features=output_masks,
-            coordinate_manager=mask_features.coordinate_manager,
-            coordinate_map_key=mask_features.coordinate_map_key,
-        )
+        output_masks = torch.cat(output_masks).permute(1, 0, 2)
+    
 
-        return_dict['outputs_mask'] = output_masks
+        outputs_mask = [me.SparseTensor(
+                features=m,
+                coordinate_manager=mask_features.coordinate_manager,
+                coordinate_map_key=mask_features.coordinate_map_key,
+            ) for m in output_masks]
+
+        return_dict['outputs_masks'] = output_masks
 
         if self.return_attn_masks:
             attn_mask = outputs_mask
             for _ in range(data['num_pooling_steps']):
-                attn_mask = self.pooling(attn_mask.float())
+                attn_mask = [self.pooling(a.float()) for a in attn_mask]
 
-            # print([m.shape for m in attn_mask.decomposed_features])
+            a, _ = torch.stack([a.F.detach().sigmoid() < 0.5 for a in attn_mask]).max(0)
 
             attn_mask = me.SparseTensor(
-                features=(attn_mask.F.detach().sigmoid() < 0.5),
-                coordinate_manager=attn_mask.coordinate_manager,
-                coordinate_map_key=attn_mask.coordinate_map_key,
+                features=a,
+                coordinate_manager=attn_mask[0].coordinate_manager,
+                coordinate_map_key=attn_mask[0].coordinate_map_key,
             )
             
             return_dict['attn_mask'] = attn_mask
