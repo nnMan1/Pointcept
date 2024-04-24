@@ -90,21 +90,19 @@ class MyMatcher(nn.Module):
 
         for i, batch_end in enumerate(offset):
 
-            with torch.no_grad():
-                out_mask = ouptups['outputs_mask'][batch_start:batch_end].T
-                tgt_mask = targets['instance'][batch_start:batch_end]
-                tgt_mask = F.one_hot(tgt_mask).T
-                
-                seed_ids = targets['seed_ids'][i]
-                seed_cls = targets['instance'][batch_start:batch_end][seed_ids]
-                masks_tgt = tgt_mask[targets['instance'][batch_start:batch_end][seed_ids]].float()
-                
+            out_mask = [o[batch_start:batch_end] for o in ouptups['outputs_masks']]
+            tgt_mask = targets['instance'][batch_start:batch_end]
+            tgt_mask = F.one_hot(tgt_mask).T
             
+            seed_ids = targets['seed_ids'][i]
+            seed_cls = targets['instance'][batch_start:batch_end][seed_ids]
+            masks_tgt = tgt_mask[targets['instance'][batch_start:batch_end][seed_ids]].float()
+                           
             matched_outputs.append(out_mask)
-            matched_targets.append(masks_tgt)
+            matched_targets.append(masks_tgt.T)
 
             batch_start = batch_end
-            
+
         return matched_outputs, matched_targets, indices
 
     # @torch.no_grad()
