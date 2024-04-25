@@ -20,7 +20,7 @@ def get_random_seed():
         + int(datetime.now().strftime("%S%f"))
         + int.from_bytes(os.urandom(2), "big")
     )
-    return seed
+    return seed % 4294967295
 
 
 def set_seed(seed=None):

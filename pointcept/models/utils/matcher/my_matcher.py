@@ -87,20 +87,23 @@ class MyMatcher(nn.Module):
         indices = []
         matched_outputs = []
         matched_targets = []
+        
+        n_masks = ouptups['outputs_masks'].shape[0]
 
         for i, batch_end in enumerate(offset):
 
-            out_mask = [o[batch_start:batch_end] for o in ouptups['outputs_masks']]
+            out_mask = ouptups['outputs_masks'][:, batch_start:batch_end]
             tgt_mask = targets['instance'][batch_start:batch_end]
             tgt_mask = F.one_hot(tgt_mask).T
             
             seed_ids = targets['seed_ids'][i]
             seed_cls = targets['instance'][batch_start:batch_end][seed_ids]
-            masks_tgt = tgt_mask[targets['instance'][batch_start:batch_end][seed_ids]].float()
+            masks_tgt = tgt_mask[targets['instance'][batch_start:batch_end][seed_ids]].float().T.unsqueeze(0)
+            masks_tgt = masks_tgt.repeat([n_masks, 1, 1])
                            
             matched_outputs.append(out_mask)
-            matched_targets.append(masks_tgt.T)
-
+            matched_targets.append(masks_tgt)
+            
             batch_start = batch_end
 
         return matched_outputs, matched_targets, indices

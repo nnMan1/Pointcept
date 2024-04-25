@@ -1,15 +1,15 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
-num_worker = 32
+batch_size = 16 # bs: total bs in all gpus
+num_worker = 100
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 
 evaluate = True
-# resume = True
-# weight='/home/exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base_my_matcher_dense/model/model_last.pth'
+# resume = False
+# weight='/home/Pointcept/exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base4/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -50,7 +50,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 800
+epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.000)
 scheduler = dict(
     type="OneCycleLR",
@@ -71,6 +71,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         split="train",
+        data_root="data/ABCDataset",
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -123,6 +124,7 @@ data = dict(
     val=dict(
         type=dataset_type,
         split="val",
+        data_root="data/ABCDataset",
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(type="NormalizeCoord"),

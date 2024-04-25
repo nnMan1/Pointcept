@@ -12,6 +12,12 @@ from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
+from pointcept.utils.misc import (
+    AverageMeter,
+    intersection_and_union,
+    intersection_and_union_gpu,
+    make_dirs,
+)
 
 import time
 
@@ -159,7 +165,7 @@ class Mask3D(nn.Module):
 
         axiliary_losses = [], [], []
 
-        for _ in range(3):
+        for _ in range(1):
             for i in self.hlevels:
                 masks = self.mask_module({
                     'query_feat': queries,
@@ -172,8 +178,8 @@ class Mask3D(nn.Module):
                 # axiliary_losses.append(0)
 
                 for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses[0].append(torch.stack([(self.loss_ce(m, target)).mean(0) for m in mask]).min(0)[0].mean())
-                    axiliary_losses[2].append(torch.stack([(self.loss_focal(m, target)).mean(0) for m in mask]).min(0)[0].mean())
+                    axiliary_losses[0].append(self.loss_ce(mask, target).mean(1).min(0)[0].mean())
+                    axiliary_losses[2].append(self.loss_focal(mask, target).mean(1).min(0)[0].mean())
 
                     # axiliary_losses[0]torch.stack(([self.loss_ce(m, target).mean(0) for m in mask])).min(0)[0].mean()
                     
@@ -202,37 +208,51 @@ class Mask3D(nn.Module):
                 })
         
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-        # axiliary_losses.append(0)
+        intersections = []
+        unions = []
 
         start_time = time.time()
         for mask, target in zip(matched_outputs, matched_targets):
 
-            axiliary_losses[0].append(torch.stack([(self.loss_ce(m, target)).mean(0) for m in mask]).min(0)[0].mean())
-            axiliary_losses[2].append(torch.stack([(self.loss_focal(m, target)).mean(0) for m in mask]).min(0)[0].mean())
+            axiliary_losses[0].append(self.loss_ce(mask, target).mean(1).min(0)[0].mean())
+            axiliary_losses[2].append(self.loss_focal(mask, target).mean(1).min(0)[0].mean())
+
+            intersections.append(((mask > 0.5) * target).sum(1))
+            unions.append(((mask > 0.5).sum(1) + target.sum(1)) - intersections[-1])
+            
+            ious = intersections[-1] / unions[-1]
+            axiliary_losses[1].append(ious.max(0)[0].mean())
+            
+        intersections = torch.stack(intersections)
+        unions = torch.stack(unions)
+        
+        ious = intersections / unions
 
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            # 'dice_loss': torch.stack(axiliary_losses[1]).mean()
+            'iou': torch.stack(axiliary_losses[1]).mean()
         }
+        
         return_dict['loss'] = return_dict['bce_loss'] + return_dict['focal_loss']
 
-        # if not self.training: 
-            # m = masks['outputs_mask'].clone()
-            # return_dict['pred_score'] = torch.zeros(len(offset), m.shape[-1])
-       
-            # batch_start = 0
-
-            # for i, batch_end in enumerate(offset):
-            #     m = masks['outputs_mask'][batch_start:batch_end]
-            #     m = F.sigmoid(m)
+        if not self.training: 
+            m = masks['outputs_masks'].clone()
+            return_dict['pred_score'] = torch.zeros(len(offset), m.shape[0], m.shape[2])
+            print(return_dict['pred_score'].shape)
+            batch_start = 0
+            for i, batch_end in enumerate(offset):
+                m = masks['outputs_masks'][:, batch_start:batch_end]
+                m = F.sigmoid(m)
+                                
+                return_dict['pred_score'][i] = (m * (m>0.5)).sum(1) / ((m>0.5).sum(1) + 1e-15)
+                batch_start = batch_end
                 
-            #     return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
-            #     batch_start = batch_end
+            return_dict['ious'] = ious
 
-            # return_dict['matched_masks'] = matched_outputs
-            # return_dict['masks'] = masks['outputs_mask']
-            # return_dict['matched_targets'] = matched_targets
+            return_dict['matched_masks'] = matched_outputs
+            return_dict['masks'] = masks['outputs_masks']
+            return_dict['matched_targets'] = matched_targets
 
         torch.cuda.empty_cache()
         return return_dict
@@ -288,6 +308,13 @@ class MaskModule(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, num_masks * hidden_dim),
         )
+
+        self.iou_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_masks * hidden_dim),
+        )
+
         self.class_embed_head = nn.Linear(hidden_dim, num_classes)
         self.use_seg_masks = use_seg_masks
 
@@ -332,7 +359,6 @@ class MaskModule(nn.Module):
                 )
 
         output_masks = torch.cat(output_masks).permute(1, 0, 2)
-    
 
         outputs_mask = [me.SparseTensor(
                 features=m,
@@ -795,7 +821,6 @@ class FFNLayer(nn.Module):
         if self.normalize_before:
             return self.forward_pre(tgt)
         return self.forward_post(tgt)
-
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
