@@ -6,7 +6,7 @@ Please cite our work if the code is helpful to you.
 """
 
 import sys
-sys.path.append('/home/Pointcept')
+sys.path.append('/home')
 
 from pointcept.engines.defaults import (
     default_argument_parser,
@@ -29,7 +29,7 @@ class Args:
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base5'}
+        self.options={'save_path': 'exp/abc_dataset2/insseg-mask3d-v1m1-0-spunet-base6'}
 
 def main():
 

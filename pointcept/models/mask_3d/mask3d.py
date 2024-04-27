@@ -248,10 +248,11 @@ class Mask3D(nn.Module):
                 return_dict['pred_score'][i] = (m * (m>0.5)).sum(1) / ((m>0.5).sum(1) + 1e-15)
                 batch_start = batch_end
                 
-            return_dict['ious'] = ious
+            return_dict['ious'] = ious.reshape(len(offset), -1, *ious[1:])
+            return_dict['pred_score'] = return_dict['pred_score'].reshape(len(offset), -1, *ious[1:])
 
+            return_dict['masks'] = masks['outputs_masks'].permute(1, 0, 2).reshape(masks['outputs_masks'].shape[1], -1)
             return_dict['matched_masks'] = matched_outputs
-            return_dict['masks'] = masks['outputs_masks']
             return_dict['matched_targets'] = matched_targets
 
         torch.cuda.empty_cache()

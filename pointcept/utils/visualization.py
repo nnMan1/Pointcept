@@ -87,3 +87,25 @@ def save_lines(
 
     if logger is not None:
         logger.info(f"Save Lines to: {file_path}")
+
+def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+    order = np.argsort(-scores)
+    indices = np.arange(masks.shape[-1])
+    keep = np.ones_like(indices, dtype=np.bool_)
+
+    masks = masks / (1 + np.exp(-masks))
+    masks[masks > 0.5] = 1
+    masks[masks < 0.5] = 0
+
+    for i in indices:
+        if keep[i]:
+            mask = masks[:, order[i]]
+            inter = (mask[:, None] * masks).sum(0)
+            union = np.logical_or(mask[:, None], masks).sum(0) - inter
+            iou = inter / union
+            iou = iou[i+1:]
+
+            overlapped = np.nonzero(iou > iou_threshold)
+            keep[overlapped + i + 1] = 0
+
+    return order[keep]

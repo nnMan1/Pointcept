@@ -77,7 +77,7 @@ class ABCDataset(Dataset):
         if self.split == 'val':
             self.split = 5
             
-        for i in range(start, 6):
+        for i in range(5, 6):
             dl += [f"p_{f.split('/')[0]}_{f.split('/')[-1]}_{i}.h5" for f in data_list]
 
         return dl
