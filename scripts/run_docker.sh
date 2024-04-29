@@ -6,5 +6,7 @@ docker run -d -ti \
           	  -v $(pwd):/home \
 			  -v /home/velibor/Data/scannet:/home/data/scannet \
 			  -v /home/velibor/Data/AssemblyRepository/scans/:/home/data/assembly/raw \
+			  -v /home/velibor/Data/ABCDataset/scanns/:/home/data/ABCDataset/scanns \
+			  -v /home/velibor/Data/ABCDataset/chunks/:/home/data/ABCDataset/raw \
 		  --gpus all -it --rm --name "pointcept" pointcept/pointcept:pytorch2.0.1-cuda11.7-cudnn8-devel
 		  

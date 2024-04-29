@@ -16,3 +16,6 @@ outputs/
 Dockerfile
 scripts/run_docker.sh
 scripts/build_image.sh
+visualizations
+samples
+samples1

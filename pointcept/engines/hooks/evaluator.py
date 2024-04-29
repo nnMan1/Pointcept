@@ -111,6 +111,7 @@ class MyInsSegEvaluator(HookBase):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
         losses = []
+        m_iou = []
 
         for i, input_dict in enumerate(self.trainer.val_loader):
             for key in input_dict.keys():
@@ -119,18 +120,20 @@ class MyInsSegEvaluator(HookBase):
             with torch.no_grad():
                 output_dict = self.trainer.model(input_dict)
                 losses.append(output_dict['loss'])
+                m_iou.append(output_dict['mIoU'])
 
         loss_avg = torch.tensor(losses).mean() 
+        m_iou = torch.tensor(m_iou).mean() 
 
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
-            # self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
             # self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
             # self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
             
-        self.trainer.comm_info["current_metric_value"] = torch.tensor(losses).mean()  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "loss"  # save for saver
+        self.trainer.comm_info["current_metric_value"] = torch.tensor(m_iou).mean()  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver
 
     def after_train(self):
         self.trainer.logger.info(

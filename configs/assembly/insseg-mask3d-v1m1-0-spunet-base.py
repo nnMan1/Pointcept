@@ -5,10 +5,8 @@ batch_size = 8 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 evaluate = True
-resume = False
-weight='/home/exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base5/model/model_last.pth'
 
 class_names = [
     "assembly",
