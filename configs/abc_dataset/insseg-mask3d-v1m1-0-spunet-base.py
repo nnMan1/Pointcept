@@ -6,11 +6,10 @@ num_worker = 100
 mix_prob = 0
 empty_cache = True
 enable_amp = True
-
 evaluate = True
-resume = False
-weight='/home/exp/abc_dataset2/insseg-mask3d-v1m1-0-spunet-base5/model/model_last.pth'
 
+resume=True
+weight='/home/exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal2/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -37,7 +36,8 @@ model = dict(
     mask_module_config=dict(
         num_classes=1, 
         return_attn_masks=True, 
-        use_seg_masks=False
+        use_seg_masks=False,
+        num_masks=3
     ),
     query_refinement_config=dict(
         pre_norm=False,
@@ -52,7 +52,7 @@ model = dict(
 
 # scheduler settings
 epoch = 600
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.01)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -114,7 +114,8 @@ data = dict(
                     "bbox",
                     "seed_ids",
                     "id",
-                    "path"
+                    "path",
+                    "weights"
                 ),
                 feat_keys=("grid_coord"),
             ),
@@ -164,7 +165,8 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "weights"
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

@@ -1151,8 +1151,9 @@ class RandomSeed(object):
 
 @TRANSFORMS.register_module()
 class FPSSeed(object):
-    def __init__(self, n_points):
+    def __init__(self, n_points, compute_weights=True):
         self.n_points = n_points
+        self.compute_weights = compute_weights
 
     def __call__(self, data_dict):
 
@@ -1160,6 +1161,13 @@ class FPSSeed(object):
         batch = torch.zeros(len(points)).long()
         ids = nn.fps(points, batch, ratio=(self.n_points + 1)/len(points))[:self.n_points]
 
+        if self.compute_weights and 'segment' in data_dict.keys():
+            classes, counts = np.unique(data_dict['instance'], return_counts=True)
+            classes = data_dict['instance'][ids]
+            weights = np.asarray([counts[c] for c in classes])
+            weights = len(ids) / weights
+
+        data_dict['weights'] = weights.reshape(1, -1)
         data_dict['seed_ids'] = ids.reshape(1, -1).numpy()
         return data_dict
     

@@ -175,7 +175,7 @@ class FocalLoss(nn.Module):
 
 @LOSSES.register_module()
 class DiceLoss(nn.Module):
-    def __init__(self, smooth=1, exponent=2, loss_weight=1.0, ignore_index=-1):
+    def __init__(self, smooth=1, exponent=2, loss_weight=1.0, ignore_index=-1, reduction = 'mean'):
         """DiceLoss.
         This loss is proposed in `V-Net: Fully Convolutional Neural Networks for
         Volumetric Medical Image Segmentation <https://arxiv.org/abs/1606.04797>`_.
@@ -185,32 +185,38 @@ class DiceLoss(nn.Module):
         self.exponent = exponent
         self.loss_weight = loss_weight
         self.ignore_index = ignore_index
+        self.reduction = reduction
 
     def forward(self, pred, target, **kwargs):
-        # [B, C, d_1, d_2, ..., d_k] -> [C, B, d_1, d_2, ..., d_k]
-        pred = pred.transpose(0, 1)
-        # [C, B, d_1, d_2, ..., d_k] -> [C, N]
-        pred = pred.reshape(pred.size(0), -1)
-        # [C, N] -> [N, C]
-        pred = pred.transpose(0, 1).contiguous()
-        # (B, d_1, d_2, ..., d_k) --> (B * d_1 * d_2 * ... * d_k,)
-        target = target.view(-1).contiguous()
-        assert pred.size(0) == target.size(
-            0
-        ), "The shape of pred doesn't match the shape of target"
-        valid_mask = target != self.ignore_index
-        target = target[valid_mask]
-        pred = pred[valid_mask]
+        # # [B, C, d_1, d_2, ..., d_k] -> [C, B, d_1, d_2, ..., d_k]
+        # pred = pred.transpose(0, 1)
+        # # [C, B, d_1, d_2, ..., d_k] -> [C, N]
+        # pred = pred.reshape(pred.size(0), -1)
+        # # [C, N] -> [N, C]
+        # pred = pred.transpose(0, 1).contiguous()
+        # # (B, d_1, d_2, ..., d_k) --> (B * d_1 * d_2 * ... * d_k,)
+        # target = target.view(-1).contiguous()
+        # assert pred.size(0) == target.size(
+        #     0
+        # ), "The shape of pred doesn't match the shape of target"
+        # valid_mask = target != self.ignore_index
+        # target = target[valid_mask]
+        # pred = pred[valid_mask]
 
         pred = F.sigmoid(pred)
-        num_classes = pred.shape[1]
-        target = F.one_hot(
-            torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
-        )
+        # num_classes = pred.shape[1]
+        # target = F.one_hot(
+        #     torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
+        # )
         
-        numerator = 2 * (pred * target).sum(0) + self.smooth
-        denominator = pred.sum(0) + pred.sum(0) + self.smooth
+        numerator = 2 * (pred * target).sum(1) + self.smooth
+        denominator = pred.sum(1) + target.sum(1) + self.smooth
 
         loss = 1 - numerator / denominator
+
+        if self.reduction == "mean":
+            loss = loss.mean()
+        elif self.reduction == "sum":
+            loss = loss.total()
         
-        return self.loss_weight * loss.mean()
+        return self.loss_weight * loss

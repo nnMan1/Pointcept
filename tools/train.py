@@ -29,8 +29,8 @@ class Args:
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/abc_dataset2/insseg-mask3d-v1m1-0-spunet-base6'}
-
+        self.options={'save_path': 'exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal2'}
+        
 def main():
 
     # args = default_argument_parser().parse_args()

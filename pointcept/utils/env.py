@@ -20,12 +20,14 @@ def get_random_seed():
         + int(datetime.now().strftime("%S%f"))
         + int.from_bytes(os.urandom(2), "big")
     )
-    return seed % 4294967295
+    return seed % (2**32 - 20)
 
 
 def set_seed(seed=None):
     if seed is None:
-        seed = get_random_seed()
+        seed = get_random_seed() 
+
+    seed %= (2**32 - 20)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

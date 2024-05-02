@@ -93,15 +93,15 @@ def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
     indices = np.arange(masks.shape[-1])
     keep = np.ones_like(indices, dtype=np.bool_)
 
-    masks = masks / (1 + np.exp(-masks))
-    masks[masks > 0.5] = 1
-    masks[masks < 0.5] = 0
+    masks = 1 / (1 + np.exp(-masks))
+    # masks[masks > 0.8] = 1
+    # masks[masks < 0.9] = 0
 
     for i in indices:
         if keep[i]:
             mask = masks[:, order[i]]
             inter = (mask[:, None] * masks).sum(0)
-            union = np.logical_or(mask[:, None], masks).sum(0) - inter
+            union = np.logical_or(mask[:, None], masks).sum(0)
             iou = inter / union
             iou = iou[i+1:]
 

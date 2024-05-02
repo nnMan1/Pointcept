@@ -109,10 +109,12 @@ data = dict(
                     "segment",
                     "instance",
                     "instance_centroid",
+                    "weights",
                     "bbox",
                     "seed_ids",
                     "id",
-                    "path"
+                    "path",
+                    "weights"
                 ),
                 feat_keys=("grid_coord"),
             ),
@@ -162,7 +164,8 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "weights"
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

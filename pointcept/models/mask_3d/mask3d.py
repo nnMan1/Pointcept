@@ -52,7 +52,7 @@ class Mask3D(nn.Module):
         sample_sizes = [200, 800, 3200, 12800, 51200]
         sizes = self.backbone.PLANES[-5:]
        
-        self.mask_module = MaskModule(hidden_dim, **mask_module_config, num_masks=3)
+        self.mask_module = MaskModule(hidden_dim, **mask_module_config)
         self.query_refinement = nn.ModuleList()
 
         for i, hlevel in enumerate(self.hlevels):
@@ -62,7 +62,7 @@ class Mask3D(nn.Module):
         self.matcher = MyMatcher()
 
         self.loss_ce = nn.BCEWithLogitsLoss(reduction='none')
-        self.loss_dice = DiceLoss()
+        self.loss_dice = DiceLoss(reduction='none')
         self.loss_focal = BinaryFocalLoss(reduce=None)
 
     def __get_pos_encs(self, coords):
@@ -163,7 +163,7 @@ class Mask3D(nn.Module):
 
         query_pos = query_pos.permute((2, 0, 1))
 
-        axiliary_losses = [], [], []
+        axiliary_losses = [], [], [], []
 
         for _ in range(1):
             for i in self.hlevels:
@@ -177,14 +177,15 @@ class Mask3D(nn.Module):
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
                 # axiliary_losses.append(0)
 
-                for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses[0].append(self.loss_ce(mask, target).mean(1).min(0)[0].mean())
-                    axiliary_losses[2].append(self.loss_focal(mask, target).mean(1).min(0)[0].mean())
+                for mask, target, weights in zip(matched_outputs, matched_targets, data['weights']):
+                    # ids = self.loss_dice(mask, target).min(0)[1]
+                    # axiliary_losses[0].append((self.loss_ce(mask, target) * weights).min(0)[0].mean())
+                    axiliary_losses[1].append(self.loss_dice(mask, target).min(0)[0].mean())
+                    axiliary_losses[2].append((self.loss_focal(mask, target)).mean(1).min(0)[0].mean())
 
                     # axiliary_losses[0]torch.stack(([self.loss_ce(m, target).mean(0) for m in mask])).min(0)[0].mean()
                     
                     # axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
-                    # axiliary_losses[1].append(self.loss_dice(mask, target))
                     # axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
 
                 # axiliary_losses[-1] /= len(matched_outputs)
@@ -212,16 +213,17 @@ class Mask3D(nn.Module):
         unions = []
 
         start_time = time.time()
-        for mask, target in zip(matched_outputs, matched_targets):
-
-            axiliary_losses[0].append(self.loss_ce(mask, target).mean(1).min(0)[0].mean())
-            axiliary_losses[2].append(self.loss_focal(mask, target).mean(1).min(0)[0].mean())
+        for mask, target, weights in zip(matched_outputs, matched_targets, data['weights']):
+            ids = self.loss_dice(mask, target).min(0)[1]
+            # axiliary_losses[0].append((self.loss_ce(mask, target) * weights).min(0)[0].mean())
+            axiliary_losses[1].append(self.loss_dice(mask, target).min(0)[0].mean())
+            axiliary_losses[2].append((self.loss_focal(mask, target)).mean(1).min(0)[0].mean())
 
             intersections.append(((mask > 0.5) * target).sum(1))
             unions.append(((mask > 0.5).sum(1) + target.sum(1)) - intersections[-1])
             
             ious = intersections[-1] / unions[-1]
-            axiliary_losses[1].append(ious.max(0)[0].mean())
+            axiliary_losses[3].append(ious.max(0)[0].mean())
             
         intersections = torch.stack(intersections)
         unions = torch.stack(unions)
@@ -229,17 +231,17 @@ class Mask3D(nn.Module):
         ious = intersections / unions
 
         return_dict = {
-            'bce_loss': torch.stack(axiliary_losses[0]).mean(),
+            # 'bce_loss': torch.stack(axiliary_losses[0]).mean(),
+            'dice_loss': torch.stack(axiliary_losses[1]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            'iou': torch.stack(axiliary_losses[1]).mean()
+            'iou': torch.stack(axiliary_losses[3]).mean()
         }
         
-        return_dict['loss'] = return_dict['bce_loss'] + return_dict['focal_loss']
+        return_dict['loss'] = return_dict['dice_loss'] + return_dict['focal_loss']
 
         if not self.training: 
             m = masks['outputs_masks'].clone()
             return_dict['pred_score'] = torch.zeros(len(offset), m.shape[0], m.shape[2])
-            print(return_dict['pred_score'].shape)
             batch_start = 0
             for i, batch_end in enumerate(offset):
                 m = masks['outputs_masks'][:, batch_start:batch_end]
