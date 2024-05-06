@@ -52,7 +52,9 @@ class Mask3D(nn.Module):
 
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
-
+        
+        self.iou_head = QueryRefinement(sizes[i], 1, mask_dim, sample_size=sample_sizes[i], **query_refinement_config)
+        
         self.matcher = HungarianMatcher()
         # self.matcher = MyMatcher()
 
@@ -89,9 +91,6 @@ class Mask3D(nn.Module):
         grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
-
-        # for p in data:
-        #     print(data['path'])
         
         mask_features, aux = self.backbone(data)
         pcd_features = aux[-1]
@@ -110,18 +109,7 @@ class Mask3D(nn.Module):
 
             coords.reverse()
 
-            
-
         pos_encodings_pcd = self.__get_pos_encs(coords)
-
-        # if self.train_on_segments:
-        #     mask_segments = []
-        #     for i, mask_feature in enumerate(
-        #         mask_features.decomposed_features
-        #     ):
-        #         mask_segments.append(
-        #             self.scatter_fn(mask_feature, point2segment[i], dim=0)
-        #         )
 
         sampled_coords = []
         batch_start = 0
@@ -166,14 +154,11 @@ class Mask3D(nn.Module):
                 })
 
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-                # axiliary_losses.append(0)
 
                 for mask, target in zip(matched_outputs, matched_targets):
                     axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
                     axiliary_losses[1].append(self.loss_dice(mask, target))
                     axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
-
-                # axiliary_losses[-1] /= len(matched_outputs)
 
                 pos_encoding=torch.cat(pos_encodings_pcd[i])
 
@@ -196,9 +181,7 @@ class Mask3D(nn.Module):
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
         intersections = []
         unions = []
-        # axiliary_losses.append(0)
 
-        start_time = time.time()
         for mask, target in zip(matched_outputs, matched_targets):
             axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
             axiliary_losses[1].append(self.loss_dice(mask, target))
@@ -210,8 +193,18 @@ class Mask3D(nn.Module):
             
             ious = intersections[-1] / unions[-1]
             axiliary_losses[3].append(ious.mean())
-
+            
+        pred_iou = self.iou_head(
+                        aux[-1].features,
+                        masks['attn_mask'].features,
+                        pos_encoding,
+                        offset.cpu(),
+                        queries,
+                        query_pos 
+                    )
         
+        print(pred_iou.shape)
+        exit(0)
 
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
@@ -295,6 +288,7 @@ class MaskModule(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
+                
         self.class_embed_head = nn.Linear(hidden_dim, num_classes)
         self.use_seg_masks = use_seg_masks
 
@@ -331,9 +325,7 @@ class MaskModule(nn.Module):
             # return_dict['output_segments'] = output_segments
         else:
             for i in range(mask_features.C[-1, 0] + 1):
-                output_masks.append(
-                    mask_features.decomposed_features[i] @ mask_embed[i].T
-                )
+                output_masks.append(mask_features.decomposed_features[i] @ mask_embed[i].T)
 
         output_masks = torch.cat(output_masks)
         outputs_mask = me.SparseTensor(
@@ -348,8 +340,6 @@ class MaskModule(nn.Module):
             attn_mask = outputs_mask
             for _ in range(data['num_pooling_steps']):
                 attn_mask = self.pooling(attn_mask.float())
-
-            # print([m.shape for m in attn_mask.decomposed_features])
 
             attn_mask = me.SparseTensor(
                 features=(attn_mask.F.detach().sigmoid() < 0.5),
@@ -449,6 +439,8 @@ class QueryRefinement(nn.Module):
         batched_data = []
         
         batch_start = 0
+        
+        print(len(batched_data))
 
         for i, batch_end in enumerate(offset):
             batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
@@ -655,6 +647,7 @@ class SelfAttentionLayer(nn.Module):
         )
 
 class CrossAttentionLayer(nn.Module):
+    
     def __init__(
         self,
         d_model,
