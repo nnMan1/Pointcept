@@ -209,7 +209,7 @@ class DiceLoss(nn.Module):
         )
         
         numerator = 2 * (pred * target).sum(0) + self.smooth
-        denominator = pred.sum(0) + pred.sum(0) + self.smooth
+        denominator = pred.sum(0) + target.sum(0) + self.smooth
 
         loss = 1 - numerator / denominator
         

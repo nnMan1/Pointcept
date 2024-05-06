@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume=True
-weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+# resume=True
+# weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -50,7 +50,7 @@ model = dict(
 
 # scheduler settings
 epoch = 800
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.02)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.0002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],

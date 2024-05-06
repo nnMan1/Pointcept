@@ -12,6 +12,7 @@ from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
+from pointcept.utils.misc import batch_iou
 
 import time
 
@@ -221,6 +222,22 @@ class Mask3D(nn.Module):
         return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss']
 
         if not self.training: 
+            m = masks['outputs_mask'].clone()
+            return_dict['pred_score'] = torch.zeros(len(offset), m.shape[1])
+            return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
+            return_dict['bious'] =  torch.zeros(len(offset), m.shape[1])
+            batch_start = 0
+            for i, batch_end in enumerate(offset):
+                m = masks['outputs_mask'][batch_start:batch_end]
+                m = F.sigmoid(m)
+                t = data['instance'][batch_start:batch_end]
+                t = F.one_hot(t).float()
+                biou = batch_iou((m.T > 0.5).float(), t.T)
+                return_dict['bious'][i] = biou.max(-1)[0]
+
+                return_dict['stability_score'][i] = (m > 0.7).sum(0) / ((m>0.3).sum(0) + 1e-15)
+                return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
+
             return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
@@ -780,7 +797,6 @@ class FFNLayer(nn.Module):
         if self.normalize_before:
             return self.forward_pre(tgt)
         return self.forward_post(tgt)
-
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
