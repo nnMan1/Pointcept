@@ -107,6 +107,7 @@ dataloader = torch.utils.data.DataLoader(ds,
                                         )
 
 for b in dataloader:
+    
     with torch.no_grad():
         for key in b.keys():
             try:
@@ -120,38 +121,40 @@ for b in dataloader:
     ious = pred['ious'][0].cpu().numpy()
     coords = b['coord'].cpu().numpy()
     preds = pred['masks'].cpu().numpy()#.argmax(-1, keepdims=True)
-    
+
     preds1 = 1 / (1 + np.exp(-preds))
-    
-    stability = (preds1 > 0.7).sum(0) / ((preds1 > 0.3).sum(0) + 1e-5)
+    stability = (preds1 > 0.8).sum(0) / ((preds1 > 0.2).sum(0) + 1e-5)
+
+    for iu, st, sc in zip(ious, stability, scores):
+        print(iu, st, sc)
     
     preds = preds[:, stability > 0.8]
     ious = ious[stability > 0.8]
     scores = scores[stability > 0.8]
+    preds1 = preds1[:, stability > 0.8]
     stability = stability[stability > 0.8]
 
     # #remove compleate masks
-    full = (preds > 0.5).mean(0)
+    full = (preds1 > 0.5).mean(0)
     preds = preds[:, full < 0.8]
     ious = ious[full < 0.8]
     scores = scores[full < 0.8]
     stability = stability[full < 0.8]
 
     # gt = np.expand_dims(pred['matched_targets'][0].cpu().numpy(), -1)
-    gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
-
-    preds = preds[:, ious > 0.5]
-    scores = ious[ious > 0.5]
+    gt = b['instance'].unsqueeze(-1).cpu().numpy()
+    preds = preds[:, ious > 0.3]
+    scores = ious[ious > 0.3]
     
     print(1, len(scores), len(preds.T))
     
-    keep = nms(preds, scores, 0.2)
+    keep = nms(preds, scores, 0.3)
     preds = preds[:, keep]
     scores = scores[keep]
   
     
     print(preds.shape, coords.shape, gt.shape)
     
-    save = np.concatenate([coords, preds], -1)
+    save = np.concatenate([coords, preds, gt], -1)
     
     np.save(f'samples/{str(b["id"].cpu().numpy())}.npy', save)
