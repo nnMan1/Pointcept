@@ -102,7 +102,7 @@ class HungarianMatcher(nn.Module):
 
         self.num_points = num_points
 
-        self.p = Pool(128)
+        # self.p = Pool(128)
 
     @torch.no_grad()
     def memory_efficient_forward(self, outputs, targets, mask_type):
@@ -239,14 +239,12 @@ class HungarianMatcher(nn.Module):
 
                 C = C.cpu().numpy()
                 Cs.append(C)
+                indices.append(linear_sum_assignment(C))
 
             batch_start = batch_end
 
-        # print(len(C))
 
-        # matching_start = time.time()
-        indices = self.p.map(linear_sum_assignment, Cs)
-        # print('Matching time: ', time.time() - matching_start)
+        # indices = self.p.map(linear_sum_assignment, Cs)
 
         batch_start = 0
 

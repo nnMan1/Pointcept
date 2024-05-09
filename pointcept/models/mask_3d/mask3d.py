@@ -53,7 +53,7 @@ class Mask3D(nn.Module):
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
         
-        self.iou_head = QueryRefinement(sizes[i], 1, mask_dim, sample_size=sample_sizes[i], **query_refinement_config)
+        self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
         
         self.matcher = HungarianMatcher()
         # self.matcher = MyMatcher()
@@ -61,6 +61,9 @@ class Mask3D(nn.Module):
         self.loss_ce = nn.BCEWithLogitsLoss()
         self.loss_dice = DiceLoss()
         self.loss_focal = BinaryFocalLoss()
+        
+        self.iou_ce_loss = nn.BCEWithLogitsLoss()
+        self.iou_mse_loss = nn.MSELoss()
 
     def __get_pos_encs(self, coords):
 
@@ -85,12 +88,37 @@ class Mask3D(nn.Module):
 
         return pos_encodings_pcd
 
+    def __compute_stats(self, masks, data, offset):
+        
+        return_dict = {}
+        
+        m = masks['outputs_mask'].clone()
+        return_dict['pred_score'] = torch.zeros(len(offset), m.shape[1])
+        return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
+        return_dict['bious'] =  torch.zeros(len(offset), m.shape[1], device='cuda')
+        batch_start = 0
+        
+        for i, batch_end in enumerate(offset):
+            m = masks['outputs_mask'][batch_start:batch_end]
+            m = F.sigmoid(m)
+            t = data['instance'][batch_start:batch_end]
+            t = F.one_hot(t).float()
+            biou = batch_iou((m.T > 0.5).float(), t.T)
+            return_dict['bious'][i] = biou.max(-1)[0]
+
+            return_dict['stability_score'][i] = (m > 0.8).sum(0) / ((m>0.2).sum(0) + 1e-15)
+            return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
+            
+        return return_dict
+
     def forward(self, data):
         
         raw_coordinates = data['coord']
         grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
+
+        total_time_start = time.time()
         
         mask_features, aux = self.backbone(data)
         pcd_features = aux[-1]
@@ -153,7 +181,9 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': len(self.hlevels) - i 
                 })
 
+                t_start = time.time()
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+                print('Matching time: ', i, time.time() - t_start)
 
                 for mask, target in zip(matched_outputs, matched_targets):
                     axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
@@ -178,7 +208,9 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': 0
                 })
         
+        t_start = time.time()
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+        print('Matching time: ', time.time() - t_start)
         intersections = []
         unions = []
 
@@ -195,47 +227,42 @@ class Mask3D(nn.Module):
             axiliary_losses[3].append(ious.mean())
             
         pred_iou = self.iou_head(
-                        aux[-1].features,
-                        masks['attn_mask'].features,
-                        pos_encoding,
+                        mask_features.features, #.clone().detach(),
+                        masks['attn_mask'].features, #.clone().detach(),
+                        torch.cat(pos_encodings_pcd[-1]),
                         offset.cpu(),
-                        queries,
-                        query_pos 
+                        queries, #.clone().detach(),
+                        query_pos, #.clone().detach() 
                     )
         
-        print(pred_iou.shape)
-        exit(0)
-
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
             'dice_loss': torch.stack(axiliary_losses[1]).mean(),
             'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
-        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss']
-
-        if not self.training: 
-            m = masks['outputs_mask'].clone()
-            return_dict['pred_score'] = torch.zeros(len(offset), m.shape[1])
-            return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
-            return_dict['bious'] =  torch.zeros(len(offset), m.shape[1])
-            batch_start = 0
-            for i, batch_end in enumerate(offset):
-                m = masks['outputs_mask'][batch_start:batch_end]
-                m = F.sigmoid(m)
-                t = data['instance'][batch_start:batch_end]
-                t = F.one_hot(t).float()
-                biou = batch_iou((m.T > 0.5).float(), t.T)
-                return_dict['bious'][i] = biou.max(-1)[0]
-
-                return_dict['stability_score'][i] = (m > 0.7).sum(0) / ((m>0.3).sum(0) + 1e-15)
-                return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
-
+        
+        return_dict.update(self.__compute_stats(masks, data, offset))
+        
+        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.6).float())
+        return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
+        return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
+            
+        if self.training:
+            return_dict.pop('pred_score')
+            return_dict.pop('bious')
+            return_dict.pop('stability_score')
+        else:
+            return_dict['pred_iou'] = pred_iou
             return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
+                        
+        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_mae_loss']
 
         torch.cuda.empty_cache()
+        print('Total time: ', time.time() - total_time_start)
+
         return return_dict
     
 class BatchNormDim1Swap(nn.BatchNorm1d):
@@ -351,6 +378,42 @@ class MaskModule(nn.Module):
                         
         return return_dict
 
+class IoUHead(nn.Module):
+    def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
+        
+        super().__init__()
+        self.iou_transformer_head = QueryRefinement(in_channels, 
+                                                    dim_feedforward=dim_feedforward, 
+                                                    mask_dim=mask_dim, 
+                                                    pre_norm=pre_norm, 
+                                                    num_heads=num_heads, 
+                                                    dropout=dropout, 
+                                                    sample_size=sample_size)
+
+        # self.iou_head = nn.Linear(in_channels, 1)
+        self.iou_head = nn.Sequential(
+            nn.Linear(in_channels, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+        )
+        
+        self.ious = None
+    
+        
+    def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
+        
+        features = self.iou_transformer_head(point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding)
+        
+        shape = features.shape[:2]
+        features = features.flatten(0, 1)
+        ious = self.iou_head(features).squeeze(-1)
+        ious = ious.reshape(*shape)
+        return ious
+  
 class QueryRefinement(nn.Module):
 
     def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
@@ -440,8 +503,6 @@ class QueryRefinement(nn.Module):
         
         batch_start = 0
         
-        print(len(batched_data))
-
         for i, batch_end in enumerate(offset):
             batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
             batch_start = batch_end
