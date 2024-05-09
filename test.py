@@ -51,7 +51,7 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = ABCDataset(
+ds = Assembly(
         split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -116,6 +116,9 @@ for b in dataloader:
                 pass
             
         pred = model(b)
+
+    if b['id'] != 61:
+        continue;
     
     scores = pred['pred_score'][0].cpu().numpy()
     ious = pred['ious'][0].cpu().numpy()

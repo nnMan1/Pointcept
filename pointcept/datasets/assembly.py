@@ -71,10 +71,14 @@ class Assembly(Dataset):
             raise NotImplementedError
         
         data_list = [f.strip() for f in data_list]
+        data_list = [f.split('/')[-1] for f in data_list]
         dl = []
+        
+        if 'train' in data_list:
+            pass
 
         for i in range(6):
-            dl += [f'{f}_{i}.h5' for f in data_list]
+            dl += [f'{self.split}_{f}_{i}.h5' for f in data_list]
 
         return dl
 
@@ -83,7 +87,8 @@ class Assembly(Dataset):
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
-        data = h5py.File(os.path.join(self.data_root, 'raw', data),'r')
+        # print(os.path.join(self.data_root, 'scanns', data))
+        data = h5py.File(os.path.join(self.data_root, 'scanns', data),'r')
         return {
             'coord': np.asarray(data['coord'])[::3],
             'instance': np.asarray(data['instance'])[::3],
@@ -135,4 +140,3 @@ class Assembly(Dataset):
 
     def __len__(self):
         return len(self.data_list) * self.loop
-
