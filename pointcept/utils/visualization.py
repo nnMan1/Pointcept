@@ -90,7 +90,7 @@ def save_lines(
 
 
 def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
-    order = np.argsort(-scores)
+    order = np.argsort(-scores)[::-1]
     indices = np.arange(masks.shape[-1])
     keep = np.ones_like(indices, dtype=np.bool_)
 

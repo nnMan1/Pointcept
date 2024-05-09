@@ -183,7 +183,7 @@ class Mask3D(nn.Module):
 
                 t_start = time.time()
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-                print('Matching time: ', i, time.time() - t_start)
+                # print('Matching time: ', i, time.time() - t_start)
 
                 for mask, target in zip(matched_outputs, matched_targets):
                     axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
@@ -210,7 +210,7 @@ class Mask3D(nn.Module):
         
         t_start = time.time()
         matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-        print('Matching time: ', time.time() - t_start)
+        # print('Matching time: ', time.time() - t_start)
         intersections = []
         unions = []
 
@@ -244,7 +244,8 @@ class Mask3D(nn.Module):
         
         return_dict.update(self.__compute_stats(masks, data, offset))
         
-        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.6).float())
+        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.3).float())
+        # pred_iou = F.sigmoid(pred_iou)
         return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
         return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
             
@@ -258,7 +259,7 @@ class Mask3D(nn.Module):
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
                         
-        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_mae_loss']
+        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_mse_loss']
 
         torch.cuda.empty_cache()
         print('Total time: ', time.time() - total_time_start)

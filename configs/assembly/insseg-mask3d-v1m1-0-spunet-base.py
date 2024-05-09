@@ -1,12 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
+batch_size = 16 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
-enable_amp = True
+enable_amp = False
 evaluate = True
+# resume=True
+# weight='exp/assembly_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -48,11 +50,11 @@ model = dict(
 
 # scheduler settings
 epoch = 800
-optimizer = dict(type="Adam", lr=0.0001, weight_decay=0.000)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.2)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
-    pct_start=0.05,
+    pct_start=0.01,
     anneal_strategy="cos",
     div_factor=10.0,
     final_div_factor=1000.0,
@@ -85,7 +87,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.01,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -133,7 +135,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.01,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

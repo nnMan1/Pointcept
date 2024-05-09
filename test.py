@@ -34,7 +34,7 @@ model = build_model(dict(
     hidden_dim=128,
     mask_dim=128))
 
-checkpoint = torch.load('exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
+checkpoint = torch.load('exp/assembly_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -51,8 +51,8 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = ABCDataset(
-        split='train',
+ds = Assembly(
+        split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
             dict(
@@ -121,7 +121,7 @@ for b in dataloader:
     scores = pred['pred_score'][0].cpu().numpy()
     stability = pred['stability_score'][0].cpu().numpy()
     ious = pred['bious'][0].cpu().numpy()
-    pred_ious = pred['bious'][0].cpu().numpy() 
+    # pred_ious = pred['bious'][0].cpu().numpy() 
     preds = pred['masks'].cpu().numpy()
 
     # pred_ious = 1 / (1 + np.exp(-pred_ious))
@@ -131,7 +131,7 @@ for b in dataloader:
 
 
 
-    filter = (stability > 0.8) & (pred_ious > 0.5)
+    filter = (stability > 0.8) & (pred_ious > 0.3)
 
     preds = preds[:, filter]
     scores = scores[filter]
@@ -144,14 +144,14 @@ for b in dataloader:
     
     
     # gt = np.expand_dims(pred['matched_targets'][0].cpu().numpy(), -1)
-    # preds = pred['matched_masks'][0].cpu().numpy()
+    preds = pred['matched_masks'][0].cpu().numpy()
     gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
     
     # print(1, len(scores), len(preds.T))
     
-    keep = nms(preds, scores, 0.3)
-    preds = preds[:, keep]
-    scores = scores[keep]
+    # keep = nms(preds, pred_ious, 0.3)
+    # preds = preds[:, keep]
+    # scores = scores[keep]
   
     print(preds.shape)
        

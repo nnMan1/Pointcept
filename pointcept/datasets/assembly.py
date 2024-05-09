@@ -73,6 +73,9 @@ class Assembly(Dataset):
         data_list = [f.strip() for f in data_list]
         data_list = [f.split('/')[-1] for f in data_list]
         dl = []
+        
+        if 'train' in data_list:
+            pass
 
         for i in range(6):
             dl += [f'{self.split}_{f}_{i}.h5' for f in data_list]
@@ -84,7 +87,7 @@ class Assembly(Dataset):
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
-        print(os.path.join(self.data_root, 'scanns', data))
+        # print(os.path.join(self.data_root, 'scanns', data))
         data = h5py.File(os.path.join(self.data_root, 'scanns', data),'r')
         return {
             'coord': np.asarray(data['coord'])[::3],
