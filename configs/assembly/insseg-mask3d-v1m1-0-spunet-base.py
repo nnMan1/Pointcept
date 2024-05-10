@@ -8,7 +8,7 @@ empty_cache = True
 enable_amp = False
 evaluate = True
 # resume=True
-# weight='exp/assembly_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth'
+weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_dice_loss+focall_loss/model/model_last.pth'
 
 class_names = [
     "assembly",

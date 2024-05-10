@@ -7,6 +7,7 @@ mix_prob = 0
 empty_cache = False
 enable_amp = False
 evaluate = True
+weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_dice_loss+focall_loss/model/model_last.pth'
 
 class_names = [
     "assembly",

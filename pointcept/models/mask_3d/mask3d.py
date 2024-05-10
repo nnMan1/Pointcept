@@ -244,8 +244,8 @@ class Mask3D(nn.Module):
         
         return_dict.update(self.__compute_stats(masks, data, offset))
         
-        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.3).float())
-        # pred_iou = F.sigmoid(pred_iou)
+        return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.5).float())
+        pred_iou = F.sigmoid(pred_iou)
         return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
         return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
             
@@ -259,7 +259,7 @@ class Mask3D(nn.Module):
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
                         
-        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_mse_loss']
+        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_ce_loss']
 
         torch.cuda.empty_cache()
         print('Total time: ', time.time() - total_time_start)
@@ -383,32 +383,33 @@ class IoUHead(nn.Module):
     def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
         
         super().__init__()
-        self.iou_transformer_head = QueryRefinement(in_channels, 
-                                                    dim_feedforward=dim_feedforward, 
-                                                    mask_dim=mask_dim, 
-                                                    pre_norm=pre_norm, 
-                                                    num_heads=num_heads, 
-                                                    dropout=dropout, 
-                                                    sample_size=sample_size)
+        # self.iou_transformer_head = QueryRefinement(in_channels, 
+        #                                             dim_feedforward=dim_feedforward, 
+        #                                             mask_dim=mask_dim, 
+        #                                             pre_norm=pre_norm, 
+        #                                             num_heads=num_heads, 
+        #                                             dropout=dropout, 
+        #                                             sample_size=sample_size)
 
         # self.iou_head = nn.Linear(in_channels, 1)
-        self.iou_head = nn.Sequential(
-            nn.Linear(in_channels, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
-        )
+        # self.iou_head = nn.Sequential(
+        #     nn.Linear(in_channels, 128),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 64),
+        #     nn.BatchNorm1d(64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, 1),
+        # )
         
         self.ious = None
     
         
     def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
-        
-        features = self.iou_transformer_head(point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding)
-        
+        return torch.zeros(queries.shape[:2], device = point_features.device)
+        # features = self.iou_transformer_head(point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding)
+        features = queries
+
         shape = features.shape[:2]
         features = features.flatten(0, 1)
         ious = self.iou_head(features).squeeze(-1)
