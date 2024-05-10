@@ -4,7 +4,7 @@ os.system("rm -r samples/*.npy")
 
 import torch
 import numpy as np
-from pointcept.datasets import ABCDataset, Assembly
+from pointcept.datasets import ABCDataset, Assembly, Cetim
 from pointcept.datasets import transform 
 from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from functools import partial
@@ -51,7 +51,7 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = Assembly(
+ds = ABCDataset(
         split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -117,8 +117,8 @@ for b in dataloader:
             
         pred = model(b)
 
-    if b['id'] != 61:
-        continue;
+    # if b['id'] != 22:
+    #     continue;
     
     scores = pred['pred_score'][0].cpu().numpy()
     ious = pred['ious'][0].cpu().numpy()
@@ -128,14 +128,15 @@ for b in dataloader:
     preds1 = 1 / (1 + np.exp(-preds))
     stability = (preds1 > 0.8).sum(0) / ((preds1 > 0.2).sum(0) + 1e-5)
 
-    for iu, st, sc in zip(ious, stability, scores):
-        print(iu, st, sc)
+    # for iu, st, sc in zip(ious, stability, scores):
+    #     print(iu, st, sc)
     
-    preds = preds[:, stability > 0.8]
-    ious = ious[stability > 0.8]
-    scores = scores[stability > 0.8]
-    preds1 = preds1[:, stability > 0.8]
-    stability = stability[stability > 0.8]
+    filters = stability > 0.8
+    preds = preds[:, filters]
+    ious = ious[filters]
+    scores = scores[filters]
+    preds1 = preds1[:, filters]
+    stability = stability[filters]
 
     # #remove compleate masks
     full = (preds1 > 0.5).mean(0)
@@ -146,12 +147,13 @@ for b in dataloader:
 
     # gt = np.expand_dims(pred['matched_targets'][0].cpu().numpy(), -1)
     gt = b['instance'].unsqueeze(-1).cpu().numpy()
-    preds = preds[:, ious > 0.3]
-    scores = ious[ious > 0.3]
+    # preds = preds[:, ious > 0.3]
+    # scores = ious[ious > 0.3]
     
     print(1, len(scores), len(preds.T))
     
     keep = nms(preds, scores, 0.3)
+    print(keep)
     preds = preds[:, keep]
     scores = scores[keep]
   
