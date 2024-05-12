@@ -407,7 +407,7 @@ class IoUHead(nn.Module):
         
     def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
         return torch.zeros(queries.shape[:2], device = point_features.device)
-        # features = self.iou_transformer_head(point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding)
+        features = self.iou_transformer_head(point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding)
         features = queries
 
         shape = features.shape[:2]

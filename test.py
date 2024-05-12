@@ -4,7 +4,7 @@ os.system("rm -r samples/*.npy")
 
 import torch
 import numpy as np
-from pointcept.datasets import ABCDataset, Assembly
+from pointcept.datasets import ABCDataset, Assembly, Cetim
 from pointcept.datasets import transform 
 from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from functools import partial
@@ -142,7 +142,7 @@ for b in dataloader:
     preds = preds[:, keep]
     scores = scores[keep]
     
-    preds = pred['matched_masks'][0].cpu().numpy()
+    # preds = pred['matched_masks'][0].cpu().numpy()
     gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
   
     save = np.concatenate([coords, preds, gt], -1)

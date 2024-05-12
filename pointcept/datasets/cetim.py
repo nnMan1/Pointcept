@@ -13,15 +13,16 @@ from pointcept.utils.cache import shared_dict
 
 from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
-from .transform import Compose, TRANSFORMS
+
+import open3d as o3d
 
 @DATASETS.register_module()
-class ABCDataset(Dataset):
+class Cetim(Dataset):
 
     def __init__(
         self,
         split="train",
-        data_root="data/ABCDataset",
+        data_root="data/cetim",
         transform=None,
         ignore_index=-1,
         test_mode=False,
@@ -29,7 +30,7 @@ class ABCDataset(Dataset):
         cache=False,
         loop=1,
     ):
-        super(ABCDataset, self).__init__()
+        super(Cetim, self).__init__()
         self.data_root = data_root
         self.split = split
         self.transform = Compose(transform)
@@ -60,26 +61,7 @@ class ABCDataset(Dataset):
         )
 
     def get_data_list(self):
-        
-        if isinstance(self.split, str):
-            data_list = open(os.path.join(self.data_root, 'raw', f"{self.split}_files.txt")).readlines()
-        elif isinstance(self.split, Sequence):
-            data_list = []
-            for split in self.split:
-                data_list += torch.load(open(os.path.join(self.data_root, 'raw', f"{self.split}_files.txt")).readlines())
-        else:
-            raise NotImplementedError
-        
-        data_list = [f.strip() for f in data_list]
-        dl = []
-
-        start = 0
-        if self.split == 'val':
-            start = 5
-            
-        for i in range(start, 6):
-            dl += [f"p_{f.split('/')[0]}_{f.split('/')[-1]}_{i}.h5" for f in data_list]
-
+        dl = glob.glob(os.path.join(self.data_root, 'raw', '*', '*.ply'))
         return dl
 
     def get_data(self, idx):
@@ -87,13 +69,16 @@ class ABCDataset(Dataset):
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
-        data = h5py.File(os.path.join(self.data_root, 'scanns', data),'r')
+        data = o3d.io.read_point_cloud(data)
+        
+        # print(os.path.join(self.data_root, 'scanns', data))
+        # data = h5py.File(os.path.join(self.data_root, 'scanns', data),'r')
         return {
-            'coord': np.asarray(data['coord'])[::3],
-            'instance': np.asarray(data['instance'])[::3],
-            'segment': np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)[::3],
-            'id': int(np.asarray(data['id'])),
-            'path':  self.data_list[idx]
+            'coord': np.asarray(data.points)[::3],
+            'instance': np.zeros(np.asarray(data.points).shape[0], dtype=np.int32)[::3],
+            'segment': np.zeros(np.asarray(data.points).shape[0], dtype=np.int32)[::3],
+            'id': idx,
+            'path': self.data_list[idx]
         } 
 
     def get_data_name(self, idx):
@@ -139,4 +124,3 @@ class ABCDataset(Dataset):
 
     def __len__(self):
         return len(self.data_list) * self.loop
-

@@ -20,6 +20,7 @@ from .shapenet_part import ShapeNetPartDataset
 from .partnet import PartNet
 from .assembly import Assembly
 from .abc_dataset import ABCDataset
+from .cetim import Cetim
 
 # dataloader
 from .dataloader import MultiDatasetDataloader
