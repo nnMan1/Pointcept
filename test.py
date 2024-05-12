@@ -131,7 +131,7 @@ for b in dataloader:
     # for iu, st, sc in zip(ious, stability, scores):
     #     print(iu, st, sc)
     
-    filters = stability > 0.8
+    filters = stability > 0.6
     preds = preds[:, filters]
     ious = ious[filters]
     scores = scores[filters]
@@ -139,11 +139,11 @@ for b in dataloader:
     stability = stability[filters]
 
     # #remove compleate masks
-    full = (preds1 > 0.5).mean(0)
-    preds = preds[:, full < 0.8]
-    ious = ious[full < 0.8]
-    scores = scores[full < 0.8]
-    stability = stability[full < 0.8]
+    # full = (preds1 > 0.5).mean(0)
+    # preds = preds[:, full < 0.8]
+    # ious = ious[full < 0.8]
+    # scores = scores[full < 0.8]
+    # stability = stability[full < 0.8]
 
     # gt = np.expand_dims(pred['matched_targets'][0].cpu().numpy(), -1)
     gt = b['instance'].unsqueeze(-1).cpu().numpy()
