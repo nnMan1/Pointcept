@@ -1,6 +1,3 @@
-import os
-os.system("rm -r samples/*.npy")
-
 
 import torch
 import numpy as np
@@ -14,7 +11,7 @@ from collections import OrderedDict
 from pointcept.utils.visualization import nms
 from torch.nn import functional as F
 import matplotlib.pyplot as plt
-from sklearn.metrics import average_precision_score
+from pointcept.engines.hooks import MyInsSegEvaluator
 
 # from pointcept.utils.visualization import nms
 
@@ -56,7 +53,7 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = Cetim(
+ds = ABCDataset(
         split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -95,7 +92,7 @@ ds = Cetim(
                 type='InstanceParser',
                 segment_ignore_index=(-1, ),
                 instance_ignore_index=-1),
-            dict(type='FPSSeed', n_points=200),
+            dict(type='FPSSeed', n_points=100),
             dict(type='ToTensor'),
             dict(
                 type='Collect',
@@ -106,66 +103,7 @@ ds = Cetim(
         test_mode=False
 )
 
-dataloader = torch.utils.data.DataLoader(ds,
-                                         batch_size=1,
-                                        collate_fn=partial(point_collate_fn),
+dataloader = torch.utils.data.DataLoader(   ds,
+                                            batch_size=1,
+                                            collate_fn=partial(point_collate_fn),
                                         )
-for b in dataloader:
-    with torch.no_grad():
-        for key in b.keys():
-            try:
-                b[key] = b[key].cuda()
-            except:
-                pass
-            
-        pred = model(b)
-
-    coords = b['coord'].cpu().numpy()
-
-    pred_ious = pred['pred_iou'][0].cpu().numpy()
-    scores = pred['pred_score'][0].cpu().numpy()
-    stability = pred['stability_score'][0].cpu().numpy()
-    ious = pred['bious'][0].cpu().numpy()
-    # pred_ious = pred['bious'][0].cpu().numpy() 
-    preds = pred['masks'].cpu().numpy()
-
-    preds_prob = 1 / (1 + np.exp(-preds))
-
-    # pred_ious = 1 / (1 + np.exp(-pred_ious))
-
-    # for sc, st, iu, piou in zip(scores, stability, ious, pred_ious):
-    #     print(sc, st, iu, piou)
-
-    filter = (stability > 0.5) #& (pred_ious > 0.3)
-
-    preds = preds[:, filter]
-    scores = scores[filter]
-    ious = ious[filter]
-    stability = stability[filter]
-    pred_ious = pred_ious[filter]
-
-    keep = nms(preds, stability, 0.3)
-    preds = preds[:, keep]
-    scores = scores[keep]
-    
-    # preds = pred['matched_masks'][0].cpu().numpy()
-    gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
-
-    prec_rec = MulticlassPrecisionRecallCurve()
-    prec_rec.update(pred['matched_masks'][0], pred['matched_targets'][0])  
-
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 0].cpu().numpy(), pred['matched_masks'][0][:, 0].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 1].cpu().numpy(), pred['matched_masks'][0][:, 1].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 2].cpu().numpy(), pred['matched_masks'][0][:, 2].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 3].cpu().numpy(), pred['matched_masks'][0][:, 3].cpu().numpy()))
-    
-    recs, precs, tres = prec_rec.compute()
-
-    for p,r,t in zip(precs, recs, tres):
-        print(((p[:-1] - p[1:]) *r[:-1]).sum())
-
-    save = np.concatenate([coords, preds, gt], -1)
-    np.save(f'samples/{str(b["id"].cpu().numpy())}.npy', save)
-    
-  
-    

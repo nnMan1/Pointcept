@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume=True
-weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth'
+# resume=True
+weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete2/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -177,8 +177,6 @@ hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(
-        type="MyInsSegEvaluator",
-    ),
+    dict(type="MyInsSegEvaluator",),
     dict(type="CheckpointSaver", save_freq=None),
 ]

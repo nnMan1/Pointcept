@@ -13,6 +13,7 @@ from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from pointcept.utils.misc import batch_iou
+from pointcept.utils.visualization import nms
 
 import time
 
@@ -111,6 +112,32 @@ class Mask3D(nn.Module):
             
         return return_dict
 
+    def __inf_select_masks(self, masks, stabilities, pred_ious=None, offset=None):
+
+        pred_masks = []
+        pred_stabilities = []
+
+        batch_start = 0
+
+        for i, batch_end in enumerate(offset):
+            preds = masks[batch_start: batch_end]
+            stability = stabilities[i]
+
+            filter = (stability > 0.5) #& (pred_ious > 0.3)
+            preds = preds[:, filter]
+            stability = stability[filter]
+            
+            keep = nms(preds, stability, 0.3)
+            preds = preds[:, keep]
+            stability = stability[keep]
+
+            pred_masks.append(preds)
+            pred_stabilities.append(stability)
+
+            batch_start = batch_end
+
+        return pred_masks, pred_stabilities
+    
     def forward(self, data):
         
         raw_coordinates = data['coord']
@@ -258,6 +285,7 @@ class Mask3D(nn.Module):
             return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
+            return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], pred_ious=pred_iou, offset=offset)
                         
         return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_ce_loss']
 
@@ -383,24 +411,24 @@ class IoUHead(nn.Module):
     def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size):
         
         super().__init__()
-        # self.iou_transformer_head = QueryRefinement(in_channels, 
-        #                                             dim_feedforward=dim_feedforward, 
-        #                                             mask_dim=mask_dim, 
-        #                                             pre_norm=pre_norm, 
-        #                                             num_heads=num_heads, 
-        #                                             dropout=dropout, 
-        #                                             sample_size=sample_size)
+        self.iou_transformer_head = QueryRefinement(in_channels, 
+                                                    dim_feedforward=dim_feedforward, 
+                                                    mask_dim=mask_dim, 
+                                                    pre_norm=pre_norm, 
+                                                    num_heads=num_heads, 
+                                                    dropout=dropout, 
+                                                    sample_size=sample_size)
 
         # self.iou_head = nn.Linear(in_channels, 1)
-        # self.iou_head = nn.Sequential(
-        #     nn.Linear(in_channels, 128),
-        #     nn.BatchNorm1d(128),
-        #     nn.ReLU(),
-        #     nn.Linear(128, 64),
-        #     nn.BatchNorm1d(64),
-        #     nn.ReLU(),
-        #     nn.Linear(64, 1),
-        # )
+        self.iou_head = nn.Sequential(
+            nn.Linear(in_channels, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+        )
         
         self.ious = None
     

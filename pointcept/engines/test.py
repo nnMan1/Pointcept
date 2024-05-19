@@ -506,3 +506,21 @@ class PartSegTester(TesterBase):
     @staticmethod
     def collate_fn(batch):
         return collate_fn(batch)
+
+@TESTERS.register_module()
+class InstSegTester(TesterBase):
+    def test(self):
+        test_dataset = self.test_loader.dataset
+        logger = get_root_logger()
+        logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+
+        batch_time = AverageMeter()
+
+        num_categories = len(self.test_loader.dataset.categories)
+        iou_category, iou_count = np.zeros(num_categories), np.zeros(num_categories)
+        self.model.eval()
+
+        save_path = os.path.join(
+            self.cfg.save_path, "result", "test_epoch{}".format(self.cfg.test_epoch)
+        )
+        make_dirs(save_path)

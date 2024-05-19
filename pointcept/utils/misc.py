@@ -49,7 +49,6 @@ def intersection_and_union(output, target, K, ignore_index=-1):
     area_union = area_output + area_target - area_intersection
     return area_intersection, area_union, area_target
 
-
 def intersection_and_union_gpu(output, target, k, ignore_index=-1):
     # 'K' classes, output and target sizes are N or N * L or N * H * W, each value in range 0 to K - 1.
     assert output.dim() in [1, 2, 3]
@@ -63,7 +62,6 @@ def intersection_and_union_gpu(output, target, k, ignore_index=-1):
     area_target = torch.histc(target, bins=k, min=0, max=k - 1)
     area_union = area_output + area_target - area_intersection
     return area_intersection, area_union, area_target
-
 
 def batch_iou(inputs: torch.Tensor, targets: torch.Tensor):
     """
@@ -79,7 +77,6 @@ def batch_iou(inputs: torch.Tensor, targets: torch.Tensor):
     union = inputs.sum(-1)[:, None] + targets.sum(-1)[None, :] - intersection + 1e-15
     
     return intersection / union
-
 
 def make_dirs(dir_name):
     if not os.path.exists(dir_name):

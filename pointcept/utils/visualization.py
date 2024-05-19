@@ -10,7 +10,6 @@ import open3d as o3d
 import numpy as np
 import torch
 
-
 def to_numpy(x):
     if isinstance(x, torch.Tensor):
         x = x.clone().detach().cpu().numpy()
@@ -90,6 +89,10 @@ def save_lines(
 
 
 def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+
+    masks = to_numpy(masks)
+    scores = to_numpy(scores)
+    
     order = np.argsort(scores)[::-1]
     indices = np.arange(masks.shape[-1])
     keep = np.ones_like(indices, dtype=np.bool_)
