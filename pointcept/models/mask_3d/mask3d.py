@@ -19,6 +19,8 @@ from pointcept.utils.misc import (
     make_dirs,
 )
 
+from .utils import *
+
 import time
 
 @MODELS.register_module("Mask-3D")
@@ -94,9 +96,6 @@ class Mask3D(nn.Module):
         grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
-
-        # for p in data:
-        #     print(data['path'])
         
         mask_features, aux = self.backbone(data)
         pcd_features = aux[-1]
@@ -234,7 +233,7 @@ class Mask3D(nn.Module):
             # 'bce_loss': torch.stack(axiliary_losses[0]).mean(),
             'dice_loss': torch.stack(axiliary_losses[1]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            'iou': torch.stack(axiliary_losses[3]).mean()
+            'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
         
         return_dict['loss'] = return_dict['dice_loss'] + return_dict['focal_loss']
@@ -242,59 +241,30 @@ class Mask3D(nn.Module):
         if not self.training: 
             m = masks['outputs_masks'].clone()
             return_dict['pred_score'] = torch.zeros(len(offset), m.shape[0], m.shape[2])
+            return_dict['stability_score'] = torch.zeros(len(offset), m.shape[0], m.shape[2])
+
             batch_start = 0
             for i, batch_end in enumerate(offset):
                 m = masks['outputs_masks'][:, batch_start:batch_end]
                 m = F.sigmoid(m)
                                 
                 return_dict['pred_score'][i] = (m * (m>0.5)).sum(1) / ((m>0.5).sum(1) + 1e-15)
+                return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
                 batch_start = batch_end
                 
             return_dict['ious'] = ious.reshape(len(offset), -1, *ious[1:])
             return_dict['pred_score'] = return_dict['pred_score'].reshape(len(offset), -1, *ious[1:])
+            return_dict['stability_score'] = return_dict['stability_score'].reshape(len(offset), -1, *ious[1:])
 
             return_dict['masks'] = masks['outputs_masks'].permute(1, 0, 2).reshape(masks['outputs_masks'].shape[1], -1)
             return_dict['matched_masks'] = matched_outputs
             return_dict['matched_targets'] = matched_targets
+            return_dict['pred_masks'], return_dict['pred_scores'] = filter_out_masks(return_dict['masks'], return_dict['stability_score'], offset=offset)
+
 
         torch.cuda.empty_cache()
         return return_dict
-    
-class BatchNormDim1Swap(nn.BatchNorm1d):
-    """
-    Used for nn.Transformer that uses a HW x N x C rep
-    """
-
-    def forward(self, x):
-        """
-        x: HW x N x C
-        permute to N x C x HW
-        Apply BN on C
-        permute back
-        """
-        hw, n, c = x.shape
-        x = x.permute(1, 2, 0)
-        x = super(BatchNormDim1Swap, self).forward(x)
-        # x: n x c x hw -> hw x n x c
-        x = x.permute(2, 0, 1)
-        return x
-
-NORM_DICT = {
-    "bn": BatchNormDim1Swap,
-    "bn1d": nn.BatchNorm1d,
-    "id": nn.Identity,
-    "ln": nn.LayerNorm,
-}
-
-ACTIVATION_DICT = {
-    "relu": nn.ReLU,
-    "gelu": nn.GELU,
-}
-
-WEIGHT_INIT_DICT = {
-    "xavier_uniform": nn.init.xavier_uniform_,
-}
-      
+     
 class MaskModule(nn.Module):
 
     def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False, num_masks=1):
@@ -424,72 +394,12 @@ class QueryRefinement(nn.Module):
                     normalize_before=self.pre_norm,
                 )
         
-    def __pad(self, data, offset, size = None, rand_idx = None, mask_idx = None):
 
-        if rand_idx is None:
-            rand_idx = []
-            mask_idx = []
-
-            batch_start = torch.cat([torch.tensor([0]), offset[:-1]])
-
-            max_size = (offset - batch_start).max()
-
-            if size != None:
-                max_size = min(max_size, size)
-
-            batch_start = 0
-
-            for i, batch_end in enumerate(offset):
-                pcd = data[batch_start: batch_end]
-                pcd_size = batch_end - batch_start
-
-                if pcd_size < max_size:
-                    idx = torch.zeros(max_size,
-                                    dtype=torch.long,
-                                    device=data.device)
-                    
-
-                    midx = torch.ones(max_size,
-                                    dtype=torch.bool,
-                                    device=data.device)
-                    
-                    idx[:pcd_size] = torch.arange(
-                        pcd_size, device = data.device
-                    )
-
-                    midx[:pcd_size] = False
-
-                else:
-                    idx = torch.randperm( pcd_size,
-                                        device = data.device
-                                        )[:max_size]
-                    midx = torch.zeros(max_size,
-                                    dtype=bool,
-                                    device=data.device)
-                    
-
-                rand_idx.append(idx)
-                mask_idx.append(midx)
-
-                batch_start = batch_end
-
-        batched_data = []
-        
-        batch_start = 0
-
-        for i, batch_end in enumerate(offset):
-            batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
-            batch_start = batch_end
-            
-        batched_data = torch.stack(batched_data)
-        
-        return batched_data, rand_idx, mask_idx
-            
     def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
 
-        point_features, rand_idx, mask_idx = self.__pad(point_features, offset, self.sample_size)
-        attn_mask, _, _ = self.__pad(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
-        pos_encoding, _, _ = self.__pad(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
+        point_features, rand_idx, mask_idx = pad_batch(point_features, offset, self.sample_size)
+        attn_mask, _, _ = pad_batch(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
+        pos_encoding, _, _ = pad_batch(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
 
 
         attn_mask.permute((0, 2, 1))[
@@ -617,7 +527,7 @@ class SelfAttentionLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -698,7 +608,7 @@ class CrossAttentionLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -795,7 +705,7 @@ class FFNLayer(nn.Module):
 
         self.norm = nn.LayerNorm(d_model)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -824,14 +734,3 @@ class FFNLayer(nn.Module):
         if self.normalize_before:
             return self.forward_pre(tgt)
         return self.forward_post(tgt)
-
-def _get_activation_fn(activation):
-    """Return an activation function given a string"""
-    if activation == "relu":
-        return F.relu
-    if activation == "gelu":
-        return F.gelu
-    if activation == "glu":
-        return F.glu
-    raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
-

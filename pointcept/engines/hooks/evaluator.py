@@ -10,10 +10,12 @@ import torch
 import torch.distributed as dist
 import pointops
 from uuid import uuid4
+from torch.nn import functional as F
 
 import pointcept.utils.comm as comm
-from pointcept.utils.misc import intersection_and_union_gpu
-
+from pointcept.utils.misc import intersection_and_union_gpu, batch_iou
+from torcheval.metrics import BinaryPrecisionRecallCurve
+from torcheval.metrics.functional import binary_auprc
 from .default import HookBase
 from .builder import HOOKS
 
@@ -103,6 +105,14 @@ class ClsEvaluator(HookBase):
 
 @HOOKS.register_module()
 class MyInsSegEvaluator(HookBase):
+
+    # def __init__(self):
+    #     self.overlaps = np.append(np.arange(0.5, 0.95, 0.05), 0.25)
+    #     self.min_region_sizes = 100
+
+    #     self.distance_threshes = float("inf")
+    #     self.distance_confs = -float("inf")
+
     def after_epoch(self):
         if self.trainer.cfg.evaluate:
             self.eval()
@@ -111,8 +121,9 @@ class MyInsSegEvaluator(HookBase):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
         losses = []
-        
-        ious = []
+        m_iou = []
+        # ap_table = np.zeros((len(self.overlaps)), float)
+
 
         for i, input_dict in enumerate(self.trainer.val_loader):
             for key in input_dict.keys():
@@ -121,19 +132,38 @@ class MyInsSegEvaluator(HookBase):
             with torch.no_grad():
                 output_dict = self.trainer.model(input_dict)
                 losses.append(output_dict['loss'])
-                ious.append(output_dict['ious'].max(1)[0].mean())
+                m_iou.append(output_dict['mIoU'])
+
+                # pred_mask = output_dict['matched_masks'][0].sigmoid()
+                # gt = F.one_hot(output_dict['matched_targets'][0])
+
+                # ious = batch_iou((pred_mask > 0.5).float().T, gt.float().T).diag()
+                # aps = binary_auprc(pred_mask.T, gt.T, num_tasks=pred_mask.shape[1])
+                
+
+                # for ov, overlap in enumerate(self.overlaps):
+                    
+                #     print(aps)
+                #     exit(0)
+                
+                # for ov, overlap in enumerate(self.overlaps):
+                #     if 
+                
+
+
+
         loss_avg = torch.tensor(losses).mean() 
-        ious_avg = torch.stack(ious).mean()
+        m_iou = torch.tensor(m_iou).mean() 
 
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
-            self.trainer.writer.add_scalar("val/mIoU", ious_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
             # self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
             # self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
             
-        self.trainer.comm_info["current_metric_value"] = torch.tensor(ious_avg)  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "loss"  # save for saver
+        self.trainer.comm_info["current_metric_value"] = torch.tensor(m_iou).mean()  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver
 
     def after_train(self):
         self.trainer.logger.info(
@@ -268,8 +298,7 @@ class InsSegEvaluator(HookBase):
         void_mask = np.in1d(segment, self.segment_ignore_index)
 
         assert (
-            pred["pred_classes"].shape[0]
-            == pred["pred_scores"].shape[0]
+            pred["pred_scores"][0].shape[0]
             == pred["pred_masks"].shape[0]
         )
         assert pred["pred_masks"].shape[1] == segment.shape[0] == instance.shape[0]
@@ -302,6 +331,11 @@ class InsSegEvaluator(HookBase):
             if i not in self.segment_ignore_index:
                 pred_instances[self.trainer.cfg.data.names[i]] = []
         instance_id = 0
+
+
+        if not 'pred_classes' in pred.keys():
+            pred['pred_classes'] = np.zeros_like(pred["pred_scores"][0], dtype=np.int32)
+
         for i in range(len(pred["pred_classes"])):
             if pred["pred_classes"][i] in self.segment_ignore_index:
                 continue
@@ -309,9 +343,9 @@ class InsSegEvaluator(HookBase):
             pred_inst["uuid"] = uuid4()
             pred_inst["instance_id"] = instance_id
             pred_inst["segment_id"] = pred["pred_classes"][i]
-            pred_inst["confidence"] = pred["pred_scores"][i]
-            pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
-            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
+            pred_inst["confidence"] = pred["pred_scores"][0][i]
+            pred_inst["mask"] = np.not_equal(pred["pred_masks"][i].cpu(), 0)
+            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"].cpu())
             pred_inst["void_intersection"] = np.count_nonzero(
                 np.logical_and(void_mask, pred_inst["mask"])
             )
@@ -335,6 +369,7 @@ class InsSegEvaluator(HookBase):
             pred_inst["matched_gt"] = matched_gt
             pred_instances[segment_name].append(pred_inst)
             instance_id += 1
+
         return gt_instances, pred_instances
 
     def evaluate_matches(self, scenes):
@@ -347,6 +382,7 @@ class InsSegEvaluator(HookBase):
         ap_table = np.zeros(
             (len(dist_threshes), len(self.valid_class_names), len(overlaps)), float
         )
+
         for di, (min_region_size, distance_thresh, distance_conf) in enumerate(
             zip(min_region_sizes, dist_threshes, dist_confs)
         ):
@@ -358,6 +394,7 @@ class InsSegEvaluator(HookBase):
                             for p in scene["pred"][label_name]:
                                 if "uuid" in p:
                                     pred_visited[p["uuid"]] = False
+                
                 for li, label_name in enumerate(self.valid_class_names):
                     y_true = np.empty(0)
                     y_score = np.empty(0)
@@ -519,6 +556,7 @@ class InsSegEvaluator(HookBase):
                     else:
                         ap_current = float("nan")
                     ap_table[di, li, oi] = ap_current
+        
         d_inf = 0
         o50 = np.where(np.isclose(self.overlaps, 0.5))
         o25 = np.where(np.isclose(self.overlaps, 0.25))
@@ -545,6 +583,8 @@ class InsSegEvaluator(HookBase):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
         scenes = []
+        m_iou = []
+
         for i, input_dict in enumerate(self.trainer.val_loader):
             assert (
                 len(input_dict["offset"]) == 1
@@ -556,6 +596,7 @@ class InsSegEvaluator(HookBase):
                 output_dict = self.trainer.model(input_dict)
 
             loss = output_dict["loss"]
+            m_iou.append(output_dict['mIoU'])
 
             segment = input_dict["segment"]
             instance = input_dict["instance"]
@@ -569,7 +610,7 @@ class InsSegEvaluator(HookBase):
                     input_dict["origin_offset"].int(),
                 )
                 idx = idx.cpu().flatten().long()
-                output_dict["pred_masks"] = output_dict["pred_masks"][:, idx]
+                output_dict["pred_masks"] = output_dict["pred_masks"][0].T[:, idx]
                 segment = input_dict["origin_segment"]
                 instance = input_dict["origin_instance"]
 
@@ -594,9 +635,11 @@ class InsSegEvaluator(HookBase):
         all_ap = ap_scores["all_ap"]
         all_ap_50 = ap_scores["all_ap_50%"]
         all_ap_25 = ap_scores["all_ap_25%"]
+        m_iou = torch.tensor(m_iou).mean() 
+
         self.trainer.logger.info(
-            "Val result: mAP/AP50/AP25 {:.4f}/{:.4f}/{:.4f}.".format(
-                all_ap, all_ap_50, all_ap_25
+            "Val result: mAP/AP50/AP25/mIoU {:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                all_ap, all_ap_50, all_ap_25, m_iou
             )
         )
         for i, label_name in enumerate(self.valid_class_names):
@@ -604,8 +647,8 @@ class InsSegEvaluator(HookBase):
             ap_50 = ap_scores["classes"][label_name]["ap50%"]
             ap_25 = ap_scores["classes"][label_name]["ap25%"]
             self.trainer.logger.info(
-                "Class_{idx}-{name} Result: AP/AP50/AP25 {AP:.4f}/{AP50:.4f}/{AP25:.4f}".format(
-                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25
+                "Class_{idx}-{name} Result: AP/AP50/AP25/mIoU {AP:.4f}/{AP50:.4f}/{AP25:.4f}/{mIoU:.4f}".format(
+                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25, mIoU=m_iou
                 )
             )
         current_epoch = self.trainer.epoch + 1
@@ -614,6 +657,7 @@ class InsSegEvaluator(HookBase):
             self.trainer.writer.add_scalar("val/mAP", all_ap, current_epoch)
             self.trainer.writer.add_scalar("val/AP50", all_ap_50, current_epoch)
             self.trainer.writer.add_scalar("val/AP25", all_ap_25, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = all_ap_50  # save for saver
         self.trainer.comm_info["current_metric_name"] = "AP50"  # save for saver

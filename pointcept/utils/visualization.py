@@ -89,6 +89,10 @@ def save_lines(
         logger.info(f"Save Lines to: {file_path}")
 
 def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+
+    masks = to_numpy(masks)
+    scores = to_numpy(scores)
+
     order = np.argsort(scores)[::-1]
     indices = np.arange(masks.shape[-1])
     keep = np.ones_like(indices, dtype=np.bool_)

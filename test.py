@@ -34,7 +34,7 @@ model = build_model(dict(
     hidden_dim=128,
     mask_dim=128))
 
-checkpoint = torch.load('/home/exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal2/model/model_last.pth')
+checkpoint = torch.load('/home/exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -153,11 +153,11 @@ for b in dataloader:
     print(1, len(scores), len(preds.T))
     
     keep = nms(preds, scores, 0.3)
-    print(keep)
     preds = preds[:, keep]
     scores = scores[keep]
+    ious = ious[keep]
   
-    
+    print(ious)
     print(preds.shape, coords.shape, gt.shape)
     
     save = np.concatenate([coords, preds, gt], -1)

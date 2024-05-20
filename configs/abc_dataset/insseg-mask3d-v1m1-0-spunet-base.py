@@ -182,7 +182,7 @@ hooks = [
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(
-        type="MyInsSegEvaluator",
+        type="InsSegEvaluator",
     ),
     dict(type="CheckpointSaver", save_freq=None),
 ]

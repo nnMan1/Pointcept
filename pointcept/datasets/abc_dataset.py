@@ -80,7 +80,7 @@ class ABCDataset(Dataset):
         for i in range(start, 6):
             dl += [f"p_{f.split('/')[0]}_{f.split('/')[-1]}_{i}.h5" for f in data_list]
 
-        return dl
+        return dl[:20]
 
     def get_data(self, idx):
 
