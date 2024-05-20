@@ -39,7 +39,7 @@ model = build_model(dict(
     hidden_dim=128,
     mask_dim=128))
 
-checkpoint = torch.load('exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
+checkpoint = torch.load('exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete4/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -133,10 +133,10 @@ for b in dataloader:
 
     # pred_ious = 1 / (1 + np.exp(-pred_ious))
 
-    # for sc, st, iu, piou in zip(scores, stability, ious, pred_ious):
-    #     print(sc, st, iu, piou)
+    for sc, st, iu, piou in zip(scores, stability, ious, pred_ious):
+        print(sc, st, iu, piou)
 
-    filter = (stability > 0.5) #& (pred_ious > 0.3)
+    filter = (stability > 0.6) #& (pred_ious > 0.3)
 
     preds = preds[:, filter]
     scores = scores[filter]

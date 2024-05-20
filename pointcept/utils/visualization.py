@@ -90,14 +90,14 @@ def save_lines(
 
 def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
 
-    masks = to_numpy(masks)
-    scores = to_numpy(scores)
+    # masks = to_numpy(masks)
+    # scores = to_numpy(scores)
     
-    order = np.argsort(scores)[::-1]
-    indices = np.arange(masks.shape[-1])
-    keep = np.ones_like(indices, dtype=np.bool_)
+    order = torch.argsort(-scores)
+    indices = torch.arange(masks.shape[-1])
+    keep = torch.ones_like(indices, dtype=torch.bool, device=masks.device)
     
-    masks = 1 / (1 + np.exp(-masks))
+    masks = 1 / (1 + torch.exp(-masks))
     masks[masks > 0.5] = 1
     masks[masks <= 0.5] = 0
     
@@ -105,11 +105,11 @@ def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
         if keep[order[i]]:
             mask = masks[:, order[i]]
             inter = (mask[:, None] * masks[:,  order]).sum(0)
-            union = np.logical_or(mask[:, None], masks[:,  order]).sum(0)
+            union = torch.logical_or(mask[:, None], masks[:,  order]).sum(0)
             iou = inter / union
             iou = iou[i+1:]
 
-            overlapped = np.nonzero(iou > iou_threshold)
+            overlapped = torch.nonzero(iou > iou_threshold).cpu()
             keep[order[overlapped + i + 1]] = 0
 
-    return np.where(keep)[0]
+    return torch.where(keep)[0]

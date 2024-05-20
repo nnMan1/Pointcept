@@ -8,7 +8,7 @@ empty_cache = True
 enable_amp = False
 evaluate = True
 # resume=True
-weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete2/model/model_last.pth'
+weight='exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -99,7 +99,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 200),
+            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -148,7 +148,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 200),
+            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -177,6 +177,6 @@ hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(type="MyInsSegEvaluator",),
+    dict(type="InsSegEvaluator",),
     dict(type="CheckpointSaver", save_freq=None),
 ]

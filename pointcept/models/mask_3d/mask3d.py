@@ -14,6 +14,7 @@ from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from pointcept.utils.misc import batch_iou
 from pointcept.utils.visualization import nms
+from .utils import calculate_stability_score
 
 import time
 
@@ -107,32 +108,39 @@ class Mask3D(nn.Module):
             biou = batch_iou((m.T > 0.5).float(), t.T)
             return_dict['bious'][i] = biou.max(-1)[0]
 
-            return_dict['stability_score'][i] = (m > 0.8).sum(0) / ((m>0.2).sum(0) + 1e-15)
+            return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
             return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
             
         return return_dict
 
-    def __inf_select_masks(self, masks, stabilities, pred_ious=None, offset=None):
+    def __inf_select_masks(self, masks, stabilities, ious=None, offset=None):
 
         pred_masks = []
         pred_stabilities = []
+        pred_ious_ = []
 
         batch_start = 0
 
         for i, batch_end in enumerate(offset):
             preds = masks[batch_start: batch_end]
             stability = stabilities[i]
+            iou = ious[i]
 
-            filter = (stability > 0.5) #& (pred_ious > 0.3)
+            st_tras = min(0.5, stability.max())
+
+            filter = (stability >= st_tras) #& (pred_ious > 0.3)
             preds = preds[:, filter]
             stability = stability[filter]
+            iou = iou[filter]
             
-            keep = nms(preds, stability, 0.3)
+            keep = nms(preds, stability, 0.3).cpu()
             preds = preds[:, keep]
             stability = stability[keep]
+            iou = iou[keep]
 
             pred_masks.append(preds)
             pred_stabilities.append(stability)
+            pred_ious_.append(iou.cpu())
 
             batch_start = batch_end
 
@@ -208,9 +216,7 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': len(self.hlevels) - i 
                 })
 
-                t_start = time.time()
                 matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
-                # print('Matching time: ', i, time.time() - t_start)
 
                 for mask, target in zip(matched_outputs, matched_targets):
                     axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
@@ -285,7 +291,7 @@ class Mask3D(nn.Module):
             return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
-            return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], pred_ious=pred_iou, offset=offset)
+            return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], ious=pred_iou, offset=offset)
                         
         return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_ce_loss']
 
@@ -562,10 +568,10 @@ class QueryRefinement(nn.Module):
         output = self.cross_attention(
                     queries.permute((1, 0, 2)),
                     src_pcd,
-                    # memory_mask=attn_mask.repeat_interleave(
-                    #     self.num_heads, dim=0
-                    # ).permute((0, 2, 1)),
-                    # memory_key_padding_mask=None,  # here we do not apply masking on padded region
+                    memory_mask=attn_mask.repeat_interleave(
+                        self.num_heads, dim=0
+                    ).permute((0, 2, 1)),
+                    memory_key_padding_mask=None,  # here we do not apply masking on padded region
                     pos=pos_encoding.permute((1, 0, 2)),
                     query_pos=query_pos_encoding,
                 )

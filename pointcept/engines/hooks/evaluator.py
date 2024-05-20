@@ -331,39 +331,45 @@ class InsSegEvaluator(HookBase):
             if i not in self.segment_ignore_index:
                 pred_instances[self.trainer.cfg.data.names[i]] = []
         instance_id = 0
-        # for i in range(len(pred["pred_classes"])):
-        #     if pred["pred_classes"][i] in self.segment_ignore_index:
-        #         continue
-        #     pred_inst = dict()
-        #     pred_inst["uuid"] = uuid4()
-        #     pred_inst["instance_id"] = instance_id
-        #     pred_inst["segment_id"] = pred["pred_classes"][i]
-        #     pred_inst["confidence"] = pred["pred_scores"][i]
-        #     pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
-        #     pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
-        #     pred_inst["void_intersection"] = np.count_nonzero(
-        #         np.logical_and(void_mask, pred_inst["mask"])
-        #     )
-        #     if pred_inst["vert_count"] < self.min_region_sizes:
-        #         continue  # skip if empty
-        #     segment_name = self.trainer.cfg.data.names[pred_inst["segment_id"]]
-        matched_gt = []
-        for gt_idx, gt_inst in enumerate(gt_instances[segment_name]):
-            intersection = np.count_nonzero(
-                np.logical_and(
-                    instance == gt_inst["instance_id"], pred_inst["mask"]
-                )
+
+
+        if not 'pred_classes' in pred.keys():
+            pred['pred_classes'] = np.zeros_like(pred["pred_scores"][0], dtype=np.int32)
+
+        for i in range(len(pred["pred_classes"])):
+            if pred["pred_classes"][i] in self.segment_ignore_index:
+                continue
+            pred_inst = dict()
+            pred_inst["uuid"] = uuid4()
+            pred_inst["instance_id"] = instance_id
+            pred_inst["segment_id"] = pred["pred_classes"][i]
+            pred_inst["confidence"] = pred["pred_scores"][0][i]
+            pred_inst["mask"] = np.not_equal(pred["pred_masks"][i].cpu(), 0)
+            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"].cpu())
+            pred_inst["void_intersection"] = np.count_nonzero(
+                np.logical_and(void_mask, pred_inst["mask"])
             )
-            if intersection > 0:
-                gt_inst_ = gt_inst.copy()
-                pred_inst_ = pred_inst.copy()
-                gt_inst_["intersection"] = intersection
-                pred_inst_["intersection"] = intersection
-                matched_gt.append(gt_inst_)
-                gt_inst["matched_pred"].append(pred_inst_)
-        pred_inst["matched_gt"] = matched_gt
-        pred_instances[segment_name].append(pred_inst)
-        instance_id += 1
+            if pred_inst["vert_count"] < self.min_region_sizes:
+                continue  # skip if empty
+            segment_name = self.trainer.cfg.data.names[pred_inst["segment_id"]]
+            matched_gt = []
+            for gt_idx, gt_inst in enumerate(gt_instances[segment_name]):
+                intersection = np.count_nonzero(
+                    np.logical_and(
+                        instance == gt_inst["instance_id"], pred_inst["mask"]
+                    )
+                )
+                if intersection > 0:
+                    gt_inst_ = gt_inst.copy()
+                    pred_inst_ = pred_inst.copy()
+                    gt_inst_["intersection"] = intersection
+                    pred_inst_["intersection"] = intersection
+                    matched_gt.append(gt_inst_)
+                    gt_inst["matched_pred"].append(pred_inst_)
+            pred_inst["matched_gt"] = matched_gt
+            pred_instances[segment_name].append(pred_inst)
+            instance_id += 1
+
         return gt_instances, pred_instances
 
     def evaluate_matches(self, scenes):
@@ -577,6 +583,8 @@ class InsSegEvaluator(HookBase):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
         scenes = []
+        m_iou = []
+
         for i, input_dict in enumerate(self.trainer.val_loader):
             assert (
                 len(input_dict["offset"]) == 1
@@ -588,6 +596,7 @@ class InsSegEvaluator(HookBase):
                 output_dict = self.trainer.model(input_dict)
 
             loss = output_dict["loss"]
+            m_iou.append(output_dict['mIoU'])
 
             segment = input_dict["segment"]
             instance = input_dict["instance"]
@@ -626,9 +635,11 @@ class InsSegEvaluator(HookBase):
         all_ap = ap_scores["all_ap"]
         all_ap_50 = ap_scores["all_ap_50%"]
         all_ap_25 = ap_scores["all_ap_25%"]
+        m_iou = torch.tensor(m_iou).mean() 
+
         self.trainer.logger.info(
-            "Val result: mAP/AP50/AP25 {:.4f}/{:.4f}/{:.4f}.".format(
-                all_ap, all_ap_50, all_ap_25
+            "Val result: mAP/AP50/AP25/mIoU {:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                all_ap, all_ap_50, all_ap_25, m_iou
             )
         )
         for i, label_name in enumerate(self.valid_class_names):
@@ -636,8 +647,8 @@ class InsSegEvaluator(HookBase):
             ap_50 = ap_scores["classes"][label_name]["ap50%"]
             ap_25 = ap_scores["classes"][label_name]["ap25%"]
             self.trainer.logger.info(
-                "Class_{idx}-{name} Result: AP/AP50/AP25 {AP:.4f}/{AP50:.4f}/{AP25:.4f}".format(
-                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25
+                "Class_{idx}-{name} Result: AP/AP50/AP25/mIoU {AP:.4f}/{AP50:.4f}/{AP25:.4f}/{mIoU:.4f}".format(
+                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25, mIoU=m_iou
                 )
             )
         current_epoch = self.trainer.epoch + 1
@@ -646,6 +657,7 @@ class InsSegEvaluator(HookBase):
             self.trainer.writer.add_scalar("val/mAP", all_ap, current_epoch)
             self.trainer.writer.add_scalar("val/AP50", all_ap_50, current_epoch)
             self.trainer.writer.add_scalar("val/AP25", all_ap_25, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = all_ap_50  # save for saver
         self.trainer.comm_info["current_metric_name"] = "AP50"  # save for saver
