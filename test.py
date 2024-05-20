@@ -39,7 +39,7 @@ model = build_model(dict(
     hidden_dim=128,
     mask_dim=128))
 
-checkpoint = torch.load('exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
+checkpoint = torch.load('exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -56,7 +56,7 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = Cetim(
+ds = ABCDataset(
         split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -154,15 +154,15 @@ for b in dataloader:
     prec_rec = MulticlassPrecisionRecallCurve()
     prec_rec.update(pred['matched_masks'][0], pred['matched_targets'][0])  
 
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 0].cpu().numpy(), pred['matched_masks'][0][:, 0].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 1].cpu().numpy(), pred['matched_masks'][0][:, 1].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 2].cpu().numpy(), pred['matched_masks'][0][:, 2].cpu().numpy()))
-    print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 3].cpu().numpy(), pred['matched_masks'][0][:, 3].cpu().numpy()))
+    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 0].cpu().numpy(), pred['matched_masks'][0][:, 0].cpu().numpy()))
+    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 1].cpu().numpy(), pred['matched_masks'][0][:, 1].cpu().numpy()))
+    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 2].cpu().numpy(), pred['matched_masks'][0][:, 2].cpu().numpy()))
+    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 3].cpu().numpy(), pred['matched_masks'][0][:, 3].cpu().numpy()))
     
     recs, precs, tres = prec_rec.compute()
 
-    for p,r,t in zip(precs, recs, tres):
-        print(((p[:-1] - p[1:]) *r[:-1]).sum())
+    # for p,r,t in zip(precs, recs, tres):
+    #     print(((p[:-1] - p[1:]) *r[:-1]).sum())
 
     save = np.concatenate([coords, preds, gt], -1)
     np.save(f'samples/{str(b["id"].cpu().numpy())}.npy', save)
