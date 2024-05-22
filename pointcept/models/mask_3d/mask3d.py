@@ -95,7 +95,7 @@ class Mask3D(nn.Module):
         return_dict = {}
         
         m = masks['outputs_mask'].clone()
-        return_dict['pred_score'] = torch.zeros(len(offset), m.shape[1])
+        return_dict['pred_scores'] = torch.zeros(len(offset), m.shape[1])
         return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
         return_dict['bious'] =  torch.zeros(len(offset), m.shape[1], device='cuda')
         batch_start = 0
@@ -109,7 +109,7 @@ class Mask3D(nn.Module):
             return_dict['bious'][i] = biou.max(-1)[0]
 
             return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
-            return_dict['pred_score'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
+            return_dict['pred_scores'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
             
         return return_dict
 
@@ -242,7 +242,7 @@ class Mask3D(nn.Module):
                 })
         
         t_start = time.time()
-        matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+        matched_outputs, matched_targets, matched_ids = self.matcher(masks, data, offset)
         # print('Matching time: ', time.time() - t_start)
         intersections = []
         unions = []
@@ -292,7 +292,10 @@ class Mask3D(nn.Module):
             return_dict['masks'] = masks['outputs_mask']
             return_dict['matched_targets'] = matched_targets
             return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], ious=pred_iou, offset=offset)
-                        
+            # return_dict['pred_masks'] = matched_outputs
+            # return_dict['pred_scores'][0] = return_dict['pred_scores'][0][matched_ids[0][0]]
+            return_dict['matched_ious'] = return_dict['bious'][0][matched_ids[0][0]]
+
         return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_ce_loss']
 
         torch.cuda.empty_cache()

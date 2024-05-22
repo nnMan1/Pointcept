@@ -5,6 +5,7 @@ docker run -d -ti \
 		  --shm-size 8G \
           	  -v $(pwd):/home \
 			  -v /home/velibor/Data/scannet:/home/data/scannet \
+		  	  -v /home/velibor/Data/scannet_instance_seg:/home/data/scannet_instance_seg \
 			  -v /home/velibor/Data/AssemblyRepository/chunks/:/home/data/assembly/raw \
 			  -v /home/velibor/Data/AssemblyRepository/scanns/:/home/data/assembly/scanns \
 			  -v /home/velibor/Data/ABCDataset/scanns/:/home/data/ABCDataset/scanns \

@@ -69,6 +69,7 @@ class Cetim(Dataset):
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
+        # data = o3d.io.read_triangle_mesh(data).sample_points_uniformly(50000)
         data = o3d.io.read_point_cloud(data)
         
         # print(os.path.join(self.data_root, 'scanns', data))

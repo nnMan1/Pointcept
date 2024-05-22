@@ -39,7 +39,7 @@ model = build_model(dict(
     hidden_dim=128,
     mask_dim=128))
 
-checkpoint = torch.load('exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete4/model/model_last.pth')
+checkpoint = torch.load('exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -56,7 +56,7 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = ABCDataset(
+ds = Cetim(
         split='val',
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -122,47 +122,30 @@ for b in dataloader:
 
     coords = b['coord'].cpu().numpy()
 
-    pred_ious = pred['pred_iou'][0].cpu().numpy()
-    scores = pred['pred_score'][0].cpu().numpy()
-    stability = pred['stability_score'][0].cpu().numpy()
-    ious = pred['bious'][0].cpu().numpy()
-    # pred_ious = pred['bious'][0].cpu().numpy() 
-    preds = pred['masks'].cpu().numpy()
+    # print(pred.keys())
+    # pred_ious = pred['pred_iou'][0].cpu().numpy()
+    # scores = pred['stability_score'][0].cpu().numpy()
+    # stability = pred['stability_score'][0].cpu().numpy()
+    # ious = pred['bious'][0].cpu().numpy()
+    # # pred_ious = pred['bious'][0].cpu().numpy() 
+    # preds = pred['masks'].cpu().numpy()
 
-    preds_prob = 1 / (1 + np.exp(-preds))
+    # print(pred['matched_ious'])
+    # exit(0)
 
-    # pred_ious = 1 / (1 + np.exp(-pred_ious))
+    # preds_prob = 1 / (1 + np.exp(-preds))
 
-    for sc, st, iu, piou in zip(scores, stability, ious, pred_ious):
-        print(sc, st, iu, piou)
 
-    filter = (stability > 0.6) #& (pred_ious > 0.3)
-
-    preds = preds[:, filter]
-    scores = scores[filter]
-    ious = ious[filter]
-    stability = stability[filter]
-    pred_ious = pred_ious[filter]
-
-    keep = nms(preds, stability, 0.3)
-    preds = preds[:, keep]
-    scores = scores[keep]
-    
-    # preds = pred['matched_masks'][0].cpu().numpy()
+    preds = pred['pred_masks'][0].cpu().numpy()
     gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
 
     prec_rec = MulticlassPrecisionRecallCurve()
     prec_rec.update(pred['matched_masks'][0], pred['matched_targets'][0])  
 
-    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 0].cpu().numpy(), pred['matched_masks'][0][:, 0].cpu().numpy()))
-    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 1].cpu().numpy(), pred['matched_masks'][0][:, 1].cpu().numpy()))
-    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 2].cpu().numpy(), pred['matched_masks'][0][:, 2].cpu().numpy()))
-    # print(average_precision_score(F.one_hot(pred['matched_targets'][0])[:, 3].cpu().numpy(), pred['matched_masks'][0][:, 3].cpu().numpy()))
-    
     recs, precs, tres = prec_rec.compute()
 
-    # for p,r,t in zip(precs, recs, tres):
-    #     print(((p[:-1] - p[1:]) *r[:-1]).sum())
+    for p,r,t in zip(precs, recs, tres):
+        print(((p[:-1] - p[1:]) *r[:-1]).sum())
 
     save = np.concatenate([coords, preds, gt], -1)
     np.save(f'samples/{str(b["id"].cpu().numpy())}.npy', save)

@@ -61,7 +61,7 @@ scheduler = dict(type="PolyLR")
 
 # dataset settings
 dataset_type = "ScanNetDataset"
-data_root = "data/scannet"
+data_root = "data/scannet_instance_seg"
 
 data = dict(
     num_classes=num_classes,

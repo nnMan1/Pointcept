@@ -33,8 +33,8 @@ class Args:
 
 def main():
 
-    # args = default_argument_parser().parse_args()
-    args = Args()
+    args = default_argument_parser().parse_args()
+    # args = Args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(

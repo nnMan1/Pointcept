@@ -6,8 +6,8 @@ num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = False
-evaluate = True
-weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_dice_loss+focall_loss/model/model_last.pth'
+resume=True
+weight='/home/exp/abc_dataset/insseg-pointgroup-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -17,34 +17,23 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="Mask-3D",
+    type="PG-v1m1",
     backbone=dict(
-        type="MinkUNet34C",
-        in_channels = 3,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
+        type="SpUNet-v1m1",
+        in_channels=3,
+        num_classes=0,
+        channels=(32, 64, 128, 256, 256, 128, 96, 96),
+        layers=(2, 3, 4, 6, 2, 2, 2, 2),
     ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
-        normalize=True,
-    ),
-    mask_module_config=dict(
-        num_classes=1, 
-        return_attn_masks=True, 
-        use_seg_masks=False
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128
+    backbone_out_channels=96,
+    semantic_num_classes=num_classes,
+    semantic_ignore_index=-1,
+    segment_ignore_index=segment_ignore_index,
+    instance_ignore_index=-1,
+    cluster_thresh=1.5,
+    cluster_closed_points=300,
+    cluster_propose_points=100,
+    cluster_min_points=50,
 )
 
 # scheduler settings
@@ -165,10 +154,10 @@ hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    # dict(
-    #     type="InsSegEvaluator",
-    #     segment_ignore_index=segment_ignore_index,
-    #     instance_ignore_index=-1,
-    # ),
+    dict(
+        type="InsSegEvaluator",
+        segment_ignore_index=segment_ignore_index,
+        instance_ignore_index=-1,
+    ),
     dict(type="CheckpointSaver", save_freq=None),
 ]
