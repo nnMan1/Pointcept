@@ -52,16 +52,17 @@ def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
 
     pos = F.binary_cross_entropy_with_logits(
         inputs, torch.ones_like(inputs), reduction="none"
-    )
+    ) / hw
+
     neg = F.binary_cross_entropy_with_logits(
         inputs, torch.zeros_like(inputs), reduction="none"
-    )
+    ) / hw
 
     loss = torch.einsum("nc,mc->nm", pos, targets) + torch.einsum(
         "nc,mc->nm", neg, (1 - targets)
     )
 
-    return loss / hw
+    return loss
 
 
 batch_sigmoid_ce_loss_jit = torch.jit.script(
@@ -83,6 +84,7 @@ class HungarianMatcher(nn.Module):
         cost_mask: float = 1,
         cost_dice: float = 1,
         num_points: int = 0,
+        instance_ignore_index: int = -1
     ):
         """Creates the matcher
 
@@ -96,6 +98,8 @@ class HungarianMatcher(nn.Module):
         self.cost_mask = cost_mask
         self.cost_dice = cost_dice
 
+        self.instance_ignore_index = instance_ignore_index
+
         assert (
             cost_class != 0 or cost_mask != 0 or cost_dice != 0
         ), "all costs cant be 0"
@@ -104,104 +108,8 @@ class HungarianMatcher(nn.Module):
 
         # self.p = Pool(128)
 
-    @torch.no_grad()
-    def memory_efficient_forward(self, outputs, targets, mask_type):
-        """More memory-friendly matching"""
-        bs, num_queries = outputs["pred_logits"].shape[:2]
-
-        Cs = []
-        indices = []
-
-        # Iterate through batch size
-        for b in range(bs):
-
-            out_prob = outputs["pred_logits"][b].softmax(
-                -1
-            )  # [num_queries, num_classes]
-            tgt_ids = targets[b]["labels"].clone()
-
-            # Compute the classification cost. Contrary to the loss, we don't use the NLL,
-            # but approximate it in 1 - proba[target class].
-            # The 1 is a constant that doesn't change the matching, it can be ommitted.
-            filter_ignore = tgt_ids == 253
-            tgt_ids[filter_ignore] = 0
-            cost_class = -out_prob[:, tgt_ids]
-            cost_class[
-                :, filter_ignore
-            ] = (
-                -1.0
-            )  # for ignore classes pretend perfect match ;) TODO better worst class match?
-
-            out_mask = outputs["pred_masks"][
-                b
-            ].T  # [num_queries, H_pred, W_pred]
-            # gt masks are already padded when preparing target
-            tgt_mask = targets[b][mask_type].to(out_mask)
-
-            if self.num_points != -1:
-                point_idx = torch.randperm(
-                    tgt_mask.shape[1], device=tgt_mask.device
-                )[: int(self.num_points * tgt_mask.shape[1])]
-                # point_idx = torch.randint(0, tgt_mask.shape[1], size=(self.num_points,), device=tgt_mask.device)
-            else:
-                # sample all points
-                point_idx = torch.arange(
-                    tgt_mask.shape[1], device=tgt_mask.device
-                )
-
-            # out_mask = out_mask[:, None]
-            # tgt_mask = tgt_mask[:, None]
-            # all masks share the same set of points for efficient matching!
-            # point_coords = torch.rand(1, self.num_points, 2, device=out_mask.device)
-            # get gt labels
-            # tgt_mask = point_sample(
-            #     tgt_mask,
-            #     point_coords.repeat(tgt_mask.shape[0], 1, 1),
-            #     align_corners=False,
-            # ).squeeze(1)
-
-            # out_mask = point_sample(
-            #     out_mask,
-            #     point_coords.repeat(out_mask.shape[0], 1, 1),
-            #     align_corners=False,
-            # ).squeeze(1)
-
-            with autocast(enabled=False):
-                out_mask = out_mask.float()
-                tgt_mask = tgt_mask.float()
-                # Compute the focal loss between masks
-                cost_mask = batch_sigmoid_ce_loss(
-                    out_mask[:, point_idx], tgt_mask[:, point_idx]
-                )
-
-                # Compute the dice loss betwen masks
-                cost_dice = batch_dice_loss(
-                    out_mask[:, point_idx], tgt_mask[:, point_idx]
-                )
-
-            # Final cost matrix
-            C = (
-                self.cost_mask * cost_mask
-                + self.cost_class * cost_class
-                + self.cost_dice * cost_dice
-            )
-            C = C.reshape(num_queries, -1).cpu()
-
-            Cs.append(C)
-            
-        with Pool(5) as p:
-            indices = p.map(linear_sum_assignment, Cs)
-
-        return [
-            (
-                torch.as_tensor(i, dtype=torch.int64),
-                torch.as_tensor(j, dtype=torch.int64),
-            )
-            for i, j in indices
-        ]
-    
     # @torch.no_grad()
-    def my_optimized_forward(self, ouptups, targets, offset):
+    def my_optimized_forward(self, outputs, targets, offset):
 
         start_time = time.time()
         batch_start = 0
@@ -209,27 +117,46 @@ class HungarianMatcher(nn.Module):
         indices = []
         matched_outputs = []
         matched_targets = []
+        matched_sem_outputs = []
+        matched_sem_targets = []
 
         Cs = []
-
         for batch_end in offset:
 
             with torch.no_grad():
-                out_mask = ouptups['outputs_mask'][batch_start:batch_end].T
+                out_mask = outputs['outputs_mask'][batch_start:batch_end].T
                 tgt_mask = targets['instance'][batch_start:batch_end]
-                tgt_mask = F.one_hot(tgt_mask).T
+                tgt_segm = targets['segment'][batch_start:batch_end]
                 
-                out_mask = out_mask.float()
+                filter = tgt_mask != self.instance_ignore_index
+
+                if filter.sum() == 0:
+                    indices.append((None, None))
+                    continue
+                
+                # out_mask = out_mask[:, filter]
+                # tgt_mask = tgt_mask[filter]
+                # tgt_segm = tgt_segm[filter]                
+                
+                tgt_mask = F.one_hot(tgt_mask+1).T[1:]
                 tgt_mask = tgt_mask.float()
+
                 # Compute the focal loss between masks
                 cost_mask = batch_sigmoid_ce_loss_jit(
                     out_mask, tgt_mask
                 )
 
+
                 # Compute the dice loss betwen masks
                 cost_dice = batch_dice_loss_jit(
                     out_mask, tgt_mask
                 )
+
+                if torch.isinf(cost_mask).sum() > 0 or torch.isnan(cost_mask).sum() > 0:
+                    pass
+                    cost_mask = batch_sigmoid_ce_loss(
+                        out_mask, tgt_mask
+                    )
 
                 C = (
                     self.cost_mask * cost_mask
@@ -237,37 +164,54 @@ class HungarianMatcher(nn.Module):
                     + self.cost_dice * cost_dice
                 )
 
+
                 C = C.cpu().numpy()
-                Cs.append(C)
                 indices.append(linear_sum_assignment(C))
 
             batch_start = batch_end
-
-
-        # indices = self.p.map(linear_sum_assignment, Cs)
 
         batch_start = 0
 
         mapping_start = time.time()
 
         for i, batch_end in enumerate(offset):
+        
             pred_ids, tgt_ids,  = indices[i]
+            out_mask = outputs['outputs_mask'][batch_start:batch_end]
+            out_seg = outputs['outputs_class'][i]
+            tgt_mask = targets['instance'][batch_start:batch_end]
+            tgt_segm = targets['segment'][batch_start:batch_end]
 
-            p = ouptups['outputs_mask'][batch_start:batch_end]
-            g = F.one_hot(targets['instance'][batch_start:batch_end])
+            filter = tgt_mask != self.instance_ignore_index
 
-            p = p[:, pred_ids]
-            g = g[:, tgt_ids].argmax(-1)
+            if filter.sum() == 0:
+                continue
+
+            # out_mask = out_mask[filter]
+            # tgt_mask = tgt_mask[filter]
+            # tgt_segm = tgt_segm[filter]                
             
-            matched_outputs.append(p)
-            matched_targets.append(g)
+            tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
+
+            out_mask = out_mask[:, pred_ids]
+            out_seg = out_seg[pred_ids]
+
+            tmp = tgt_mask[:, tgt_ids].argmax(0)
+            tgt_segm = tgt_segm[tmp]
+
+            tgt_mask = tgt_mask[:, tgt_ids]#.argmax(-1)
+                        
+            matched_outputs.append(out_mask)
+            matched_targets.append(tgt_mask)
+            matched_sem_outputs.append(out_seg)
+            matched_sem_targets.append(tgt_segm)
 
             batch_start = batch_end
             
         # print('Mapping time: ', time.time() - mapping_start)      
         # print('HM time: ', time.time() - start_time)      
         # print('Data_len: ', len(Cs))      
-        return matched_outputs, matched_targets, indices
+        return matched_outputs, matched_targets, matched_sem_outputs, matched_sem_targets, indices
 
     # @torch.no_grad()
     def forward(self, outputs, targets, offset):

@@ -4,7 +4,7 @@ os.system("rm -r samples/*.npy")
 
 import torch
 import numpy as np
-from pointcept.datasets import ABCDataset, Assembly, Cetim
+from pointcept.datasets import ABCDataset, Assembly, Cetim, ScanNetDataset
 from pointcept.datasets import transform 
 from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from functools import partial
@@ -23,7 +23,7 @@ from torcheval.metrics import MulticlassPrecisionRecallCurve
 model = build_model(dict(
     type='Mask-3D',
     backbone=dict(
-        type='MinkUNet34C', in_channels=3, out_channels=128, out_fpn=True),
+        type='MinkUNet34C', in_channels=6, out_channels=128, out_fpn=True),
     position_encoding=dict(
         type='PositionEmbeddingCoordsSine',
         pos_type='fourier',
@@ -31,15 +31,15 @@ model = build_model(dict(
         gauss_scale=1,
         normalize=True),
     mask_module_config=dict(
-        num_classes=1, return_attn_masks=True, use_seg_masks=False,         
-        ),
+        num_classes=20, return_attn_masks=True, use_seg_masks=False),
     query_refinement_config=dict(pre_norm=False, num_heads=8, dropout=0),
     num_decoders=1,
     dim_feedforward=1024,
     hidden_dim=128,
-    mask_dim=128))
+    mask_dim=128,
+    instance_ignore_index=-1))
 
-checkpoint = torch.load('exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3/model/model_last.pth')
+checkpoint = torch.load('exp/scannet/insseg-mask3d-1m1-0-spunet-base_sparse/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -56,99 +56,85 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = Cetim(
+ds = ScanNetDataset(
         split='val',
+        data_root='data/scannet_instance_seg',
         transform=[
+            # dict(type="NormalizeCoord"),
             dict(type='CenterShift', apply_z=True),
             dict(
-                type='RandomDropout',
-                dropout_ratio=0.2,
-                dropout_application_ratio=0.5),
-            dict(
-                type='RandomRotate',
-                angle=[-1, 1],
-                axis='z',
-                center=[0, 0, 0],
-                p=0.5),
-            dict(
-                type='RandomRotate',
-                angle=[-0.015625, 0.015625],
-                axis='x',
-                p=0.5),
-            dict(
-                type='RandomRotate',
-                angle=[-0.015625, 0.015625],
-                axis='y',
-                p=0.5),
-            dict(type='NormalizeCoord'),
-            dict(type='RandomScale', scale=[0.9, 1.1]),
-            dict(type='RandomFlip', p=0.8),
-            dict(type='RandomJitter', sigma=0.001, clip=0.02),
+                type='Copy',
+                keys_dict=dict(
+                    coord='origin_coord',
+                    segment='origin_segment',
+                    instance='origin_instance')),
             dict(
                 type='GridSample',
                 grid_size=0.02,
                 hash_type='fnv',
                 mode='train',
                 return_grid_coord=True,
-                keys=('coord', 'segment', 'instance')),
+                keys=('coord', 'color', 'normal', 'segment', 'instance')),
+            dict(type='CenterShift', apply_z=False),
+            dict(type='NormalizeColor'),
             dict(
                 type='InstanceParser',
-                segment_ignore_index=(-1, ),
+                segment_ignore_index=(-1, 0, 1),
                 instance_ignore_index=-1),
-            dict(type='FPSSeed', n_points=200),
+            dict(type='FPSSeed', n_points=100),
             dict(type='ToTensor'),
             dict(
                 type='Collect',
                 keys=('coord', 'grid_coord', 'segment', 'instance',
-                      'instance_centroid', 'bbox', 'seed_ids', 'id', 'path'),
-                feat_keys='grid_coord')
+                      'origin_coord', 'origin_segment', 'origin_instance',
+                      'instance_centroid', 'bbox', 'seed_ids'),
+                feat_keys=('color', 'normal'),
+                offset_keys_dict=dict(
+                    offset='coord', origin_offset='origin_coord'))
         ],
-        test_mode=False
-)
+        test_mode=False)
 
 dataloader = torch.utils.data.DataLoader(ds,
                                          batch_size=1,
                                         collate_fn=partial(point_collate_fn),
                                         )
-for b in dataloader:
+for id, b in enumerate(dataloader):
     with torch.no_grad():
         for key in b.keys():
             try:
                 b[key] = b[key].cuda()
             except:
                 pass
-            
         pred = model(b)
 
+    filter = b['instance'] != -1
     coords = b['coord'].cpu().numpy()
 
     # print(pred.keys())
-    # pred_ious = pred['pred_iou'][0].cpu().numpy()
-    # scores = pred['stability_score'][0].cpu().numpy()
+    pred_ious = pred['pred_iou'][0].cpu().numpy()
+    scores = pred['stability_score'][0].cpu().numpy()
     # stability = pred['stability_score'][0].cpu().numpy()
-    # ious = pred['bious'][0].cpu().numpy()
+    ious = pred['bious'][0].cpu().numpy()
     # # pred_ious = pred['bious'][0].cpu().numpy() 
     # preds = pred['masks'].cpu().numpy()
 
     # print(pred['matched_ious'])
     # exit(0)
 
+    for sc, piou, giou in zip(scores, pred_ious, ious):
+        print(sc, piou, giou)
+
     # preds_prob = 1 / (1 + np.exp(-preds))
 
 
-    preds = pred['pred_masks'][0].cpu().numpy()
-    gt = pred['matched_targets'][0].unsqueeze(-1).cpu().numpy()
+    preds = pred['pred_masks'].T.cpu().numpy()
+    gt = pred['matched_targets'][0].argmax(-1, keepdim=True).cpu().numpy()
+    # gt = np.zeros((len(preds), 1))
 
-    prec_rec = MulticlassPrecisionRecallCurve()
-    prec_rec.update(pred['matched_masks'][0], pred['matched_targets'][0])  
-
-    recs, precs, tres = prec_rec.compute()
-
-    for p,r,t in zip(precs, recs, tres):
-        print(((p[:-1] - p[1:]) *r[:-1]).sum())
+    print(preds.shape, gt.shape, coords.shape)
 
     save = np.concatenate([coords, preds, gt], -1)
-    np.save(f'samples/{str(b["id"].cpu().numpy())}.npy', save)
+    np.save(f'samples/{id}.npy', save)
     
   
     

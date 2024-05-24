@@ -194,19 +194,19 @@ class DiceLoss(nn.Module):
         # [C, N] -> [N, C]
         pred = pred.transpose(0, 1).contiguous()
         # (B, d_1, d_2, ..., d_k) --> (B * d_1 * d_2 * ... * d_k,)
-        target = target.view(-1).contiguous()
+        # target = target.view(-1).contiguous()
         assert pred.size(0) == target.size(
             0
         ), "The shape of pred doesn't match the shape of target"
-        valid_mask = target != self.ignore_index
-        target = target[valid_mask]
-        pred = pred[valid_mask]
+        # valid_mask = target != self.ignore_index
+        # target = target[valid_mask]
+        # pred = pred[valid_mask]
 
         pred = F.sigmoid(pred)
         num_classes = pred.shape[1]
-        target = F.one_hot(
-            torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
-        )
+        # target = F.one_hot(
+        #     torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
+        # )
         
         numerator = 2 * (pred * target).sum(0) + self.smooth
         denominator = pred.sum(0) + target.sum(0) + self.smooth

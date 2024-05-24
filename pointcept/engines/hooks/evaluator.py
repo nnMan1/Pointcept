@@ -272,6 +272,11 @@ class InsSegEvaluator(HookBase):
             pred_inst["instance_id"] = instance_id
             pred_inst["segment_id"] = pred["pred_classes"][i]
             pred_inst["confidence"] = pred["pred_scores"][i]
+
+            if pred["pred_masks"][i].dtype in (torch.float32, np.float32):
+                pred["pred_masks"][i] = 1 / (1 + np.exp(-pred["pred_masks"][i]))
+                pred["pred_masks"][i] = pred["pred_masks"][i] > 0.5
+ 
             pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
             pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
             pred_inst["void_intersection"] = np.count_nonzero(

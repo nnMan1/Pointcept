@@ -12,16 +12,24 @@ from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
-from pointcept.utils.misc import batch_iou
-from pointcept.utils.visualization import nms
-from .utils import calculate_stability_score
+
+from .utils import *
 
 import time
 
 @MODELS.register_module("Mask-3D")
 class Mask3D(nn.Module):
     
-    def __init__(self, backbone, position_encoding, num_decoders, dim_feedforward, mask_dim, hidden_dim, mask_module_config, query_refinement_config):
+    def __init__(self, 
+                 backbone, 
+                 position_encoding, 
+                 num_decoders, 
+                 dim_feedforward, 
+                 mask_dim, 
+                 hidden_dim,
+                 instance_ignore_index, 
+                 mask_module_config, 
+                 query_refinement_config):
 
         super().__init__()
 
@@ -57,10 +65,11 @@ class Mask3D(nn.Module):
         
         self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
         
-        self.matcher = HungarianMatcher()
+        self.matcher = HungarianMatcher(instance_ignore_index)
         # self.matcher = MyMatcher()
 
-        self.loss_ce = nn.BCEWithLogitsLoss()
+        # self.loss_ce = nn.BCEWithLogitsLoss()
+        self.loss_ce = nn.CrossEntropyLoss()
         self.loss_dice = DiceLoss()
         self.loss_focal = BinaryFocalLoss()
         
@@ -89,62 +98,6 @@ class Mask3D(nn.Module):
                 pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
 
         return pos_encodings_pcd
-
-    def __compute_stats(self, masks, data, offset):
-        
-        return_dict = {}
-        
-        m = masks['outputs_mask'].clone()
-        return_dict['pred_scores'] = torch.zeros(len(offset), m.shape[1])
-        return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
-        return_dict['bious'] =  torch.zeros(len(offset), m.shape[1], device='cuda')
-        batch_start = 0
-        
-        for i, batch_end in enumerate(offset):
-            m = masks['outputs_mask'][batch_start:batch_end]
-            m = F.sigmoid(m)
-            t = data['instance'][batch_start:batch_end]
-            t = F.one_hot(t).float()
-            biou = batch_iou((m.T > 0.5).float(), t.T)
-            return_dict['bious'][i] = biou.max(-1)[0]
-
-            return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
-            return_dict['pred_scores'][i] = (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
-            
-        return return_dict
-
-    def __inf_select_masks(self, masks, stabilities, ious=None, offset=None):
-
-        pred_masks = []
-        pred_stabilities = []
-        pred_ious_ = []
-
-        batch_start = 0
-
-        for i, batch_end in enumerate(offset):
-            preds = masks[batch_start: batch_end]
-            stability = stabilities[i]
-            iou = ious[i]
-
-            st_tras = min(0.5, stability.max())
-
-            filter = (stability >= st_tras) #& (pred_ious > 0.3)
-            preds = preds[:, filter]
-            stability = stability[filter]
-            iou = iou[filter]
-            
-            keep = nms(preds, stability, 0.3).cpu()
-            preds = preds[:, keep]
-            stability = stability[keep]
-            iou = iou[keep]
-
-            pred_masks.append(preds)
-            pred_stabilities.append(stability)
-            pred_ious_.append(iou.cpu())
-
-            batch_start = batch_end
-
-        return pred_masks, pred_stabilities
     
     def forward(self, data):
         
@@ -207,7 +160,7 @@ class Mask3D(nn.Module):
 
         axiliary_losses = [], [], [], []
 
-        for _ in range(1):
+        for _ in range(3):
             for i in self.hlevels:
                 masks = self.mask_module({
                     'query_feat': queries,
@@ -216,12 +169,13 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': len(self.hlevels) - i 
                 })
 
-                matched_outputs, matched_targets, _ = self.matcher(masks, data, offset)
+                matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, _ = self.matcher(masks, data, offset)
 
-                for mask, target in zip(matched_outputs, matched_targets):
-                    axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+                for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
+                    # axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+                    axiliary_losses[0].append(self.loss_ce(p_seg, t_seg))
                     axiliary_losses[1].append(self.loss_dice(mask, target))
-                    axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
+                    axiliary_losses[2].append(self.loss_focal(mask, target.float()))
 
                 pos_encoding=torch.cat(pos_encodings_pcd[i])
 
@@ -241,32 +195,34 @@ class Mask3D(nn.Module):
                     'num_pooling_steps': 0
                 })
         
+
         t_start = time.time()
-        matched_outputs, matched_targets, matched_ids = self.matcher(masks, data, offset)
+        matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, _ = self.matcher(masks, data, offset)
         # print('Matching time: ', time.time() - t_start)
         intersections = []
         unions = []
 
-        for mask, target in zip(matched_outputs, matched_targets):
-            axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+
+        for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
+            # axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
+            axiliary_losses[0].append(self.loss_ce(p_seg, t_seg))
             axiliary_losses[1].append(self.loss_dice(mask, target))
-            axiliary_losses[2].append(self.loss_focal(mask, F.one_hot(target, mask.shape[1]).float()))
+            axiliary_losses[2].append(self.loss_focal(mask, target.float()))
             
-            target = F.one_hot(target, mask.shape[1])
             intersections.append(((mask > 0.5) * target).sum(0))
             unions.append(((mask > 0.5).sum(0) + target.sum(0)) - intersections[-1])
             
             ious = intersections[-1] / unions[-1]
             axiliary_losses[3].append(ious.mean())
             
-        pred_iou = self.iou_head(
-                        mask_features.features, #.clone().detach(),
-                        masks['attn_mask'].features, #.clone().detach(),
-                        torch.cat(pos_encodings_pcd[-1]),
-                        offset.cpu(),
-                        queries, #.clone().detach(),
-                        query_pos, #.clone().detach() 
-                    )
+        # pred_iou = self.iou_head(
+        #                 mask_features.features, #.clone().detach(),
+        #                 masks['attn_mask'].features, #.clone().detach(),
+        #                 torch.cat(pos_encodings_pcd[-1]),
+        #                 offset.cpu(),
+        #                 queries, #.clone().detach(),
+        #                 query_pos, #.clone().detach() 
+        #             )
         
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
@@ -275,69 +231,48 @@ class Mask3D(nn.Module):
             'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
         
-        return_dict.update(self.__compute_stats(masks, data, offset))
-        
-        return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.5).float())
-        pred_iou = F.sigmoid(pred_iou)
-        return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
-        return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
-            
+        return_dict.update(compute_stats(masks, data, offset))
+        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.5).float())
+        # pred_iou = F.sigmoid(pred_iou)
+        # return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
+        # return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
+
         if self.training:
-            return_dict.pop('pred_score')
+            return_dict.pop('pred_scores')
             return_dict.pop('bious')
             return_dict.pop('stability_score')
         else:
-            return_dict['pred_iou'] = pred_iou
-            return_dict['matched_masks'] = matched_outputs
             return_dict['masks'] = masks['outputs_mask']
+            return_dict['pred_classes'] = masks['outputs_class']
+            return_dict['pred_iou'] = pred_iou
+            
+            ids, return_dict['pred_scores'] = select_masks(return_dict['masks'], return_dict['pred_scores'].cpu(), ious=pred_iou, offset=offset)
+            
+            #Evaluation works only with batch size = 1 (due to the evaluator)
+            return_dict['pred_masks'] = return_dict['masks'][:, ids[0]].T.cpu()
+            return_dict['pred_classes'] = return_dict['pred_classes'][0][ids[0]].argmax(-1).cpu()
+            return_dict['pred_scores'] = return_dict['pred_scores'][0].cpu()
+            return_dict['matched_masks'] = matched_outputs
             return_dict['matched_targets'] = matched_targets
-            return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], ious=pred_iou, offset=offset)
-            # return_dict['pred_masks'] = matched_outputs
-            # return_dict['pred_scores'][0] = return_dict['pred_scores'][0][matched_ids[0][0]]
-            return_dict['matched_ious'] = return_dict['bious'][0][matched_ids[0][0]]
 
-        return_dict['loss'] = return_dict['focal_loss'] + 0.5 * return_dict['dice_loss'] + return_dict['bce_loss'] + 1 * return_dict['iou_ce_loss']
+        # return_dict.update(compute_stats(masks, data, offset))
+        
+        # if self.training:
+        #     #
+        # else:
+        #     
+        #     return_dict['matched_masks'] = matched_outputs
+        #     return_dict['masks'] = masks['outputs_mask']
+        #     return_dict['matched_targets'] = matched_targets
+        #     return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], ious=pred_iou, offset=offset)
+        #     # return_dict['pred_masks'] = matched_outputs
+        #     # return_dict['pred_scores'][0] = return_dict['pred_scores'][0][matched_ids[0][0]]
+        #     return_dict['matched_ious'] = return_dict['bious'][0][matched_ids[0][0]]
 
-        torch.cuda.empty_cache()
-        print('Total time: ', time.time() - total_time_start)
+        return_dict['loss'] = return_dict['focal_loss'] +  return_dict['dice_loss'] + 0.5 * return_dict['bce_loss'] 
 
         return return_dict
-    
-class BatchNormDim1Swap(nn.BatchNorm1d):
-    """
-    Used for nn.Transformer that uses a HW x N x C rep
-    """
-
-    def forward(self, x):
-        """
-        x: HW x N x C
-        permute to N x C x HW
-        Apply BN on C
-        permute back
-        """
-        hw, n, c = x.shape
-        x = x.permute(1, 2, 0)
-        x = super(BatchNormDim1Swap, self).forward(x)
-        # x: n x c x hw -> hw x n x c
-        x = x.permute(2, 0, 1)
-        return x
-
-NORM_DICT = {
-    "bn": BatchNormDim1Swap,
-    "bn1d": nn.BatchNorm1d,
-    "id": nn.Identity,
-    "ln": nn.LayerNorm,
-}
-
-ACTIVATION_DICT = {
-    "relu": nn.ReLU,
-    "gelu": nn.GELU,
-}
-
-WEIGHT_INIT_DICT = {
-    "xavier_uniform": nn.init.xavier_uniform_,
-}
-                 
+         
 class MaskModule(nn.Module):
 
     def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False):
@@ -682,7 +617,7 @@ class SelfAttentionLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -764,7 +699,7 @@ class CrossAttentionLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -861,7 +796,7 @@ class FFNLayer(nn.Module):
 
         self.norm = nn.LayerNorm(d_model)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = get_activation_fn(activation)
         self.normalize_before = normalize_before
 
         self._reset_parameters()
@@ -890,14 +825,4 @@ class FFNLayer(nn.Module):
         if self.normalize_before:
             return self.forward_pre(tgt)
         return self.forward_post(tgt)
-
-def _get_activation_fn(activation):
-    """Return an activation function given a string"""
-    if activation == "relu":
-        return F.relu
-    if activation == "gelu":
-        return F.gelu
-    if activation == "glu":
-        return F.glu
-    raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
 

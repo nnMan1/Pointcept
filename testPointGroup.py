@@ -16,19 +16,19 @@ from torch.nn import functional as F
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score
 # from pointcept.utils.visualization import nms
-num_classes = 1
+num_classes = 20
 segment_ignore_index = (-1, 0, 1)
 
 model = build_model(dict(
      type='PG-v1m1',
     backbone=dict(
         type='SpUNet-v1m1',
-        in_channels=3,
+        in_channels=6,
         num_classes=0,
         channels=(32, 64, 128, 256, 256, 128, 96, 96),
         layers=(2, 3, 4, 6, 2, 2, 2, 2)),
     backbone_out_channels=96,
-    semantic_num_classes=1,
+    semantic_num_classes=num_classes,
     semantic_ignore_index=-1,
     segment_ignore_index=(-1, ),
     instance_ignore_index=-1,
@@ -37,7 +37,7 @@ model = build_model(dict(
     cluster_propose_points=100,
 cluster_min_points=50))
 
-checkpoint = torch.load('exp/assembly/insseg-pointgroup-v1m1-0-spunet-base/model/model_last.pth')
+checkpoint = torch.load('exp/scannet/insseg-pointgroup-v1m1-0-spunet-base/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -54,8 +54,9 @@ model.load_state_dict(weight)
 model = model.cuda()
 model.eval()
 
-ds = ABCDataset(
+ds = ScanNetDataset(
         split='val',
+        data_root='data/scannet_instance_seg',
         transform=[
             dict(type='CenterShift', apply_z=True),
             dict(
@@ -66,24 +67,24 @@ ds = ABCDataset(
                     instance='origin_instance')),
             dict(
                 type='GridSample',
-                grid_size=0.5,
+                grid_size=0.02,
                 hash_type='fnv',
                 mode='train',
                 return_grid_coord=True,
-                keys=('coord', 'segment', 'instance')),
+                keys=('coord', 'color', 'normal', 'segment', 'instance')),
             dict(type='CenterShift', apply_z=False),
+            dict(type='NormalizeColor'),
             dict(
                 type='InstanceParser',
-                segment_ignore_index=(-1, ),
+                segment_ignore_index=(-1, 0, 1),
                 instance_ignore_index=-1),
-            dict(type='FPSSeed', n_points=25),
             dict(type='ToTensor'),
             dict(
                 type='Collect',
                 keys=('coord', 'grid_coord', 'segment', 'instance',
                       'origin_coord', 'origin_segment', 'origin_instance',
-                      'instance_centroid', 'bbox', 'seed_ids'),
-                feat_keys='coord',
+                      'instance_centroid', 'bbox'),
+                feat_keys=('color', 'normal'),
                 offset_keys_dict=dict(
                     offset='coord', origin_offset='origin_coord'))
         ],

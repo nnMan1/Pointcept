@@ -24,12 +24,12 @@ def main_worker(cfg):
 
 class Args:
     def __init__(self):
-        self.config_file = 'configs/abc_dataset/insseg-mask3d-v1m1-0-spunet-base.py'
+        self.config_file = 'configs/scannet/insseg-mask3d-v1m1-0-spunet-base.py'
         self.num_gpus = 1
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/delete_imed/insseg-mask3d-v1m1-0-spunet-base_delete4'}
+        self.options={'save_path': 'exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete4'}
 
 def main():
 
