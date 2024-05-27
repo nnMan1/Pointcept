@@ -56,6 +56,9 @@ def select_masks(masks, stabilities, ious=None, offset=None):
         pred_stabilities = []
         pred_ious_ = []
 
+        if ious == None:
+             ious = stabilities
+
         pred_ids = []
 
         batch_start = 0

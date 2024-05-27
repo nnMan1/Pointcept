@@ -65,13 +65,16 @@ class Mask3D(nn.Module):
         
         self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
         
-        self.matcher = HungarianMatcher(instance_ignore_index)
+        self.matcher = HungarianMatcher(cost_class=2,
+                                        cost_dice=2,
+                                        cost_mask=5,
+                                        instance_ignore_index=instance_ignore_index)
         # self.matcher = MyMatcher()
 
         # self.loss_ce = nn.BCEWithLogitsLoss()
         self.loss_ce = nn.CrossEntropyLoss()
         self.loss_dice = DiceLoss()
-        self.loss_focal = BinaryFocalLoss()
+        self.loss_focal = nn.BCEWithLogitsLoss()
         
         self.iou_ce_loss = nn.BCEWithLogitsLoss()
         self.iou_mse_loss = nn.MSELoss()
@@ -198,13 +201,11 @@ class Mask3D(nn.Module):
 
         t_start = time.time()
         matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, _ = self.matcher(masks, data, offset)
-        # print('Matching time: ', time.time() - t_start)
         intersections = []
         unions = []
 
 
         for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-            # axiliary_losses[0].append(self.loss_ce(mask, F.one_hot(target, mask.shape[1]).float()))
             axiliary_losses[0].append(self.loss_ce(p_seg, t_seg))
             axiliary_losses[1].append(self.loss_dice(mask, target))
             axiliary_losses[2].append(self.loss_focal(mask, target.float()))
@@ -214,16 +215,7 @@ class Mask3D(nn.Module):
             
             ious = intersections[-1] / unions[-1]
             axiliary_losses[3].append(ious.mean())
-            
-        # pred_iou = self.iou_head(
-        #                 mask_features.features, #.clone().detach(),
-        #                 masks['attn_mask'].features, #.clone().detach(),
-        #                 torch.cat(pos_encodings_pcd[-1]),
-        #                 offset.cpu(),
-        #                 queries, #.clone().detach(),
-        #                 query_pos, #.clone().detach() 
-        #             )
-        
+                    
         return_dict = {
             'bce_loss': torch.stack(axiliary_losses[0]).mean(),
             'focal_loss': torch.stack(axiliary_losses[2]).mean(),
@@ -231,22 +223,14 @@ class Mask3D(nn.Module):
             'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
         
-        return_dict.update(compute_stats(masks, data, offset))
-        # return_dict['iou_ce_loss'] = self.iou_ce_loss(pred_iou, (return_dict['bious'] > 0.5).float())
-        # pred_iou = F.sigmoid(pred_iou)
-        # return_dict['iou_mse_loss'] = self.iou_mse_loss(pred_iou, return_dict['bious'])
-        # return_dict['iou_mae_loss'] = (pred_iou - return_dict['bious']).abs().mean()
 
-        if self.training:
-            return_dict.pop('pred_scores')
-            return_dict.pop('bious')
-            return_dict.pop('stability_score')
-        else:
+        if not self.training:
+            return_dict.update(compute_stats(masks, data, offset))
+
             return_dict['masks'] = masks['outputs_mask']
             return_dict['pred_classes'] = masks['outputs_class']
-            return_dict['pred_iou'] = pred_iou
             
-            ids, return_dict['pred_scores'] = select_masks(return_dict['masks'], return_dict['pred_scores'].cpu(), ious=pred_iou, offset=offset)
+            ids, return_dict['pred_scores'] = select_masks(return_dict['masks'], return_dict['pred_scores'].cpu(), offset=offset)
             
             #Evaluation works only with batch size = 1 (due to the evaluator)
             return_dict['pred_masks'] = return_dict['masks'][:, ids[0]].T.cpu()
@@ -255,21 +239,7 @@ class Mask3D(nn.Module):
             return_dict['matched_masks'] = matched_outputs
             return_dict['matched_targets'] = matched_targets
 
-        # return_dict.update(compute_stats(masks, data, offset))
-        
-        # if self.training:
-        #     #
-        # else:
-        #     
-        #     return_dict['matched_masks'] = matched_outputs
-        #     return_dict['masks'] = masks['outputs_mask']
-        #     return_dict['matched_targets'] = matched_targets
-        #     return_dict['pred_masks'], return_dict['pred_scores'] = self.__inf_select_masks(return_dict['masks'], return_dict['stability_score'], ious=pred_iou, offset=offset)
-        #     # return_dict['pred_masks'] = matched_outputs
-        #     # return_dict['pred_scores'][0] = return_dict['pred_scores'][0][matched_ids[0][0]]
-        #     return_dict['matched_ious'] = return_dict['bious'][0][matched_ids[0][0]]
-
-        return_dict['loss'] = return_dict['focal_loss'] +  return_dict['dice_loss'] + 0.5 * return_dict['bce_loss'] 
+        return_dict['loss'] = 5 * return_dict['focal_loss'] + 2 * return_dict['dice_loss'] + return_dict['bce_loss'] 
 
         return return_dict
          

@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 3  # bs: total bs in all gpus
+batch_size = 6  # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
 resume=True
-weight='exp/scannet/insseg-mask3d-1m1-0-spunet-base_sparse/model/model_last.pth'
+weight='exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete4/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -114,7 +114,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -162,7 +162,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

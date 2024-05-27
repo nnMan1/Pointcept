@@ -121,10 +121,11 @@ class HungarianMatcher(nn.Module):
         matched_sem_targets = []
 
         Cs = []
-        for batch_end in offset:
+        for i, batch_end in enumerate(offset):
 
             with torch.no_grad():
                 out_mask = outputs['outputs_mask'][batch_start:batch_end].T
+                out_seg = outputs['outputs_class'][i].softmax(-1) 
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_segm = targets['segment'][batch_start:batch_end]
                 
@@ -139,6 +140,9 @@ class HungarianMatcher(nn.Module):
                 # tgt_segm = tgt_segm[filter]                
                 
                 tgt_mask = F.one_hot(tgt_mask+1).T[1:]
+                instances_seg = (tgt_mask * tgt_segm).max(1)[0]
+                cost_class = 1 - out_seg[:, instances_seg]
+
                 tgt_mask = tgt_mask.float()
 
                 # Compute the focal loss between masks
@@ -160,7 +164,7 @@ class HungarianMatcher(nn.Module):
 
                 C = (
                     self.cost_mask * cost_mask
-                    # + self.cost_class * cost_class
+                    + self.cost_class * cost_class
                     + self.cost_dice * cost_dice
                 )
 
@@ -182,15 +186,14 @@ class HungarianMatcher(nn.Module):
             tgt_mask = targets['instance'][batch_start:batch_end]
             tgt_segm = targets['segment'][batch_start:batch_end]
 
+            # nonassigned_pred_ids = [i for i in range(out_mask.shape[-1]) if i not in pred_ids]
+            
+
             filter = tgt_mask != self.instance_ignore_index
 
             if filter.sum() == 0:
                 continue
 
-            # out_mask = out_mask[filter]
-            # tgt_mask = tgt_mask[filter]
-            # tgt_segm = tgt_segm[filter]                
-            
             tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
 
             out_mask = out_mask[:, pred_ids]
@@ -246,36 +249,3 @@ class HungarianMatcher(nn.Module):
         ]
         lines = [head] + [" " * _repr_indent + line for line in body]
         return "\n".join(lines)
-
-if __name__ == '__main__':
-
-
-    matcher = HungarianMatcher()
-
-    pred = torch.rand([4096, 500])
-    gt = torch.randint(0, 2000, [4096])
-    offset = torch.tensor([2040, 4096], dtype=torch.int32)
-
-    matched_masks, matched_targets, ids = matcher({'output_mask':pred}, 
-                                                  {'instance': gt}, 
-                                                   offset)
-    
-    batch_start = 0
-    
-    # for b in ids:
-    #     print(len(b[0]))
-
-    # print(list(zip(ids[0][0], ids[0][1])))
-
-    # for p in zip(*mapping):
-    #     print(p)
-
-    # pred = {
-    #     "pred_masks": torch.rand([2, 2048, 20], device='cuda')
-    # }
-
-    # target=torch.randint(0, 20, [2,2024])
-
-    # matcher = HungarianMatcher()
-    # matcher(pred, target, 'pred_masks')
-

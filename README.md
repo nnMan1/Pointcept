@@ -695,6 +695,7 @@ cd ../..
 ```bash
 # ScanNet
 sh scripts/train.sh -g 1 -d abc_dataset -c insseg-pointgroup-v1m1-0-spunet-base -n insseg-pointgroup-v1m1-0-spunet-base
+sh scripts/train.sh -g 1 -d scannet -c insseg-mask3d-v1m1-0-spunet-base -n insseg-mask3d-v1m1-0-spunet-base
 # S3DIS
 sh scripts/train.sh -g 4 -d scannet -c insseg-pointgroup-v1m1-0-spunet-base -n insseg-pointgroup-v1m1-0-spunet-base
 ```

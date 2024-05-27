@@ -39,7 +39,7 @@ model = build_model(dict(
     mask_dim=128,
     instance_ignore_index=-1))
 
-checkpoint = torch.load('exp/scannet/insseg-mask3d-1m1-0-spunet-base_sparse/model/model_last.pth')
+checkpoint = torch.load('exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete4/model/model_last.pth')
 
 weight = OrderedDict()
 
@@ -70,7 +70,7 @@ ds = ScanNetDataset(
                     instance='origin_instance')),
             dict(
                 type='GridSample',
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type='fnv',
                 mode='train',
                 return_grid_coord=True,
@@ -111,7 +111,7 @@ for id, b in enumerate(dataloader):
     coords = b['coord'].cpu().numpy()
 
     # print(pred.keys())
-    pred_ious = pred['pred_iou'][0].cpu().numpy()
+    # pred_ious = pred['pred_iou'][0].cpu().numpy()
     scores = pred['stability_score'][0].cpu().numpy()
     # stability = pred['stability_score'][0].cpu().numpy()
     ious = pred['bious'][0].cpu().numpy()
@@ -121,8 +121,8 @@ for id, b in enumerate(dataloader):
     # print(pred['matched_ious'])
     # exit(0)
 
-    for sc, piou, giou in zip(scores, pred_ious, ious):
-        print(sc, piou, giou)
+    for sc, giou in zip(scores, ious):
+        print(sc, giou)
 
     # preds_prob = 1 / (1 + np.exp(-preds))
 
