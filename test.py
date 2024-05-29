@@ -98,6 +98,8 @@ dataloader = torch.utils.data.DataLoader(ds,
                                          batch_size=1,
                                         collate_fn=partial(point_collate_fn),
                                         )
+used = torch.zeros(21, dtype=torch.bool)
+
 for id, b in enumerate(dataloader):
     with torch.no_grad():
         for key in b.keys():
@@ -121,6 +123,7 @@ for id, b in enumerate(dataloader):
     # print(pred['matched_ious'])
     # exit(0)
 
+    used[pred['matched_seg_targets'][0].unique()] = True
     for sc, giou in zip(scores, ious):
         print(sc, giou)
 
@@ -137,4 +140,4 @@ for id, b in enumerate(dataloader):
     np.save(f'samples/{id}.npy', save)
     
   
-    
+print(torch.where(used))

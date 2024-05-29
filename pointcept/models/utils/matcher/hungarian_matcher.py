@@ -134,11 +134,7 @@ class HungarianMatcher(nn.Module):
                 if filter.sum() == 0:
                     indices.append((None, None))
                     continue
-                
-                # out_mask = out_mask[:, filter]
-                # tgt_mask = tgt_mask[filter]
-                # tgt_segm = tgt_segm[filter]                
-                
+                 
                 tgt_mask = F.one_hot(tgt_mask+1).T[1:]
                 instances_seg = (tgt_mask * tgt_segm).max(1)[0]
                 cost_class = 1 - out_seg[:, instances_seg]
@@ -149,7 +145,6 @@ class HungarianMatcher(nn.Module):
                 cost_mask = batch_sigmoid_ce_loss_jit(
                     out_mask, tgt_mask
                 )
-
 
                 # Compute the dice loss betwen masks
                 cost_dice = batch_dice_loss_jit(
@@ -197,10 +192,13 @@ class HungarianMatcher(nn.Module):
             tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
 
             out_mask = out_mask[:, pred_ids]
-            out_seg = out_seg[pred_ids]
-
+            
             tmp = tgt_mask[:, tgt_ids].argmax(0)
-            tgt_segm = tgt_segm[tmp]
+            tmp = tgt_segm[tmp]
+
+            tgt_segm = torch.zeros_like(out_seg[:, 0], dtype=torch.int64)
+            tgt_segm[pred_ids] = tmp
+
 
             tgt_mask = tgt_mask[:, tgt_ids]#.argmax(-1)
                         

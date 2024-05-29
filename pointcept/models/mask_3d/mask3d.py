@@ -56,7 +56,7 @@ class Mask3D(nn.Module):
 
         sample_sizes = [200, 800, 3200, 12800, 51200]
         sizes = self.backbone.PLANES[-5:]
-       
+
         self.mask_module = MaskModule(hidden_dim, **mask_module_config)
         self.query_refinement = nn.ModuleList()
 
@@ -72,7 +72,10 @@ class Mask3D(nn.Module):
         # self.matcher = MyMatcher()
 
         # self.loss_ce = nn.BCEWithLogitsLoss()
-        self.loss_ce = nn.CrossEntropyLoss()
+        weight = torch.ones(mask_module_config['num_classes'])
+        weight[0] = 0.1
+
+        self.loss_ce = nn.CrossEntropyLoss(weight=weight)
         self.loss_dice = DiceLoss()
         self.loss_focal = nn.BCEWithLogitsLoss()
         
@@ -225,19 +228,21 @@ class Mask3D(nn.Module):
         
 
         if not self.training:
+            masks = db_scan(data, masks)
             return_dict.update(compute_stats(masks, data, offset))
 
             return_dict['masks'] = masks['outputs_mask']
             return_dict['pred_classes'] = masks['outputs_class']
             
-            ids, return_dict['pred_scores'] = select_masks(return_dict['masks'], return_dict['pred_scores'].cpu(), offset=offset)
+            ids, return_dict['pred_scores'] = select_masks(return_dict['masks'], return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=offset)
             
             #Evaluation works only with batch size = 1 (due to the evaluator)
             return_dict['pred_masks'] = return_dict['masks'][:, ids[0]].T.cpu()
-            return_dict['pred_classes'] = return_dict['pred_classes'][0][ids[0]].argmax(-1).cpu()
+            return_dict['pred_classes'] = return_dict['pred_classes'][ids[0]].argmax(-1).cpu()
             return_dict['pred_scores'] = return_dict['pred_scores'][0].cpu()
             return_dict['matched_masks'] = matched_outputs
             return_dict['matched_targets'] = matched_targets
+            return_dict['matched_seg_targets'] = matched_seg_targets
 
         return_dict['loss'] = 5 * return_dict['focal_loss'] + 2 * return_dict['dice_loss'] + return_dict['bce_loss'] 
 
@@ -393,73 +398,12 @@ class QueryRefinement(nn.Module):
                     dropout=self.dropout,
                     normalize_before=self.pre_norm,
                 )
-        
-    def __pad(self, data, offset, size = None, rand_idx = None, mask_idx = None):
-
-        if rand_idx is None:
-            rand_idx = []
-            mask_idx = []
-
-            batch_start = torch.cat([torch.tensor([0]), offset[:-1]])
-
-            max_size = (offset - batch_start).max()
-
-            if size != None:
-                max_size = min(max_size, size)
-
-            batch_start = 0
-
-            for i, batch_end in enumerate(offset):
-                pcd = data[batch_start: batch_end]
-                pcd_size = batch_end - batch_start
-
-                if pcd_size < max_size:
-                    idx = torch.zeros(max_size,
-                                    dtype=torch.long,
-                                    device=data.device)
                     
-
-                    midx = torch.ones(max_size,
-                                    dtype=torch.bool,
-                                    device=data.device)
-                    
-                    idx[:pcd_size] = torch.arange(
-                        pcd_size, device = data.device
-                    )
-
-                    midx[:pcd_size] = False
-
-                else:
-                    idx = torch.randperm( pcd_size,
-                                        device = data.device
-                                        )[:max_size]
-                    midx = torch.zeros(max_size,
-                                    dtype=bool,
-                                    device=data.device)
-                    
-
-                rand_idx.append(idx)
-                mask_idx.append(midx)
-
-                batch_start = batch_end
-
-        batched_data = []
-        
-        batch_start = 0
-        
-        for i, batch_end in enumerate(offset):
-            batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
-            batch_start = batch_end
-            
-        batched_data = torch.stack(batched_data)
-        
-        return batched_data, rand_idx, mask_idx
-            
     def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
 
-        point_features, rand_idx, mask_idx = self.__pad(point_features, offset, self.sample_size)
-        attn_mask, _, _ = self.__pad(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
-        pos_encoding, _, _ = self.__pad(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
+        point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
+        attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
+        pos_encoding, _, _ = pad_data(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
 
 
         attn_mask.permute((0, 2, 1))[

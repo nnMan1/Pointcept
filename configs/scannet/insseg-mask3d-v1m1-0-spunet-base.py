@@ -7,7 +7,7 @@ mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
-resume=True
+resume=False
 weight='exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete4/model/model_last.pth'
 
 class_names = [
