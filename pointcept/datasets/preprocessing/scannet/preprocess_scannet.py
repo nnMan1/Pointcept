@@ -172,6 +172,7 @@ def handle_process(
         save_dict["semantic_gt20"] = semantic_gt20
         save_dict["semantic_gt200"] = semantic_gt200
         save_dict["instance_gt"] = instance_ids
+        save_dict["seg_indices"] = seg_indices
 
         # Concatenate with original cloud
         processed_vertices = np.hstack((semantic_gt200, instance_ids))
@@ -189,12 +190,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--dataset_root",
-        required=True,
+        # required=True,
+        default='/home/data/raw/scannet',
         help="Path to the ScanNet dataset containing scene folders",
     )
     parser.add_argument(
         "--output_root",
-        required=True,
+        # required=True,
+        default='/home/data/delete',
         help="Output path where train/val folders will be located",
     )
     parser.add_argument(

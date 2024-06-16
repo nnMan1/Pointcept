@@ -96,10 +96,13 @@ class ScanNetDataset(Dataset):
             )[0]
             cache_name = "pointcept" + data_name.replace(os.path.sep, "-")
             data = shared_dict(cache_name)
+
         coord = data["coord"]
         color = data["color"]
         normal = data["normal"]
         scene_id = data["scene_id"]
+        seg_indices = data["seg_indices"]
+
         if "semantic_gt20" in data.keys():
             segment = data["semantic_gt20"].reshape([-1])
         else:
@@ -115,7 +118,9 @@ class ScanNetDataset(Dataset):
             segment=segment,
             instance=instance,
             scene_id=scene_id,
+            seg_indices=seg_indices
         )
+
         if self.la:
             sampled_index = self.la[self.get_data_name(idx)]
             mask = np.ones_like(segment).astype(np.bool)

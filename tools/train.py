@@ -29,7 +29,7 @@ class Args:
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete46'}
+        self.options={'save_path': 'exp/delete_imed_segments/insseg-scannet-v1m1-0-spunet-base_delete46'}
 
 def main():
 

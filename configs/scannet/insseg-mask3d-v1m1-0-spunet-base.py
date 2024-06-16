@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6  # bs: total bs in all gpus
+batch_size = 5  # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
-resume=False
-weight='exp/delete_imed/insseg-scannet-v1m1-0-spunet-base_delete4/model/model_last.pth'
+resume=True
+weight='exp/delete_imed_segments/insseg-scannet-v1m1-0-spunet-base_delete46/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -54,7 +54,7 @@ model = dict(
     mask_module_config=dict(
         num_classes=num_classes, 
         return_attn_masks=True, 
-        use_seg_masks=False
+        use_seg_masks=True
     ),
     query_refinement_config=dict(
         pre_norm=False,
@@ -69,7 +69,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 800
+epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
 scheduler = dict(
     type="OneCycleLR",
@@ -82,7 +82,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ScanNetDataset"
-data_root = "data/scannet_instance_seg"
+data_root = "data/delete"
 
 data = dict(
     num_classes=num_classes,
@@ -114,11 +114,11 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.04,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "normal", "segment", "instance"),
+                keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
             dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="NormalizeColor"),
@@ -138,7 +138,8 @@ data = dict(
                     "instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "seg_indices"
                 ),
                 feat_keys=("color", "normal"),
             ),
@@ -162,11 +163,11 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.04,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "color", "normal", "segment", "instance"),
+                keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
             # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
@@ -176,7 +177,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type="FPSSeed", n_points=100),
+            dict(type="FPSSeed", n_points=150),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -190,7 +191,8 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "seg_indices"
                 ),
                 feat_keys=("color", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

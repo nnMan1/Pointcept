@@ -12,6 +12,7 @@ from .position_embedding import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
+from torch_scatter import scatter_mean, scatter_max, scatter_min
 
 from .utils import *
 
@@ -58,6 +59,7 @@ class Mask3D(nn.Module):
         sizes = self.backbone.PLANES[-5:]
 
         self.mask_module = MaskModule(hidden_dim, **mask_module_config)
+
         self.query_refinement = nn.ModuleList()
 
         for i, hlevel in enumerate(self.hlevels):
@@ -111,11 +113,25 @@ class Mask3D(nn.Module):
         grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
+        seg_indices = data['seg_indices']
+
+        tmp = seg_indices.unique()
+        for i, v in enumerate(tmp):
+            seg_indices[seg_indices == v] = i
 
         total_time_start = time.time()
         
         mask_features, aux = self.backbone(data)
         pcd_features = aux[-1]
+
+        if self.mask_module.use_seg_masks:
+            mask_segments = []
+            batch_start = 0
+
+            for i, batch_end in enumerate(offset):
+                mask_feature = mask_features.decomposed_features[i]
+                mask_segments.append(scatter_mean(mask_feature, seg_indices[batch_start:batch_end], dim=0))
+                batch_start = batch_end        
         
         with torch.no_grad():
             coordinates = me.SparseTensor(
@@ -168,12 +184,20 @@ class Mask3D(nn.Module):
 
         for _ in range(3):
             for i in self.hlevels:
-                masks = self.mask_module({
+
+                mask_module_data = {
                     'query_feat': queries,
                     'query_pos': query_pos,
                     'mask_features': mask_features,
-                    'num_pooling_steps': len(self.hlevels) - i 
-                })
+                    'num_pooling_steps': len(self.hlevels) - i,
+                    'offset': offset
+                }
+
+                if self.mask_module.use_seg_masks:
+                    mask_module_data['mask_segments'] = mask_segments
+                    mask_module_data['seg_indices'] = seg_indices
+
+                masks = self.mask_module(mask_module_data)
 
                 matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, _ = self.matcher(masks, data, offset)
 
@@ -194,19 +218,23 @@ class Mask3D(nn.Module):
                                                    query_pos 
                                                    )
                 
-        masks = self.mask_module({
+        mask_module_data = {
                     'query_feat': queries,
                     'query_pos': query_pos,
                     'mask_features': mask_features,
-                    'num_pooling_steps': 0
-                })
+                    'num_pooling_steps': 0,
+                    'offset': offset
+                }
         
+        if self.mask_module.use_seg_masks:
+            mask_module_data['mask_segments'] = mask_segments
+            mask_module_data['seg_indices'] = seg_indices
 
-        t_start = time.time()
+        masks = self.mask_module(mask_module_data)
+        
         matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, _ = self.matcher(masks, data, offset)
         intersections = []
         unions = []
-
 
         for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
             axiliary_losses[0].append(self.loss_ce(p_seg, t_seg))
@@ -228,7 +256,7 @@ class Mask3D(nn.Module):
         
 
         if not self.training:
-            masks = db_scan(data, masks)
+            # masks = db_scan(data, masks)
             return_dict.update(compute_stats(masks, data, offset))
 
             return_dict['masks'] = masks['outputs_mask']
@@ -238,7 +266,7 @@ class Mask3D(nn.Module):
             
             #Evaluation works only with batch size = 1 (due to the evaluator)
             return_dict['pred_masks'] = return_dict['masks'][:, ids[0]].T.cpu()
-            return_dict['pred_classes'] = return_dict['pred_classes'][ids[0]].argmax(-1).cpu()
+            return_dict['pred_classes'] = return_dict['pred_classes'][0, ids[0]].argmax(-1).cpu()
             return_dict['pred_scores'] = return_dict['pred_scores'][0].cpu()
             return_dict['matched_masks'] = matched_outputs
             return_dict['matched_targets'] = matched_targets
@@ -275,8 +303,8 @@ class MaskModule(nn.Module):
 
     def forward(self, data):
 
-        query_feat, mask_features, query_pos = data['query_feat'], data['mask_features'], data['query_pos']
-
+        query_feat, mask_features, query_pos, offset = data['query_feat'], data['mask_features'], data['query_pos'], data['offset']
+            
         query_feat = self.decoder_norm(query_feat)
         mask_embed = self.mask_embed_head(query_feat)
         outputs_class = self.class_embed_head(query_feat)
@@ -289,15 +317,18 @@ class MaskModule(nn.Module):
         }
 
         if self.use_seg_masks:
-            pass
-            # point2segment = data['point2segment']
-            # output_segments = []
+            mask_segments = data['mask_segments']
+            seg_indices = data['seg_indices']
+            
+            output_segments = []
 
-            # for i in range(len(mask_segments)):
-            #     output_segments.append(mask_segments[i] @ mask_embed[i].T)
-            #     output_masks.append(output_segments[-1][point2segment[i]])
-        
-            # return_dict['output_segments'] = output_segments
+            batch_start = 0
+            for i,batch_end in enumerate(offset):
+                output_segments.append(mask_segments[i] @ mask_embed[i].T)
+                output_masks.append(output_segments[-1][seg_indices[batch_start:batch_end]])
+                batch_start = batch_end
+                                
+            return_dict['output_segments'] = output_segments
         else:
             for i in range(mask_features.C[-1, 0] + 1):
                 output_masks.append(mask_features.decomposed_features[i] @ mask_embed[i].T)

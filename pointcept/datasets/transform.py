@@ -220,6 +220,9 @@ class RandomDropout(object):
                 data_dict["segment"] = data_dict["segment"][idx]
             if "instance" in data_dict.keys():
                 data_dict["instance"] = data_dict["instance"][idx]
+            if "seg_indices" in data_dict.keys():
+                data_dict["seg_indices"] = data_dict["seg_indices"][idx]
+
         return data_dict
 
 
@@ -973,6 +976,9 @@ class SphereCrop(object):
                         ]
                     if "strength" in data_dict.keys():
                         data_crop_dict["strength"] = data_dict["strength"][idx_crop]
+                    if "seg_indices" in data_dict.keys():
+                        data_crop_dict["seg_indices"] = data_dict["seg_indices"][idx_crop]
+
                     data_crop_dict["weight"] = dist2[idx_crop]
                     data_crop_dict["index"] = data_dict["index"][idx_crop]
                     data_part_list.append(data_crop_dict)
@@ -1021,6 +1027,9 @@ class SphereCrop(object):
                 data_dict["displacement"] = data_dict["displacement"][idx_crop]
             if "strength" in data_dict.keys():
                 data_dict["strength"] = data_dict["strength"][idx_crop]
+            if "seg_indices" in data_dict.keys():
+                data_dict["seg_indices"] = data_dict["seg_indices"][idx_crop]
+
         return data_dict
 
 

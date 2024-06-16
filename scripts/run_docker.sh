@@ -4,6 +4,7 @@ docker run -d -ti \
 		  -v /tmp/.X11-unix:/tmp\.X11-unix --net=host \
 		  --shm-size 8G \
           	  -v $(pwd):/home \
+			  -v /media/velibor/2842653342650742/scannet/scannet/:/home/data/raw/scannet/ \
 			  -v /home/velibor/Data/scannet:/home/data/scannet \
 		  	  -v /home/velibor/Data/scannet_instance_seg:/home/data/scannet_instance_seg \
 			  -v /home/velibor/Data/AssemblyRepository/chunks/:/home/data/assembly/raw \
