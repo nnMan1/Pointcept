@@ -82,15 +82,15 @@ class Fuselage(Dataset):
         data = np.load(data)
         
         return {
-            'coord': data[:, :3],
-            'instance': data[:, 3].astype(np.int64),
-            'segment': self.semantic_mapping[data[:, 3].astype(np.int64)],
+            'coord': data[::5, :3],
+            'instance': data[::5, 3].astype(np.int64),
+            'segment': self.semantic_mapping[data[::5, 3].astype(np.int64)],
             'id': idx,
             'path': self.data_list[idx]
         } 
 
     def get_data_name(self, idx):
-        return str(self.data_list[idx].assembly)
+        return str(idx)
 
     def prepare_train_data(self, idx):
         # load data

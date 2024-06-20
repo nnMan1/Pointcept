@@ -1,10 +1,12 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 3  # bs: total bs in all gpus
+batch_size = 8  # bs: total bs in all gpus
 mix_prob = 0.8
-empty_cache = False
+empty_cache = True
 enable_amp = True
+# resume=True
+weight='/home/Pointcept/exp/fuselage/semseg-spunet-v1m1-0-base/model/model_last.pth'
 
 # model settings
 model = dict(
@@ -16,7 +18,7 @@ model = dict(
         channels=(32, 64, 128, 256, 256, 128, 96, 96),
         layers=(2, 3, 4, 6, 2, 2, 2, 2),
     ),
-    criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1)],
+    criteria=[dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
 )
 
 # scheduler settings

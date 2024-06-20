@@ -31,8 +31,8 @@ class Args:
         self.options={'save_path': 'exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete3'}
 
 def main():
-    args = Args()
-    # args = default_argument_parser().parse_args()
+    # args = Args()//
+    args = default_argument_parser().parse_args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(
