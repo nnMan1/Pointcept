@@ -9,6 +9,11 @@ import os
 import open3d as o3d
 import numpy as np
 import torch
+from matplotlib import colors as mcolors
+
+colors = list(dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS).values())
+colors = np.asarray([mcolors.to_rgba(color)[:3] for color in colors])
+colors = colors[colors != np.asarray([1, 1, 1])].reshape([-1, 3])
 
 def to_numpy(x):
     if isinstance(x, torch.Tensor):
@@ -113,3 +118,19 @@ def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
             keep[order[overlapped + i + 1]] = 0
 
     return torch.where(keep)[0]
+
+
+def to_o3d(pos, faces=None, verts_colors=None):
+
+    if faces is not None:
+        geom = o3d.geometry.TriangleMesh()
+        geom.vertices = o3d.utility.Vector3dVector(to_numpy(pos))
+        geom.triangles = o3d.utility.Vector3iVector(to_numpy(faces))
+    else:
+        geom = o3d.geometry.PointCloud()
+        geom.points = o3d.utility.Vector3dVector(to_numpy(pos))
+
+        if verts_colors is not None:
+            geom.colors = o3d.utility.Vector3dVector(to_numpy(verts_colors))
+
+    return geom
