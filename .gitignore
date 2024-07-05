@@ -19,3 +19,4 @@ scripts/build_image.sh
 visualizations
 samples
 samples1
+scripts/*.sh

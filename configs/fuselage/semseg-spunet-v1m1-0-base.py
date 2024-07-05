@@ -5,8 +5,13 @@ batch_size = 8  # bs: total bs in all gpus
 mix_prob = 0.8
 empty_cache = True
 enable_amp = True
+<<<<<<< HEAD
 resume=True
 weight='/home/exp/fuselage/semseg-spunet-v1m1-0-base_250x250x250/model/model_last.pth'
+=======
+# resume=True
+weight='/home/Pointcept/exp/fuselage/semseg-spunet-v1m1-0-base/model/model_last.pth'
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
 
 # model settings
 model = dict(
@@ -14,9 +19,15 @@ model = dict(
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
+<<<<<<< HEAD
         num_classes=4,
         channels=(32, 64, 128, 128, 96, 96),
         layers=(2, 3, 4, 2, 2, 2),
+=======
+        num_classes=3,
+        channels=(32, 64, 128, 256, 256, 128, 96, 96),
+        layers=(2, 3, 4, 6, 2, 2, 2, 2),
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
     ),
     criteria=[dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
 )
@@ -35,6 +46,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "Fuselage"
+<<<<<<< HEAD
 names=['body', 'body1', 'panel', 'riwet']
 data_root = 'data/fuselage/crops_250x250x250'
 
@@ -42,6 +54,18 @@ data = dict(
     num_classes=4,
     ignore_index=-1,
     names = names,
+=======
+data_root = "data/fuselage"
+
+data = dict(
+    num_classes=3,
+    ignore_index=-1,
+    names=[
+        "panel",
+        "body",
+        "riwet"
+    ],
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
     train=dict(
         type=dataset_type,
         split="train",
@@ -67,7 +91,11 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
+<<<<<<< HEAD
                 grid_size=0.1,
+=======
+                grid_size=0.5,
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment"),
@@ -85,7 +113,10 @@ data = dict(
             ),
         ],
         test_mode=False,
+<<<<<<< HEAD
         classes=names
+=======
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
     ),
     val=dict(
         type=dataset_type,
@@ -95,7 +126,11 @@ data = dict(
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="GridSample",
+<<<<<<< HEAD
                 grid_size=0.1,
+=======
+                grid_size=0.5,
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment"),
@@ -112,7 +147,10 @@ data = dict(
             ),
         ],
         test_mode=False,
+<<<<<<< HEAD
         classes=names
+=======
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
     ),
     test=dict(
         type=dataset_type,
@@ -126,7 +164,11 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
+<<<<<<< HEAD
                 grid_size=0.1,
+=======
+                grid_size=0.5,
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
@@ -262,6 +304,11 @@ data = dict(
                 [dict(type="RandomFlip", p=1)],
             ],
         ),
+<<<<<<< HEAD
         classes = names
     ),
 )
+=======
+    ),
+)
+>>>>>>> db8ad9c1e69143cd82a06689660abe8bfbd62b2e
