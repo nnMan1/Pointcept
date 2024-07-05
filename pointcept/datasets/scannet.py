@@ -102,7 +102,7 @@ class ScanNetDataset(Dataset):
         normal = data["normal"]
         scene_id = data["scene_id"]
         seg_indices = data["seg_indices"]
-
+        
         if "semantic_gt20" in data.keys():
             segment = data["semantic_gt20"].reshape([-1])
         else:
@@ -111,6 +111,13 @@ class ScanNetDataset(Dataset):
             instance = data["instance_gt"].reshape([-1])
         else:
             instance = np.ones(coord.shape[0]) * -1
+
+        
+        uni = np.unique(seg_indices)
+
+        for i, v in enumerate(uni):
+            seg_indices[seg_indices == v] = i
+
         data_dict = dict(
             coord=coord,
             normal=normal,
@@ -118,7 +125,7 @@ class ScanNetDataset(Dataset):
             segment=segment,
             instance=instance,
             scene_id=scene_id,
-            seg_indices=seg_indices
+            seg_indices=seg_indices,
         )
 
         if self.la:

@@ -21,6 +21,7 @@ from .partnet import PartNet
 from .assembly import Assembly
 from .abc_dataset import ABCDataset
 from .cetim import Cetim
+from .fuselage import Fuselage
 
 # dataloader
 from .dataloader import MultiDatasetDataloader

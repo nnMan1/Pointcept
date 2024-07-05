@@ -956,7 +956,7 @@ class SphereCrop(object):
                 while idx_uni.size != data_dict["index"].shape[0]:
                     init_idx = np.argmin(coord_p)
                     dist2 = np.sum(
-                        np.power(data_dict["coord"] - data_dict["coord"][init_idx], 2),
+                        np.power(data_dict["coord"] - data_dict["coord"][init_idx], 1),
                         1,
                     )
                     idx_crop = np.argsort(dist2)[:point_max]
