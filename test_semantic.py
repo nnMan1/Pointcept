@@ -9,15 +9,11 @@ from pointcept.datasets import ABCDataset, Assembly, Cetim, ScanNetDataset, Fuse
 
 ds = Fuselage(split='val',
                 data_root = 'data/fuselage/crops_250x250x250',
-              transform=[
-                    dict(type="CenterShift", apply_z=True),
-                    # dict(type="NormalizeColor"),
-                ],
                 classes=['body', 'body1', 'panel', 'riwet']
     )
 
 for d in ds:
-    try:
+    # try:
         pred = d['path'].replace('/', '_')
         pred = np.load(f'exp/fuselage/semseg-spunet-v1m1-0-base_250x250x250_hard_rot/result/{pred}_pred.npy')
     
@@ -26,5 +22,5 @@ for d in ds:
         print(np.asarray(pcd.colors).shape)
         o3d.io.write_point_cloud(f"samples/{d['path'].replace('/', '_')}.ply", pcd)
         o3d.visualization.draw_geometries([pcd])
-    except:
-        pass
+    # except:
+    #     pass

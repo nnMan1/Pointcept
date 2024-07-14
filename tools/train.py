@@ -6,7 +6,7 @@ Please cite our work if the code is helpful to you.
 """
 
 import sys
-sys.path.append('/home/Pointcept')
+sys.path.append('/home')
 
 from pointcept.engines.defaults import (
     default_argument_parser,
@@ -24,12 +24,12 @@ def main_worker(cfg):
 
 class Args:
     def __init__(self):
-        self.config_file = '/home/Pointcept/configs/fuselage/semseg-spunet-v1m1-0-base.py'
+        self.config_file = 'configs/fuselage/semseg-spunet-v1m1-0-base_hard_rot.py'
         self.num_gpus = 1
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/fuselage/semseg-spunet-v1m1-0-base_focal'}
+        self.options={'save_path': 'exp/fuselage/semseg-spunet-v1m1-0-base_250x250x250_hard_rot_uniform'}
 
 def main():
 

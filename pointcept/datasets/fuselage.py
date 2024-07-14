@@ -67,13 +67,19 @@ class Fuselage(Dataset):
     def get_data_list(self):
         
         if isinstance(self.split, str):
-            data_list = open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines()
+            data_list_files = open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines()
         elif isinstance(self.split, Sequence):
-            data_list = []
+            data_list_files = []
             for split in self.split:
-                data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
+                data_list_files += torch.load(open(os.path.join(self.data_root, f"{split}_files.txt")).readlines())
         else:
             raise NotImplementedError
+        
+        data_list_files = [f.strip() for f in data_list_files]
+
+        data_list = []
+        for file in data_list_files:
+            data_list += open(os.path.join(self.data_root, file)).readlines()
         
         data_list = [f.strip() for f in data_list]
 
@@ -84,12 +90,11 @@ class Fuselage(Dataset):
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
-        # print(os.path.join(self.data_root, 'scanns', data))
-
         labels = []
         pcd = o3d.geometry.PointCloud()
 
         for cls in self.classes:
+            # print(os.path.join(self.data_root, data, cls, '*.ply'))
             for file in glob.glob(os.path.join(self.data_root, data, cls, '*.ply')):
                 tmp = o3d.io.read_point_cloud(file)
                 pcd += tmp

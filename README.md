@@ -395,6 +395,8 @@ For example:
 # -p is default set as python and can be ignored
 # -w is default set as model_best and can be ignored
 sh scripts/test.sh -p python -d scannet -n semseg-pt-v2m2-0-base -w model_best
+sh scripts/test.sh -p python -d fuselage -n semseg-spunet-v1m1-0-base_250x250x250_hard_rot -w model_best -g 1
+
 # Direct
 export PYTHONPATH=./
 python tools/test.py --config-file configs/scannet/semseg-pt-v2m2-0-base.py --options save_path=exp/scannet/semseg-pt-v2m2-0-base weight=exp/scannet/semseg-pt-v2m2-0-base/model/model_best.pth
