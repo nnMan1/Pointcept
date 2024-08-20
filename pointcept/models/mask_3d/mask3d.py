@@ -106,18 +106,21 @@ class Mask3D(nn.Module):
                 pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
 
         return pos_encodings_pcd
-    
+
+    # def forward(self, data):
+        
+    #     if 'seg_indices' in data.keys():
+    #         return self.forward_with_grouping(data)
+    #     else:
+    #         return self.forward_no_grouping(data)
+
     def forward(self, data):
         
         raw_coordinates = data['coord']
         grid_coordinates = data['grid_coord']
         offset = data['offset']
         seed_ids = data['seed_ids']
-        seg_indices = data['seg_indices']
-
-        tmp = seg_indices.unique()
-        for i, v in enumerate(tmp):
-            seg_indices[seg_indices == v] = i
+        seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
 
         total_time_start = time.time()
         
@@ -182,7 +185,7 @@ class Mask3D(nn.Module):
 
         axiliary_losses = [], [], [], []
 
-        for _ in range(3):
+        for _ in range(1):
             for i in self.hlevels:
 
                 mask_module_data = {
@@ -275,7 +278,8 @@ class Mask3D(nn.Module):
         return_dict['loss'] = 5 * return_dict['focal_loss'] + 2 * return_dict['dice_loss'] + return_dict['bce_loss'] 
 
         return return_dict
-         
+     
+     
 class MaskModule(nn.Module):
 
     def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False):
