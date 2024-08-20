@@ -1,5 +1,5 @@
 from .builder import build_model
-from .default import DefaultSegmentor, DefaultClassifier
+from .default import DefaultSegmentor, DefaultClassifier, GroupingSegmentor
 
 # Backbones
 from .sparse_unet import *

@@ -6,7 +6,7 @@ mix_prob = 0.8
 empty_cache = True
 enable_amp = False
 # resume=True
-# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
+# weight='exp/fuselage/semseg-pt-v1m1-0-base_lr_split_1_8/model/model_last.pth'
 
 # model settings
 model = dict(
@@ -64,14 +64,6 @@ data = dict(
             dict(type="ChromaticJitter", p=0.95, std=0.05),
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
-            dict(
-                type="GridSample",
-                grid_size=0.15,
-                hash_type="fnv",
-                mode="train",
-                keys=("coord", "segment"),
-                return_grid_coord=True,
-            ),
             dict(type="SphereCrop", point_max=100000, mode="random"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
@@ -79,8 +71,8 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment"),
-                feat_keys=("grid_coord", ),
+                keys=("coord", "segment"),
+                feat_keys=("coord", ),
             ),
         ],
         test_mode=False,
@@ -92,22 +84,14 @@ data = dict(
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            dict(
-                type="GridSample",
-                grid_size=0.15,
-                hash_type="fnv",
-                mode="train",
-                keys=("coord", "segment"),
-                return_grid_coord=True,
-            ),
             dict(type="SphereCrop", point_max=200000, mode="center"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment"),
-                feat_keys=("grid_coord", ),
+                keys=("coord", "segment"),
+                feat_keys=("coord", ),
             ),
         ],
         test_mode=False,
@@ -123,22 +107,14 @@ data = dict(
         ],
         test_mode=True,
         test_cfg=dict(
-            voxelize=dict(
-                type="GridSample",
-                grid_size=0.15,
-                hash_type="fnv",
-                mode="test",
-                return_grid_coord=True,                
-                keys=("coord", "segment"),
-            ),
             crop=None,
             post_transform=[
                 dict(type="CenterShift", apply_z=False),
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index"),
-                    feat_keys=("grid_coord",),
+                    keys=("coord", "index"),
+                    feat_keys=("coord",),
                 ),
             ],
             aug_transform=[

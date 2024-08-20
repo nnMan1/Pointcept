@@ -379,6 +379,10 @@ export PYTHONPATH=./
 python tools/train.py --config-file ${CONFIG_PATH} --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${CHECKPOINT_PATH}
 ```
 
+Fuselage
+sh scripts/train.sh -p python -g 1 -d fuselage -c semseg-spunet-v1m1-0-base_lr_split_normals -n semseg-spunet-v1m1-0-base_lr_split_normals
+
+
 ### Testing
 During training, model evaluation is performed on point clouds after grid sampling (voxelization), providing an initial assessment of model performance. However, to obtain precise evaluation results, testing is **essential**. The testing process involves subsampling a dense point cloud into a sequence of voxelized point clouds, ensuring comprehensive coverage of all points. These sub-results are then predicted and collected to form a complete prediction of the entire point cloud. This approach yields  higher evaluation results compared to simply mapping/interpolating the prediction. In addition, our testing code supports TTA (test time augmentation) testing, which further enhances the stability of evaluation performance.
 
@@ -395,7 +399,7 @@ For example:
 # -p is default set as python and can be ignored
 # -w is default set as model_best and can be ignored
 sh scripts/test.sh -p python -d scannet -n semseg-pt-v2m2-0-base -w model_best
-sh scripts/test.sh -p python -d fuselage -n semseg-spunet-v1m1-0-base_250x250x250_hard_rot -w model_best -g 1
+sh scripts/test.sh -p python -d fuselage -n semseg-spunet-v1m1-0-base_lr_split_grouping3 -w model_best -g 1
 
 # Direct
 export PYTHONPATH=./

@@ -21,3 +21,4 @@ samples
 samples1
 scripts/*.sh
 samples_
+tests

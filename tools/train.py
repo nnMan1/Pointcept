@@ -32,9 +32,10 @@ class Args:
         self.options={'save_path': 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base'}
 
 def main():
+    # sh scripts/train.sh -p python -g 1 -d fuselage -c semseg-spunet-v1m1-0-base_lr_split_groupingV2 -n semseg-spunet-v1m1-0-base_lr_split_groupingV2[]
 
-    # args = default_argument_parser().parse_args()
-    args = Args()
+    args = default_argument_parser().parse_args()
+    # args = Args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(

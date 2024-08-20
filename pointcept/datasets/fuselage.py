@@ -28,7 +28,7 @@ class Fuselage(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
-        classes = ['body', 'body1', 'hole', 'panel', 'riwet', 'table']
+        classes = ['body', 'body1', 'hole', 'panel', 'rivet', 'table']
     ):
         super(Fuselage, self).__init__()
 
@@ -91,6 +91,42 @@ class Fuselage(Dataset):
 
         data = self.data_list[idx]
         labels = []
+        pcd = []
+
+        for cls in self.classes:
+            # print(os.path.join(self.data_root, data, cls, '*.ply'))
+            for file in glob.glob(os.path.join(self.data_root, data, cls, '*.npy')):
+                tmp = np.load(file)
+                pcd.append(tmp)
+                labels.append(np.ones(tmp.shape[0]) * self.class_to_id[cls])
+
+        if len(pcd) == 0:
+            return self.get_data(idx + 1)
+
+        pcd = np.concatenate(pcd)
+        labels = np.concatenate(labels)
+
+        if len(pcd) < 2048:
+            return self.get_data(idx + 1)
+
+        div = 2
+
+        seg_indices = pcd[::div, -1].astype(np.int32)
+        uniq_seg_indices = np.unique(seg_indices)
+
+        for i, ind in enumerate(uniq_seg_indices):
+            seg_indices[seg_indices == ind] = i
+            
+        return {
+            'coord': pcd[::div, :3],
+            'segment': np.asarray(labels, dtype=np.int32)[::div],
+            'normal': pcd[::div, 3:6],
+            'seg_indices': seg_indices,
+            'id': idx,
+            'path': self.data_list[idx]
+        } 
+
+
         pcd = o3d.geometry.PointCloud()
 
         for cls in self.classes:
@@ -108,10 +144,12 @@ class Fuselage(Dataset):
         return {
             'coord': np.asarray(pcd.points),
             'segment': labels.astype(np.int32),
+            'normal': np.asarray(pcd.points),
             'id': idx,
             'path': self.data_list[idx]
-        } 
+        }
 
+        
     def get_data_name(self, idx):
         return str(self.data_list[idx]).replace('/', '_')
 
@@ -124,7 +162,8 @@ class Fuselage(Dataset):
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
-        segment = data_dict.pop("segment")
+        # segment = data_dict.pop("segment")
+        segment = data_dict['segment']
         data_dict = self.transform(data_dict)
         data_dict_list = []
         for aug in self.aug_transform:
