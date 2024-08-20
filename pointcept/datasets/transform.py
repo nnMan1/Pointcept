@@ -1053,6 +1053,8 @@ class ShufflePoint(object):
             data_dict["segment"] = data_dict["segment"][shuffle_index]
         if "instance" in data_dict.keys():
             data_dict["instance"] = data_dict["instance"][shuffle_index]
+        if "seg_indices" in data_dict.keys():
+            data_dict["seg_indices"] = data_dict["seg_indices"][shuffle_index]
         return data_dict
 
 

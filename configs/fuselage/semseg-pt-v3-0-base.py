@@ -17,15 +17,15 @@ model = dict(
         type="PT-v3m1",
         in_channels=3,
         order=["z", "z-trans", "hilbert", "hilbert-trans"],
-        stride=(2, 2, 2, 2),
-        enc_depths=(2, 2, 2, 6, 2),
-        enc_channels=(32, 64, 128, 256, 512),
-        enc_num_head=(2, 4, 8, 16, 32),
-        enc_patch_size=(1024, 1024, 1024, 1024, 1024),
-        dec_depths=(2, 2, 2, 2),
-        dec_channels=(64, 64, 128, 256),
-        dec_num_head=(4, 4, 8, 16),
-        dec_patch_size=(1024, 1024, 1024, 1024),
+        stride=(2, 2, 2),
+        enc_depths=(2, 2, 2, 4),
+        enc_channels=(32, 64, 128, 256),
+        enc_num_head=(2, 4, 8, 16),
+        enc_patch_size=(48, 48, 48, 48),
+        dec_depths=(2, 2, 2),
+        dec_channels=(64, 64, 128),
+        dec_num_head=(4, 4, 8),
+        dec_patch_size=(48, 48, 48),
         mlp_ratio=4,
         qkv_bias=True,
         qk_scale=None,
@@ -67,7 +67,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "Fuselage"
-names=['body', 'body1', 'panel', 'riwets']
+names=['body', 'body1', 'panel', 'rivets']
 data_root = 'data/fuselage/crops_250x250x250'
 
 data = dict(
@@ -76,7 +76,7 @@ data = dict(
     names = names,
     train=dict(
         type=dataset_type,
-        split="train",
+        split="train_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -121,7 +121,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -148,7 +148,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),

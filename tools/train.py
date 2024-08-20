@@ -24,17 +24,18 @@ def main_worker(cfg):
 
 class Args:
     def __init__(self):
-        self.config_file = 'configs/fuselage/semseg-spunet-v1m1-0-base_hard_rot.py'
+        self.config_file = 'configs/fuselage/semseg-spunet-v1m1-0-base_lr_split_grouping.py'
         self.num_gpus = 1
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/fuselage/semseg-spunet-v1m1-0-base_250x250x250_hard_rot_uniform'}
+        self.options={'save_path': 'exp/delete_imed/semseg-spunet-v1m1-0-base_lr_split_grouping3'}
 
 def main():
+    # sh scripts/train.sh -p python -g 1 -d fuselage -c semseg-spunet-v1m1-0-base_lr_split_groupingV2 -n semseg-spunet-v1m1-0-base_lr_split_groupingV2[]
 
-    # args = default_argument_parser().parse_args()
-    args = Args()
+    args = default_argument_parser().parse_args()
+    # args = Args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(

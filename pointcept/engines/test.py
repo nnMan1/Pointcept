@@ -185,6 +185,7 @@ class SemSegTester(TesterBase):
                     idx_part = input_dict["index"]
                     with torch.no_grad():
                         pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
+
                         pred_part = F.softmax(pred_part, -1)
                         if self.cfg.empty_cache:
                             torch.cuda.empty_cache()
@@ -226,7 +227,7 @@ class SemSegTester(TesterBase):
             m_iou = np.mean(intersection_meter.sum / (union_meter.sum + 1e-10))
             m_acc = np.mean(intersection_meter.sum / (target_meter.sum + 1e-10))
 
-            batch_time.update(time.time() - end)
+            batch_time.update(1 / ((time.time() - end) / len(fragment_list)))
             logger.info(
                 "Test: {} [{}/{}]-{} "
                 "Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) "

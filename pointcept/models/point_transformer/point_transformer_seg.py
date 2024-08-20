@@ -231,19 +231,19 @@ class PointTransformerSeg(nn.Module):
             stride=stride[3],
             nsample=nsample[3],
         )  # N/64
-        self.enc5 = self._make_enc(
-            block,
-            planes[4],
-            blocks[4],
-            share_planes,
-            stride=stride[4],
-            nsample=nsample[4],
-        )  # N/256
-        self.dec5 = self._make_dec(
-            block, planes[4], 1, share_planes, nsample=nsample[4], is_head=True
-        )  # transform p5
+        # self.enc5 = self._make_enc(
+        #     block,
+        #     planes[4],
+        #     blocks[4],
+        #     share_planes,
+        #     stride=stride[4],
+        #     nsample=nsample[4],
+        # )  # N/256
+        # self.dec5 = self._make_dec(
+        #     block, planes[4], 1, share_planes, nsample=nsample[4], is_head=True
+        # )  # transform p5
         self.dec4 = self._make_dec(
-            block, planes[3], 1, share_planes, nsample=nsample[3]
+            block, planes[3], 1, share_planes, nsample=nsample[3], is_head=True
         )  # fusion p5 and p4
         self.dec3 = self._make_dec(
             block, planes[2], 1, share_planes, nsample=nsample[2]
@@ -289,17 +289,21 @@ class PointTransformerSeg(nn.Module):
         p0 = data_dict["coord"]
         x0 = data_dict["feat"]
         o0 = data_dict["offset"].int()
+        
         p1, x1, o1 = self.enc1([p0, x0, o0])
         p2, x2, o2 = self.enc2([p1, x1, o1])
         p3, x3, o3 = self.enc3([p2, x2, o2])
         p4, x4, o4 = self.enc4([p3, x3, o3])
-        p5, x5, o5 = self.enc5([p4, x4, o4])
-        x5 = self.dec5[1:]([p5, self.dec5[0]([p5, x5, o5]), o5])[1]
-        x4 = self.dec4[1:]([p4, self.dec4[0]([p4, x4, o4], [p5, x5, o5]), o4])[1]
+        # p5, x5, o5 = self.enc5([p4, x4, o4])
+
+        # x5 = self.dec5[1:]([p5, self.dec5[0]([p5, x5, o5]), o5])[1]
+        x4 = self.dec4[1:]([p4, self.dec4[0]([p4, x4, o4]), o4])[1]
+        # x4 = self.dec4[1:]([p4, self.dec4[0]([p4, x4, o4], [p5, x5, o5]), o4])[1]
         x3 = self.dec3[1:]([p3, self.dec3[0]([p3, x3, o3], [p4, x4, o4]), o3])[1]
         x2 = self.dec2[1:]([p2, self.dec2[0]([p2, x2, o2], [p3, x3, o3]), o2])[1]
         x1 = self.dec1[1:]([p1, self.dec1[0]([p1, x1, o1], [p2, x2, o2]), o1])[1]
         x = self.cls(x1)
+
         return x
 
 
