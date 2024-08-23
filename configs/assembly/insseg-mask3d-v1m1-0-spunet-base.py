@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-# resume=True
-weight='/home/exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_dice_loss+focall_loss/model/model_last.pth'
+resume=True
+weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -45,12 +45,13 @@ model = dict(
     num_decoders=1,
     dim_feedforward=1024,
     hidden_dim=128,
-    mask_dim=128
+    mask_dim=128,
+    instance_ignore_index=-1
 )
 
 # scheduler settings
 epoch = 800
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.2)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -61,7 +62,7 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "Assembly"
+dataset_type = "ABCDataset"
 
 data = dict(
     num_classes=num_classes,
@@ -87,7 +88,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.05,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -99,7 +100,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
+            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -135,7 +136,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.05,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -177,8 +178,6 @@ hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(
-        type="MyInsSegEvaluator",
-    ),
+    dict(type="InsSegEvaluator",),
     dict(type="CheckpointSaver", save_freq=None),
 ]

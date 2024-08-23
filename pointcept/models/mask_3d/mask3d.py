@@ -65,7 +65,7 @@ class Mask3D(nn.Module):
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
         
-        self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
+        # self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
         
         self.matcher = HungarianMatcher(cost_class=2,
                                         cost_dice=2,
@@ -100,19 +100,9 @@ class Mask3D(nn.Module):
                         input_range=[scene_min, scene_max],
                     )
 
-                if tmp.sum().isnan():
-                    pass
-
                 pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
 
         return pos_encodings_pcd
-
-    # def forward(self, data):
-        
-    #     if 'seg_indices' in data.keys():
-    #         return self.forward_with_grouping(data)
-    #     else:
-    #         return self.forward_no_grouping(data)
 
     def forward(self, data):
         
@@ -129,12 +119,12 @@ class Mask3D(nn.Module):
 
         if self.mask_module.use_seg_masks:
             mask_segments = []
-            batch_start = 0
 
+            batch_start = 0
             for i, batch_end in enumerate(offset):
                 mask_feature = mask_features.decomposed_features[i]
                 mask_segments.append(scatter_mean(mask_feature, seg_indices[batch_start:batch_end], dim=0))
-                batch_start = batch_end        
+                batch_start = batch_end    
         
         with torch.no_grad():
             coordinates = me.SparseTensor(
@@ -153,10 +143,12 @@ class Mask3D(nn.Module):
         pos_encodings_pcd = self.__get_pos_encs(coords)
 
         sampled_coords = []
-        batch_start = 0
-        for i, batch_end in enumerate(offset):
-            points = grid_coordinates[batch_start:batch_end].float()
+        
+        bs = 0
+        for i, be in enumerate(offset):
+            points = grid_coordinates[bs:be].float()
             sampled_coords.append(points[seed_ids[i]])
+            bs = be
 
         mins = torch.stack(
                 [
