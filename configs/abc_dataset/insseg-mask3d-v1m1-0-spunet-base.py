@@ -1,15 +1,15 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
-num_worker = 100
+batch_size = 8 # bs: total bs in all gpus
+num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
 
-resume=True
-weight='/home/exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal2/model/model_last.pth'
+# resume=True
+# weight='/home/exp/abc_dataset_my_matcher_multimask/insseg-mask3d-v1m1-0-spunet-base_3_masks_dice+focal2/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -89,7 +89,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.01,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -138,7 +138,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.01,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

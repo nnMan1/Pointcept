@@ -136,6 +136,20 @@ class Mask3D(nn.Module):
             sampled_coords.append(points[seed_ids[i]])
             sampled_features.append(features[seed_ids[i]])
 
+            # from pointcept.utils.visualization import to_o3d
+            # import open3d as o3d
+
+            # pcd1 = to_o3d(grid_coordinates[batch_start:batch_end].float())
+            # o3d.io.write_point_cloud('pcd1.ply', pcd1)
+
+
+            # pcd2 = to_o3d(sampled_coords[-1])
+            # o3d.io.write_point_cloud('pcd2.ply', pcd2)
+
+            batch_start = batch_end
+
+
+
         mins = torch.stack(
                 [
                     coordinates.decomposed_features[i].min(dim=0)[0]
@@ -157,9 +171,8 @@ class Mask3D(nn.Module):
         
         query_pos = self.query_projection(query_pos)
 
-        queries = torch.zeros_like(query_pos).permute((0, 2, 1))
-        # queries = torch.stack(sampled_features)
-
+        # queries = torch.zeros_like(query_pos).permute((0, 2, 1))
+        queries = torch.stack(sampled_features)
         query_pos = query_pos.permute((2, 0, 1))
 
         axiliary_losses = [], [], [], []
@@ -346,7 +359,7 @@ class MaskModule(nn.Module):
             for _ in range(data['num_pooling_steps']):
                 attn_mask = [self.pooling(a.float()) for a in attn_mask]
 
-            a, _ = torch.stack([a.F.detach().sigmoid() < 0.5 for a in attn_mask]).max(0)
+            a, _ = torch.stack([a.F.detach().sigmoid() < 0.5 for a in attn_mask]).min(0)
 
             attn_mask = me.SparseTensor(
                 features=a,
@@ -416,10 +429,10 @@ class QueryRefinement(nn.Module):
         output = self.cross_attention(
                     queries.permute((1, 0, 2)),
                     src_pcd,
-                    # memory_mask=attn_mask.repeat_interleave(
-                    #     self.num_heads, dim=0
-                    # ).permute((0, 2, 1)),
-                    # memory_key_padding_mask=None,  # here we do not apply masking on padded region
+                    memory_mask=attn_mask.repeat_interleave(
+                        self.num_heads, dim=0
+                    ).permute((0, 2, 1)),
+                    memory_key_padding_mask=None,  # here we do not apply masking on padded region
                     pos=pos_encoding.permute((1, 0, 2)),
                     query_pos=query_pos_encoding,
                 )
