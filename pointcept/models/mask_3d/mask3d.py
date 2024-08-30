@@ -40,7 +40,17 @@ class Mask3D(nn.Module):
         self.dropout = 0.0
         self.hlevels = [0,1,2,3]
 
-        self.backbone = build_model(backbone)        
+        self.backbone = build_model(backbone)  
+
+        self.mask_features_head = me.MinkowskiConvolution(
+            in_channels=self.backbone.PLANES[7],
+            out_channels=self.mask_dim,
+            kernel_size=1,
+            stride=1,
+            bias=True,
+            dimension=3
+        )
+
         self.pooling = MinkowskiAvgPooling(kernel_size=2, stride=2, dimension=3)
 
         position_encoding.pop('type')
@@ -114,8 +124,8 @@ class Mask3D(nn.Module):
 
         total_time_start = time.time()
         
-        mask_features, aux = self.backbone(data)
-        pcd_features = aux[-1]
+        pcd_features, aux = self.backbone(data)
+        mask_features = self.mask_features_head(pcd_features)
 
         if self.mask_module.use_seg_masks:
             mask_segments = []
@@ -177,7 +187,7 @@ class Mask3D(nn.Module):
 
         axiliary_losses = [], [], [], []
 
-        for _ in range(1):
+        for _ in range(3):
             for i in self.hlevels:
 
                 mask_module_data = {

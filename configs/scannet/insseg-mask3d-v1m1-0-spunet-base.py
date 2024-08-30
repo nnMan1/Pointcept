@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = True
 evaluate = True
 resume=True
-weight='exp/delete_imed_segments/insseg-scannet-v1m1-0-spunet-base_delete46/model/model_last.pth'
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -39,7 +39,7 @@ segment_ignore_index = (-1, 0, 1)
 model = dict(
     type="Mask-3D",
     backbone=dict(
-        type="MinkUNet34C",
+        type="Res16UNet34C",
         in_channels = 6,
         out_channels = 128,
         out_fpn=True, #return intermidiate features
