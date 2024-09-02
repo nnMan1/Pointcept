@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = True
 evaluate = True
 resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base2/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -139,7 +139,8 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                     "seed_ids",
-                    "seg_indices"
+                    "seg_indices",
+                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
             ),
@@ -177,7 +178,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type="FPSSeed", n_points=150),
+            dict(type="FPSSeed", n_points=100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -192,7 +193,8 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                     "seed_ids",
-                    "seg_indices"
+                    "seg_indices",
+                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

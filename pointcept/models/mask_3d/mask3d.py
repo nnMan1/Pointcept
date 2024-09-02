@@ -121,9 +121,16 @@ class Mask3D(nn.Module):
         offset = data['offset']
         seed_ids = data['seed_ids']
         seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
+        group_segment = data['group_segment']
 
-        total_time_start = time.time()
-        
+        bb = 0
+        for be in offset:
+            tmp = seg_indices[bb:be]
+            _, inverse_indices = torch.unique(tmp, return_inverse=True)
+            seg_indices[bb:be] = inverse_indices   
+            bb = be
+
+
         pcd_features, aux = self.backbone(data)
         mask_features = self.mask_features_head(pcd_features)
 
@@ -253,13 +260,12 @@ class Mask3D(nn.Module):
             axiliary_losses[3].append(ious.mean())
                     
         return_dict = {
-            'bce_loss': torch.stack(axiliary_losses[0]).mean(),
-            'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            'dice_loss': torch.stack(axiliary_losses[1]).mean(),
+            'bce_loss': torch.stack(axiliary_losses[0]).sum() / len(offset),
+            'focal_loss': torch.stack(axiliary_losses[2]).sum() / len(offset),
+            'dice_loss': torch.stack(axiliary_losses[1]).sum() / len(offset),
             'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
         
-
         if not self.training:
             # masks = db_scan(data, masks)
             return_dict.update(compute_stats(masks, data, offset))
@@ -442,7 +448,6 @@ class QueryRefinement(nn.Module):
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
         pos_encoding, _, _ = pad_data(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
 
-
         attn_mask.permute((0, 2, 1))[
                     attn_mask.sum(1) == rand_idx[0].shape[0]
                 ] = False
@@ -464,10 +469,7 @@ class QueryRefinement(nn.Module):
                     pos=pos_encoding.permute((1, 0, 2)),
                     query_pos=query_pos_encoding,
                 )
-        
-        if output.isnan().sum() > 0:
-            pass
-        
+                
         output = self.self_attention(
                     output,
                     tgt_mask=None,

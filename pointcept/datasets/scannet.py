@@ -22,6 +22,8 @@ from .preprocessing.scannet.meta_data.scannet200_constants import (
     VALID_CLASS_IDS_200,
 )
 
+import torch_scatter
+
 
 @DATASETS.register_module()
 class ScanNetDataset(Dataset):
@@ -112,11 +114,12 @@ class ScanNetDataset(Dataset):
         else:
             instance = np.ones(coord.shape[0]) * -1
 
-        
         uni = np.unique(seg_indices)
 
         for i, v in enumerate(uni):
             seg_indices[seg_indices == v] = i
+
+        group_segment = torch_scatter.scatter_mean(torch.tensor(segment), torch.tensor(seg_indices)).numpy()
 
         data_dict = dict(
             coord=coord,
@@ -126,6 +129,7 @@ class ScanNetDataset(Dataset):
             instance=instance,
             scene_id=scene_id,
             seg_indices=seg_indices,
+            group_segment=group_segment
         )
 
         if self.la:

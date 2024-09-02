@@ -143,7 +143,7 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
             iou = iou[filter]
             ids = ids[filter]
             
-            keep = nms(preds, stability, 0.7).cpu()
+            keep = nms(preds, stability, 0.3).cpu()
             preds = preds[:, keep]
             stability = stability[keep]
             iou = iou[keep]
