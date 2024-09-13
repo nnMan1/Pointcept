@@ -337,8 +337,7 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        return self.my_optimized_forward(outputs, targets, offset)
-        # return self.memory_efficient_forward(outputs, targets, mask_type)
+        return self.my_optimized_forward_v2(outputs, targets, offset)
 
     def __repr__(self, _repr_indent=4):
         head = "Matcher " + self.__class__.__name__

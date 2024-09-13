@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = True
 evaluate = True
 resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base2/model/model_last.pth'
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base_rm/model/model_last.pth'
 
 class_names = [
     "wall",

@@ -135,15 +135,17 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
 
             ids = torch.arange(len(stability))
 
-            st_tras = 0.1
+            filter = ((preds > 0).sum(0) > 100).cpu()
 
-            filter = (stability > st_tras) #& (pred_ious > 0.3)
+            # st_tras = 0.1
+
+            # filter = (stability > st_tras) #& (pred_ious > 0.3)
             preds = preds[:, filter]
             stability = stability[filter]
             iou = iou[filter]
             ids = ids[filter]
             
-            keep = nms(preds, stability, 0.3).cpu()
+            keep = nms(preds, stability, 1).cpu()
             preds = preds[:, keep]
             stability = stability[keep]
             iou = iou[keep]
