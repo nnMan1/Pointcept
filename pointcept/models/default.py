@@ -5,7 +5,8 @@ import torch_scatter
 from pointcept.models.losses import build_criteria
 from pointcept.models.utils.structure import Point
 from .builder import MODELS, build_model
-
+from pointcept.utils.visualization import to_o3d, colors
+import open3d as o3d
 
 
 @MODELS.register_module()
@@ -62,12 +63,40 @@ class GroupingSegmentor(nn.Module):
         bb = 0
         for be in input_dict['offset']:
             groups = input_dict['seg_indices'][bb:be]
+            group_size = torch.bincount(groups)
+
+            if 'segment' in input_dict.keys():
+                labels = input_dict['segment'][bb:be]
+
             fts = bb_features[bb:be]
+
+            labels = labels[group_size[groups] > 50]
+            coords = input_dict['coord'][bb:be][group_size[groups] > 50]
+            fts = fts[group_size[groups] > 50]
+            groups = groups[group_size[groups] > 50]
+
+
+            filter = torch_scatter.scatter_min(labels, groups)[0] != torch_scatter.scatter_max(labels, groups)[0]
+            filter = filter.cpu()
+            print(group_size[filter])
+
+            # if self.training:
+            #     filter = group_size[groups] > 50
+            #     fts = fts[filter]
+            #     labels = labels[filter] 
+            #     groups = groups[filter]
 
             group_fts = torch_scatter.scatter_mean(fts, groups, dim=0)
 
             if 'segment' in input_dict.keys():
-                tgts_gr.append(torch_scatter.scatter_min(input_dict['segment'][bb:be], groups)[0])
+                if any(torch_scatter.scatter_min(labels, groups)[0] != torch_scatter.scatter_max(labels, groups)[0]):
+                    # ids = torch.where(torch_scatter.scatter_min(labels, groups)[0] == torch_scatter.scatter_max(labels, groups)[0])
+                    # print(ids, filter.sum())
+                    pcd = to_o3d(input_dict['coord'][bb:be][filter[groups.cpu()]].cpu(), verts_colors=colors[groups.cpu()[filter[groups.cpu()]] % len(colors)])
+                    o3d.io.write_point_cloud('pcd.ply', pcd)
+                    raise Exception("Wrong annotations")
+
+                tgts_gr.append(torch_scatter.scatter_min(labels, groups)[0])
 
             sl = self.final(group_fts)
             seg_logits_gr.append(sl)
@@ -78,14 +107,13 @@ class GroupingSegmentor(nn.Module):
         
         seg_logits_pt = torch.cat(seg_logits_pt, 0)
         seg_logits_gr = torch.cat(seg_logits_gr, 0)
-        tgts_gr = torch.cat(tgts_gr)
 
-        # print(seg_logits_pt.shape, seg_logits_gr.shape, tgts_gr.max(),tgts_gr.min(), tgts_gr.dtype)
-        # exit(0)
+        if 'segment' in input_dict.keys():
+            tgts_gr = torch.cat(tgts_gr)
 
         # train
         if self.training:
-            loss = self.criteria(seg_logits_pt, input_dict["segment"])
+            loss = self.criteria(seg_logits_gr, tgts_gr)
             return dict(loss=loss)
         # eval
         elif "segment" in input_dict.keys():
