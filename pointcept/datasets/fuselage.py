@@ -126,29 +126,6 @@ class Fuselage(Dataset):
             'path': self.data_list[idx]
         } 
 
-
-        pcd = o3d.geometry.PointCloud()
-
-        for cls in self.classes:
-            # print(os.path.join(self.data_root, data, cls, '*.ply'))
-            for file in glob.glob(os.path.join(self.data_root, data, cls, '*.ply')):
-                tmp = o3d.io.read_point_cloud(file)
-                pcd += tmp
-                labels.append(np.ones(np.asarray(tmp.points).shape[0]) * self.class_to_id[cls])
-
-        if(len(labels) == 0):
-            return self.get_data(idx + 1)
-
-        labels = np.concatenate(labels)
-    
-        return {
-            'coord': np.asarray(pcd.points),
-            'segment': labels.astype(np.int32),
-            'normal': np.asarray(pcd.points),
-            'id': idx,
-            'path': self.data_list[idx]
-        }
-
         
     def get_data_name(self, idx):
         return str(self.data_list[idx]).replace('/', '_')
@@ -156,6 +133,18 @@ class Fuselage(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+
+        groups = data_dict['seg_indices']
+        group_size = np.bincount(groups)
+        soft_gorups = data_dict['seg_indices']
+
+        for g, s in enumerate(group_size):
+            if s > 0:
+                labels = data_dict['segment']
+                labels = labels[groups == g]
+                label = np.bincount(labels).argmax()
+                data_dict['segment'][groups == g] = label
+
         data_dict = self.transform(data_dict)
         return data_dict
 

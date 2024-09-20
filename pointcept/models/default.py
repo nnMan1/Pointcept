@@ -70,29 +70,11 @@ class GroupingSegmentor(nn.Module):
 
             fts = bb_features[bb:be]
 
-            labels = labels[group_size[groups] > 50]
-            coords = input_dict['coord'][bb:be][group_size[groups] > 50]
-            fts = fts[group_size[groups] > 50]
-            groups = groups[group_size[groups] > 50]
-
-
-            filter = torch_scatter.scatter_min(labels, groups)[0] != torch_scatter.scatter_max(labels, groups)[0]
-            filter = filter.cpu()
-            print(group_size[filter])
-
-            # if self.training:
-            #     filter = group_size[groups] > 50
-            #     fts = fts[filter]
-            #     labels = labels[filter] 
-            #     groups = groups[filter]
-
             group_fts = torch_scatter.scatter_mean(fts, groups, dim=0)
 
             if 'segment' in input_dict.keys():
                 if any(torch_scatter.scatter_min(labels, groups)[0] != torch_scatter.scatter_max(labels, groups)[0]):
-                    # ids = torch.where(torch_scatter.scatter_min(labels, groups)[0] == torch_scatter.scatter_max(labels, groups)[0])
-                    # print(ids, filter.sum())
-                    pcd = to_o3d(input_dict['coord'][bb:be][filter[groups.cpu()]].cpu(), verts_colors=colors[groups.cpu()[filter[groups.cpu()]] % len(colors)])
+                    pcd = to_o3d(input_dict['coord'][bb:be].cpu(), verts_colors=colors[groups.cpu() % len(colors)])
                     o3d.io.write_point_cloud('pcd.ply', pcd)
                     raise Exception("Wrong annotations")
 

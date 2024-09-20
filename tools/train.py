@@ -24,18 +24,18 @@ def main_worker(cfg):
 
 class Args:
     def __init__(self):
-        self.config_file = '/home/configs/abc_dataset/insseg-mask3d-v1m1-0-spunet-base.py'
+        self.config_file = '/home/configs/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping.py'
         self.num_gpus = 1
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base'}
+        self.options={'save_path': 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping_a2'}
 
 def main():
     # sh scripts/train.sh -p python -g 1 -d fuselage -c semseg-spunet-v1m1-0-base_lr_split_groupingV2 -n semseg-spunet-v1m1-0-base_lr_split_groupingV2[]
 
-    args = default_argument_parser().parse_args()
-    # args = Args()
+    # args = default_argument_parser().parse_args()
+    args = Args()
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(
