@@ -1,22 +1,24 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6  # bs: total bs in all gpus
-mix_prob = 0.8
+batch_size = 8  # bs: total bs in all gpus
+mix_prob = 0.0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 
 # model settings
 model = dict(
-    type="DefaultSegmentor",
+    type="GroupingSegmentor",
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
-        num_classes=6,
-        channels=(32, 64, 128, 128, 96, 96),
+        num_classes=0,
+        channels=(32, 64, 128, 128, 96, 256),
         layers=(2, 3, 4, 2, 2, 2),
     ),
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
+    final_in_channels = 256,
+    num_classes = 4 ,
+    criteria=[dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
 )
 
 # scheduler settings
@@ -33,16 +35,16 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "Fuselage"
-names=['body', 'body1', 'panel', 'rivets_t1', 'rivets_t2', 'rivets_t3']
-data_root = 'data/fuselage/crops_250x250x250_3_rivets'
+names=['body', 'body1', 'panel', 'rivets']
+data_root = 'data/fuselage/crops_250x250x250'
 
 data = dict(
-    num_classes=6,
+    num_classes=4,
     ignore_index=-1,
     names = names,
     train=dict(
         type=dataset_type,
-        split="train_lr",
+        split="train",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -65,7 +67,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment", "normal", "seg_indices"),
@@ -74,12 +76,12 @@ data = dict(
             dict(type="SphereCrop", point_max=100000, mode="random"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
-            # dict(type="ShufflePoint"),
+            dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -87,13 +89,13 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val_lr",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment", "normal", "seg_indices"),
@@ -106,7 +108,7 @@ data = dict(
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -114,7 +116,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val_lr",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -124,11 +126,11 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
-                keys=("coord", "segment", "normal"),
+                keys=("coord", "segment", "normal", "seg_indices"),
             ),
             crop=None,
             post_transform=[
@@ -136,8 +138,8 @@ data = dict(
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index", "normal", "seg_indices"),
-                    feat_keys=("grid_coord"),
+                keys=("coord", "grid_coord", "segment", "seg_indices"),
+                    feat_keys=("grid_coord",),
                 ),
             ],
             aug_transform=[

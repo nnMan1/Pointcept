@@ -6,7 +6,7 @@ mix_prob = 0.8
 empty_cache = True
 enable_amp = True
 resume=True
-weight='/home/exp/fuselage/semseg-spunet-v1m1-0-base_250x250x250/model/model_last.pth'
+weight='/home/exp/fuselage/semseg-spunet-v1m1-0-base_cls_1_3/model/model_last.pth'
 
 # model settings
 model = dict(

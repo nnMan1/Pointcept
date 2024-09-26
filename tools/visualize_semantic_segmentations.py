@@ -26,11 +26,15 @@ dataloader = torch.utils.data.DataLoader(
             persistent_workers=True,
         )
 
-results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets/result'
+results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping_point_loss_d256/result'
 
 for sample in dataset:
-    print(sample["id"])
+    print(sample.keys())
     result = np.load(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.npy"))
+    gt = sample['segment']
+
+    # result = gt == result
+
     pcd = to_o3d(sample['coord'], verts_colors=colors[result % len(colors)])
 
     o3d.io.write_point_cloud(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.ply"), pcd)

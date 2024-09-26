@@ -134,16 +134,15 @@ class Fuselage(Dataset):
         # load data
         data_dict = self.get_data(idx)
 
-        groups = data_dict['seg_indices']
-        group_size = np.bincount(groups)
-        soft_gorups = data_dict['seg_indices']
+        # groups = data_dict['seg_indices']
+        # group_size = np.bincount(groups)
 
-        for g, s in enumerate(group_size):
-            if s > 0:
-                labels = data_dict['segment']
-                labels = labels[groups == g]
-                label = np.bincount(labels).argmax()
-                data_dict['segment'][groups == g] = label
+        # for g, s in enumerate(group_size):
+        #     if s > 0:
+        #         labels = data_dict['segment']
+        #         labels = labels[groups == g]
+        #         label = np.bincount(labels).argmax()
+        #         data_dict['segment'][groups == g] = label
 
         data_dict = self.transform(data_dict)
         return data_dict

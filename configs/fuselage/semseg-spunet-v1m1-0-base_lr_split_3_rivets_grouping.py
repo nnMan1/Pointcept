@@ -5,8 +5,8 @@ batch_size = 6  # bs: total bs in all gpus
 mix_prob = 0.0
 empty_cache = True
 enable_amp = False
-resume=True
-weight='exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping_a2/model/model_best.pth'
+# resume=True
+# weight='exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping_a2/model/model_best.pth'
 
 # model settings
 model = dict(
@@ -15,10 +15,10 @@ model = dict(
         type="SpUNet-v1m1",
         in_channels=3,
         num_classes=0,
-        channels=(32, 64, 128, 128, 96, 96),
+        channels=(32, 64, 128, 128, 96, 256),
         layers=(2, 3, 4, 2, 2, 2),
     ),
-    final_in_channels = 96,
+    final_in_channels = 256,
     num_classes = 6 ,
     criteria=[dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
 )
