@@ -10,10 +10,12 @@ from typing import Callable, List, Optional, Union
 
 from pointcept.utils.logger import get_root_logger
 from pointcept.utils.cache import shared_dict
+from sklearn.cluster import DBSCAN
 
 from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
+
 
 @DATASETS.register_module()
 class Fuselage(Dataset):
@@ -28,7 +30,8 @@ class Fuselage(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
-        classes = ['body', 'body1', 'hole', 'panel', 'rivet', 'table']
+        classes = ['body', 'body1', 'hole', 'panel', 'rivet', 'table'],
+        augment_holes = False
     ):
         super(Fuselage, self).__init__()
 
@@ -44,6 +47,7 @@ class Fuselage(Dataset):
         )  # force make loop = 1 while in test mode
         self.test_mode = test_mode
         self.test_cfg = test_cfg if test_mode else None
+        self.augment_holes = augment_holes
 
         if test_mode:
             self.test_voxelize = TRANSFORMS.build(self.test_cfg.voxelize)
@@ -63,6 +67,52 @@ class Fuselage(Dataset):
                 len(self.data_list), self.loop, split
             )
         )
+
+    def remove_rivet(self, data_dict):
+        
+        rivet_id = self.class_to_id['rivets']
+        hole_id = self.class_to_id['hole']
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+    
+        if np.sum(labels == rivet_id) == 0:
+            return data_dict
+        
+        ids = np.where(labels == rivet_id)[0]
+
+        clusters = (
+                        DBSCAN(
+                            eps=0.95,
+                            min_samples=1,
+                            n_jobs=1,
+                        )
+                        .fit(points[ids])
+                        .labels_
+                    )
+        
+        cluster_id = np.random.choice(clusters, 1)[0]
+
+        remove_ids = np.where(clusters == cluster_id)
+        center = points[ids[remove_ids]].mean(axis=0)
+        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max()
+
+        hole_diam_radious = rivet_diam + np.random.uniform(2, 4)
+
+        dists =  np.linalg.norm(points - center, axis=-1)
+        ids_interesting = np.where(dists < hole_diam_radious)
+        ids_remove = np.logical_and(dists < hole_diam_radious, labels == rivet_id)
+
+        ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.8, 1) * ids_remove.sum())
+
+        labels[ids_interesting] = hole_id
+
+        data_dict['segment'] = labels
+
+        for key, val in data_dict.items():
+            if isinstance(val, np.ndarray) and len(val) == len(points):
+                data_dict[key] = val[np.logical_not(ids_remove)]
+
+        return data_dict
 
     def get_data_list(self):
         
@@ -126,7 +176,6 @@ class Fuselage(Dataset):
             'path': self.data_list[idx]
         } 
 
-        
     def get_data_name(self, idx):
         return str(self.data_list[idx]).replace('/', '_')
 
@@ -144,7 +193,15 @@ class Fuselage(Dataset):
         #         label = np.bincount(labels).argmax()
         #         data_dict['segment'][groups == g] = label
 
+
+        if self.augment_holes:
+            data_dict = self.remove_rivet(data_dict)
+            data_dict = self.remove_rivet(data_dict)
+            data_dict = self.remove_rivet(data_dict)
+
+
         data_dict = self.transform(data_dict)
+
         return data_dict
 
     def prepare_test_data(self, idx):

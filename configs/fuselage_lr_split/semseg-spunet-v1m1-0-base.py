@@ -1,30 +1,29 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6  # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 mix_prob = 0.8
 empty_cache = True
 enable_amp = False
 # resume=True
-# weight='exp/delete_imed/semseg-spunet-v1m1-0-base_lr_split_grouping3/model/model_last.pth'
+# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
 
 # model settings
 model = dict(
-    type="GroupingSegmentorV2",
+    type="DefaultSegmentor",
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
-        num_classes=0,
-        channels=(32, 64, 128, 128, 96, 256),
+        num_classes=4,
+        channels=(32, 64, 128, 128, 96, 96),
         layers=(2, 3, 4, 2, 2, 2),
     ),
-    final_in_channels = 256,
-    num_classes = 4 ,
-    criteria=[dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
+    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
 )
 
 # scheduler settings
 epoch = 800
+eval_epoch = 100# sche total eval & checkpoint epoch
 optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(
     type="OneCycleLR",
@@ -32,7 +31,7 @@ scheduler = dict(
     pct_start=0.05,
     anneal_strategy="cos",
     div_factor=10.0,
-    final_div_factor=10000.0,
+    final_div_factor=1000.0,
 )
 
 # dataset settings
@@ -55,8 +54,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis="z", p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
@@ -72,18 +71,18 @@ data = dict(
                 grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
-                keys=("coord", "segment", "normal", "seg_indices"),
+                keys=("coord", "segment"),
                 return_grid_coord=True,
             ),
             dict(type="SphereCrop", point_max=100000, mode="random"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
-            # dict(type="ShufflePoint"),
+            dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                keys=("coord", "grid_coord", "segment"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -100,17 +99,17 @@ data = dict(
                 grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
-                keys=("coord", "segment", "normal", "seg_indices"),
+                keys=("coord", "segment"),
                 return_grid_coord=True,
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode="center"),
+            dict(type="SphereCrop", point_max=200000, mode="center"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                keys=("coord", "grid_coord", "segment"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -132,7 +131,7 @@ data = dict(
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
-                keys=("coord", "segment", "normal"),
+                keys=("coord", "segment"),
             ),
             crop=None,
             post_transform=[
@@ -140,8 +139,8 @@ data = dict(
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index", "normal", "seg_indices"),
-                    feat_keys=("grid_coord"),
+                    keys=("coord", "grid_coord", "index"),
+                    feat_keys=("grid_coord",),
                 ),
             ],
             aug_transform=[

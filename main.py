@@ -7,59 +7,93 @@ import numpy as np
 import open3d as o3d 
 from pointcept.datasets import build_dataset
 from pointcept.utils.visualization import to_o3d, colors
+from sklearn.cluster import DBSCAN
+
+def IoU(ids1, ids2):
+    n_points = np.maximum(ids1.max(), ids2.max()) + 1
+    t1 = np.zeros((n_points, ))
+    t2 = np.zeros((n_points, ))
+
+    t1[ids1] = 1
+    t2[ids2] = 1
+    return (t1 * t2).sum() / (t1.sum() + t2.sum() - (t1 * t2).sum())
 
 dataset = build_dataset(dict(
                         type='Fuselage',
                         split='val_lr',
-                        data_root='data/fuselage/crops_250x250x250_3_rivets',
-                        transform=[
-                            dict(type="CenterShift", apply_z=True),
-                            dict(
-                                type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.2
-                            ),
-                            # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis="z", p=0.75),
-                            dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-                            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-                            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
-                            dict(type="RandomScale", scale=[0.9, 1.1]),
-                            # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
-                            dict(type="RandomFlip", p=0.5),
-                            dict(type="RandomJitter", sigma=0.005, clip=0.02),
-                            # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
-                            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
-                            dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
-                            dict(type="ChromaticJitter", p=0.95, std=0.05),
-                            # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
-                            # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
-                            dict(
-                                type="GridSample",
-                                grid_size=0.3,
-                                hash_type="fnv",
-                                mode="train",
-                                keys=("coord", "segment", "normal", "seg_indices"),
-                                return_grid_coord=True,
-                            ),
-                            dict(type="SphereCrop", point_max=100000, mode="random"),
-                            dict(type="CenterShift", apply_z=False),
-                            # dict(type="NormalizeColor"),
-                            # dict(type="ShufflePoint"),
-                            dict(type="ToTensor"),
-                            dict(
-                                type="Collect",
-                                keys=("coord", "grid_coord", "segment", "seg_indices", 'path'),
-                                feat_keys=("grid_coord"),
-                            ),
-                        ],
+                        data_root='data/fuselage/crops_250x250x250_holes',
+                        transform=[],
                         test_mode=False,
                         classes=[
-                            'body', 'body1', 'panel', 'rivets_t1', 'rivets_t2', 'rivets_t3'
+                           'body', 'body1', 'hole', 'panel', 'rivets'
                         ]))
 
-results = '/home'
+dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=1,
+            drop_last=False,
+            persistent_workers=True,
+        )
 
-for sample in dataset:
-    # print(sample["id"])
-    # result = np.load(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.npy"))
-    pcd = to_o3d(sample['coord'], verts_colors=colors[sample["seg_indices"] % len(colors)])
+results = 'exp/fuselage_hole_detection/semseg-spunet-v1-m1-0-base_lr_split_holes_aug_v3/result/'
 
-    o3d.io.write_point_cloud(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.ply"), pcd)
+preds = []
+gts = []
+coords = []
+
+print(len(dataset))
+
+for i, sample in enumerate(dataset):
+
+    if i > len(dataset):
+        break
+
+    result = np.load(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.npy"))
+    gt = sample['segment']
+    points = sample['coord']
+
+    preds.append(result)
+    gts.append(gt)
+    coords.append(points)
+
+    # result = gt == result
+
+    # pcd = to_o3d(sample['coord'], verts_colors=colors[result % len(colors)])
+
+tp, tn, fp, fn = 0, 0, 0, 0
+
+preds = np.concatenate(preds)[::3]
+gts = np.concatenate(gts)[::3]
+coords = np.concatenate(coords)[::3]
+
+ids_pred = np.where(preds == 2)[0]
+ids_gts = np.where(gts == 2)[0]
+
+print(len(ids_pred), len(ids_gts))
+
+coords1 = coords[ids_pred]
+pcd = to_o3d(coords1)
+clusters1 = DBSCAN(eps=4, min_samples=2).fit(coords1).labels_
+
+print(clusters1.max())
+
+coords2 = coords[ids_gts]
+clusters2 = DBSCAN(eps=4, min_samples=2).fit(coords2).labels_
+
+d1 = np.zeros((clusters1.max()+1,))
+d2 = np.zeros((clusters2.max()+1,))
+o = 0
+
+for c1 in np.unique(clusters1):
+
+    if np.sum(clusters1 == c1) < 20:
+        o += 1
+        continue
+
+    for c2 in np.unique(clusters2):
+        if IoU(ids_pred[clusters1 == c1], ids_gts[clusters2 == c2]) > 0.5:
+            d1[c1] = 1
+            d2[c2] = 1
+
+print(d1.sum(), d2.sum(), (1 - d1).sum() - o, (1 - d2).sum())

@@ -11,11 +11,11 @@ from pointcept.utils.visualization import to_o3d, colors
 dataset = build_dataset(dict(
                         type='Fuselage',
                         split='val_lr',
-                        data_root='data/fuselage/crops_250x250x250_3_rivets',
+                        data_root='data/fuselage/crops_250x250x250',
                         transform=[],
                         test_mode=False,
                         classes=[
-                            'body', 'body1', 'panel', 'rivets_t1', 'rivets_t2', 'rivets_t3'
+                           'body', 'body1', 'panel', 'rivets'
                         ]))
 
 dataloader = torch.utils.data.DataLoader(
@@ -26,7 +26,7 @@ dataloader = torch.utils.data.DataLoader(
             persistent_workers=True,
         )
 
-results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_3_rivets_grouping_point_loss_d256/result'
+results = 'exp/fuselage_lr_split/semseg-pt-v3-0-base-ce-loss/result'
 
 for sample in dataset:
     print(sample.keys())
