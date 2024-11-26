@@ -1,43 +1,64 @@
-from pointcept.utils import visualization
-from pointcept.datasets import Fuselage, ABCDataset, Assembly, ScanNetDataset
+import torch
 import open3d as o3d
-import torch_scatter
+from pointcept.models import build_model
+from pointcept.datasets import build_dataset
+from pointcept.utils.visualization import to_o3d, colors
 
-class_names = [
-    "assembly",
-]
-num_classes = 1
-segment_ignore_index = (-1, )
+dataset = build_dataset(dict(
+                        type='Assembly',
+                        split='train'))
 
-ds = Assembly(
-        split="train",
-        transform=[
-            dict(type="ToTensor"),
-            dict(
-                type="Collect",
-                keys=(
-                    "coord",
-                ),
-                feat_keys=("coord"),
-            ),
-        ],
-        test_mode=False,
-    )
+dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=0,
+            drop_last=False,
+            persistent_workers=False,
+        )
 
+ptv3_cfg =  dict(
+    type="DefaultSegmentorV2",
+    num_classes=20,
+    backbone_out_channels=64,
+    backbone=dict(
+        type="PT-v3m1",
+        in_channels=6,
+        order=["z", "z-trans", "hilbert", "hilbert-trans"],
+        stride=(2, 2, 2, 2),
+        enc_depths=(2, 2, 2, 6, 2),
+        enc_channels=(32, 64, 128, 256, 512),
+        enc_num_head=(2, 4, 8, 16, 32),
+        enc_patch_size=(1024, 1024, 1024, 1024, 1024),
+        dec_depths=(2, 2, 2, 2),
+        dec_channels=(64, 64, 128, 256),
+        dec_num_head=(4, 4, 8, 16),
+        dec_patch_size=(1024, 1024, 1024, 1024),
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        drop_path=0.3,
+        shuffle_orders=True,
+        pre_norm=True,
+        enable_rpe=False,
+        enable_flash=True,
+        upcast_attention=False,
+        upcast_softmax=False,
+        cls_mode=False,
+        pdnorm_bn=False,
+        pdnorm_ln=False,
+        pdnorm_decouple=True,
+        pdnorm_adaptive=False,
+        pdnorm_affine=True,
+        pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+    ),
+    criteria=[
+        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
+        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
+    ],
+)
 
-for d in ds:
-
-    # id += 1
-
-    # if (torch_scatter.scatter_min(d['segment'], d['seg_indices'])[0] - torch_scatter.scatter_min(d['segment'], d['seg_indices'])[0]).min() != 0:
-    #     raise Exception()
-
-    # print(id)
-
-    coords = d['coord']
-    # seg = d['seg_indices'] % len(visualization.colors)
-    pcd = visualization.to_o3d(coords)
-    o3d.io.write_point_cloud('pcd.ply', pcd)
-    # o3d.visualization.draw_geometries([pcd])
+for d in dataloader:
+    print(d['borders'])
     exit(0)
-    

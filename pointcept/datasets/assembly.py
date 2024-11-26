@@ -1,6 +1,7 @@
 import os
 import glob
 import h5py
+import json
 import numpy as np
 import torch
 from copy import deepcopy
@@ -72,13 +73,14 @@ class Assembly(Dataset):
         
         data_list = [f.strip() for f in data_list]
         data_list = [f.split('/')[-1] for f in data_list]
+
         dl = []
         
         if 'train' in data_list:
             pass
 
-        for i in range(6):
-            dl += [f'{self.split}_{f}_{i}.h5' for f in data_list]
+        for f in data_list:
+           dl += glob.glob(f'{self.data_root}/scans5/*/{f}/*.json')
 
         return dl
 
@@ -96,13 +98,35 @@ class Assembly(Dataset):
             'id': idx,
             'path': self.data_list[idx]
         } 
+    
+    def get_data_json(self, idx):
+
+    
+        idx = idx % len(self.data_list)
+
+        data = self.data_list[idx]
+
+        with open(data) as f:
+            data = json.load(f)
+
+        data['coord'] = data.pop('points')
+        data['instance'] = data.pop('labels')
+        data['segment'] = np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)[::3],
+        data['id'] = idx
+        data['path'] = self.data_list[idx]
+
+        for k in ['coord', 'borders', 'instance']:
+            if k in data.keys():
+                data[k] = np.asarray(data[k])
+        
+        return data
 
     def get_data_name(self, idx):
         return str(self.data_list[idx].assembly)
 
     def prepare_train_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)
+        data_dict = self.get_data_json(idx)
         data_dict = self.transform(data_dict)
         return data_dict
 

@@ -1,4 +1,10 @@
-FROM pytorch/pytorch:2.5.1-cuda-cudnn9-devel
+ARG TORCH_VERSION=2.0.1
+ARG CUDA_VERSION=11.7
+ARG CUDNN_VERSION=8
+
+FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
+
+VOLUME ["/mnt/618E45BE72620BDD/PhD/repositories/Pointcept/tmp", "/home"]
 
 # Fix nvidia-key error issue (NO_PUBKEY A4B469963BF863CC)
 RUN rm /etc/apt/sources.list.d/*.list
@@ -17,16 +23,17 @@ RUN conda install h5py pyyaml -c anaconda -y
 RUN conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
 RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y
 
-RUN pip install --upgrade pip
-RUN pip install torch-geometric
-RUN pip install spconv-cu${CUDA_VERSION_NO_DOT}
-RUN pip install open3d
+RUN pip3 install --upgrade pip && \
+    pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
 
 # # Build MinkowskiEngine
-# RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
-# WORKDIR /workspace/MinkowskiEngine
-# RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" python setup.py install --blas=openblas --force_cuda
-# WORKDIR /workspace
+RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
+WORKDIR /workspace/MinkowskiEngine
+RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" python setup.py install --blas=openblas --force_cuda \
+	&& cd /workspace \
+	&& rm -r MinkowskiEngine
+	
+WORKDIR /workspace
 
 # # Build pointops
 # RUN git clone https://github.com/Pointcept/Pointcept.git
