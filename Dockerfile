@@ -4,8 +4,6 @@ ARG CUDNN_VERSION=8
 
 FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
 
-VOLUME ["/mnt/618E45BE72620BDD/PhD/repositories/Pointcept/tmp", "/home"]
-
 # Fix nvidia-key error issue (NO_PUBKEY A4B469963BF863CC)
 RUN rm /etc/apt/sources.list.d/*.list
 
@@ -21,7 +19,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 # Install Pointcept environment
 RUN conda install h5py pyyaml -c anaconda -y
 RUN conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
-RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y
+RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg libffi==3.3 -y 
 
 RUN pip3 install --upgrade pip && \
     pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d

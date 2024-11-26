@@ -1,4 +1,5 @@
 import torch
+from common_tools import VData
 import open3d as o3d
 from pointcept.models import build_model
 from pointcept.datasets import build_dataset
@@ -60,5 +61,5 @@ ptv3_cfg =  dict(
 )
 
 for d in dataloader:
-    print(d['borders'])
+    print(d['path'])
     exit(0)
