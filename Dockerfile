@@ -12,6 +12,11 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 	&& apt -y update --no-install-recommends \
 	&& apt -y install --no-install-recommends \
 	  git wget tmux vim zsh build-essential cmake ninja-build libopenblas-dev libsparsehash-dev \
+	  gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 \
+	  libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 \
+	  libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 \
+	  libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils \
+      ffmpeg libsm6 libxext6  -y \
 	&& apt autoremove -y \
 	&& apt clean -y \
 	&& export DEBIAN_FRONTEND=dialog
@@ -19,7 +24,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 # Install Pointcept environment
 RUN conda install h5py pyyaml -c anaconda -y
 RUN conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
-RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg libffi==3.3 -y 
+RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y 
+RUN conda install libffi==3.3 -y
 
 RUN pip3 install --upgrade pip && \
     pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
@@ -27,18 +33,18 @@ RUN pip3 install --upgrade pip && \
 # # Build MinkowskiEngine
 RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
 WORKDIR /workspace/MinkowskiEngine
-RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" python setup.py install --blas=openblas --force_cuda \
+RUN python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas \
 	&& cd /workspace \
 	&& rm -r MinkowskiEngine
 	
 WORKDIR /workspace
 
-# # Build pointops
-# RUN git clone https://github.com/Pointcept/Pointcept.git
-# RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointops -v
+# Build pointops
+RUN git clone https://github.com/Pointcept/Pointcept.git
+RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointops -v
 
-# # Build pointgroup_ops
-# RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointgroup_ops -v
+# Build pointgroup_ops
+RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointgroup_ops -v
 
-# # Build swin3d
-# RUN TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX 8.0" pip install -U git+https://github.com/microsoft/Swin3D.git -v
+# Build swin3d
+RUN TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX 8.0" pip install -U git+https://github.com/microsoft/Swin3D.git -v
