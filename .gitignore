@@ -22,3 +22,4 @@ scripts/*.sh
 samples_
 tests
 .env
+*.ply

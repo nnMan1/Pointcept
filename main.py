@@ -61,5 +61,10 @@ ptv3_cfg =  dict(
 )
 
 for d in dataloader:
-    print(d['path'])
-    exit(0)
+    data = VData.from_dict({
+        'points': d['coord'][0],
+        'labels': d['instance'][0],
+        'border_dist': d['border_dist'][0]
+    })
+
+    o3d.visualization.draw_geometries([data.to_o3d_pointcloud(color='border_dist')])

@@ -72,7 +72,7 @@ class Assembly(Dataset):
             raise NotImplementedError
         
         data_list = [f.strip() for f in data_list]
-        data_list = [f.split('/')[-1] for f in data_list]
+        data_list = [os.path.splitext(f.split('/')[-1])[0] for f in data_list]
 
         dl = []
         
@@ -101,13 +101,31 @@ class Assembly(Dataset):
     
     def get_data_json(self, idx):
 
+        def select_multiple(path, k):
+            basepath, name = os.path.split(path)
+            id = int(os.path.splitext(name)[0])    
+
+            max_idx = sorted([int(os.path.splitext(p)[0]) for p in os.listdir(basepath)], reverse=True)[0]
+
+            data = {}
+
+            for offset in range(k):
+                with open(os.path.join(basepath, f'{(id+offset) % (max_idx + 1)}.json'), 'r') as file:
+                    tmp = json.load(file)
+
+                for key, value in tmp.items():
+                    if key in data.keys():
+                        data[key] = np.concatenate([data[key], np.asarray(value)])
+                    else:
+                        data[key] = np.asarray(value) 
+
+            return data     
     
         idx = idx % len(self.data_list)
 
         data = self.data_list[idx]
 
-        with open(data) as f:
-            data = json.load(f)
+        data=select_multiple(data, 5)
 
         data['coord'] = data.pop('points')
         data['instance'] = data.pop('labels')
@@ -115,10 +133,16 @@ class Assembly(Dataset):
         data['id'] = idx
         data['path'] = self.data_list[idx]
 
+        if 'border_dist' in data:
+            data['border_dist'] = np.asarray(data['border_dist'])
+
+        if 'borders' in data:
+            data['borders'] = np.asarray(data['borders'])
+
         for k in ['coord', 'borders', 'instance']:
             if k in data.keys():
                 data[k] = np.asarray(data[k])
-        
+       
         return data
 
     def get_data_name(self, idx):
@@ -132,7 +156,7 @@ class Assembly(Dataset):
 
     def prepare_test_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)
+        data_dict = self.get_data_json(idx)
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
         data_dict_list = []
