@@ -29,10 +29,12 @@ class Assembly(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        multiview=1
     ):
         super(Assembly, self).__init__()
         self.data_root = data_root
         self.split = split
+        self.multiview = multiview
         self.transform = Compose(transform)
         self.cache = cache
         self.loop = (
@@ -125,11 +127,11 @@ class Assembly(Dataset):
 
         data = self.data_list[idx]
 
-        data=select_multiple(data, 5)
+        data=select_multiple(data, self.multiview)
 
         data['coord'] = data.pop('points')
         data['instance'] = data.pop('labels')
-        data['segment'] = np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)[::3],
+        data['segment'] = np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)
         data['id'] = idx
         data['path'] = self.data_list[idx]
 

@@ -191,12 +191,14 @@ class PointClip(object):
 
 @TRANSFORMS.register_module()
 class RandomDropout(object):
-    def __init__(self, dropout_ratio=0.2, dropout_application_ratio=0.5):
+    def __init__(self, dropout_ratio=0.2, dropout_application_ratio=0.5, 
+                 keys=['coord', 'origin_coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'displacement', 'strength', 'seg_indices']):
         """
         upright_axis: axis index among x,y,z, i.e. 2 for z
         """
         self.dropout_ratio = dropout_ratio
         self.dropout_application_ratio = dropout_application_ratio
+        self.keys = keys
 
     def __call__(self, data_dict):
         if random.random() < self.dropout_application_ratio:
@@ -208,20 +210,10 @@ class RandomDropout(object):
                 mask = np.zeros_like(data_dict["segment"]).astype(bool)
                 mask[data_dict["sampled_index"]] = True
                 data_dict["sampled_index"] = np.where(mask[idx])[0]
-            if "coord" in data_dict.keys():
-                data_dict["coord"] = data_dict["coord"][idx]
-            if "color" in data_dict.keys():
-                data_dict["color"] = data_dict["color"][idx]
-            if "normal" in data_dict.keys():
-                data_dict["normal"] = data_dict["normal"][idx]
-            if "strength" in data_dict.keys():
-                data_dict["strength"] = data_dict["strength"][idx]
-            if "segment" in data_dict.keys():
-                data_dict["segment"] = data_dict["segment"][idx]
-            if "instance" in data_dict.keys():
-                data_dict["instance"] = data_dict["instance"][idx]
-            if "seg_indices" in data_dict.keys():
-                data_dict["seg_indices"] = data_dict["seg_indices"][idx]
+
+            for key in self.keys:
+                if key in data_dict.keys():
+                    data_dict[key] = data_dict[key][idx]
 
         return data_dict
 
@@ -929,11 +921,14 @@ class GridSample(object):
 
 @TRANSFORMS.register_module()
 class SphereCrop(object):
-    def __init__(self, point_max=80000, sample_rate=None, mode="random"):
+    def __init__(self, point_max=80000, sample_rate=None, mode="random", 
+                 keys=['coord', 'origin_coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'displacement', 'strength', 'seg_indices']):
         self.point_max = point_max
         self.sample_rate = sample_rate
         assert mode in ["random", "center", "all"]
         self.mode = mode
+
+        self.keys = keys
 
     def __call__(self, data_dict):
         point_max = (
@@ -962,22 +957,9 @@ class SphereCrop(object):
                     idx_crop = np.argsort(dist2)[:point_max]
 
                     data_crop_dict = dict()
-                    if "coord" in data_dict.keys():
-                        data_crop_dict["coord"] = data_dict["coord"][idx_crop]
-                    if "grid_coord" in data_dict.keys():
-                        data_crop_dict["grid_coord"] = data_dict["grid_coord"][idx_crop]
-                    if "normal" in data_dict.keys():
-                        data_crop_dict["normal"] = data_dict["normal"][idx_crop]
-                    if "color" in data_dict.keys():
-                        data_crop_dict["color"] = data_dict["color"][idx_crop]
-                    if "displacement" in data_dict.keys():
-                        data_crop_dict["displacement"] = data_dict["displacement"][
-                            idx_crop
-                        ]
-                    if "strength" in data_dict.keys():
-                        data_crop_dict["strength"] = data_dict["strength"][idx_crop]
-                    if "seg_indices" in data_dict.keys():
-                        data_crop_dict["seg_indices"] = data_dict["seg_indices"][idx_crop]
+                    for key in self.keys:
+                        if key in data_dict.keys():
+                            data_crop_dict[key] = data_dict[key][idx_crop]
 
                     data_crop_dict["weight"] = dist2[idx_crop]
                     data_crop_dict["index"] = data_dict["index"][idx_crop]
@@ -1009,26 +991,10 @@ class SphereCrop(object):
             idx_crop = np.argsort(np.sum(np.square(data_dict["coord"] - center), 1))[
                 :point_max
             ]
-            if "coord" in data_dict.keys():
-                data_dict["coord"] = data_dict["coord"][idx_crop]
-            if "origin_coord" in data_dict.keys():
-                data_dict["origin_coord"] = data_dict["origin_coord"][idx_crop]
-            if "grid_coord" in data_dict.keys():
-                data_dict["grid_coord"] = data_dict["grid_coord"][idx_crop]
-            if "color" in data_dict.keys():
-                data_dict["color"] = data_dict["color"][idx_crop]
-            if "normal" in data_dict.keys():
-                data_dict["normal"] = data_dict["normal"][idx_crop]
-            if "segment" in data_dict.keys():
-                data_dict["segment"] = data_dict["segment"][idx_crop]
-            if "instance" in data_dict.keys():
-                data_dict["instance"] = data_dict["instance"][idx_crop]
-            if "displacement" in data_dict.keys():
-                data_dict["displacement"] = data_dict["displacement"][idx_crop]
-            if "strength" in data_dict.keys():
-                data_dict["strength"] = data_dict["strength"][idx_crop]
-            if "seg_indices" in data_dict.keys():
-                data_dict["seg_indices"] = data_dict["seg_indices"][idx_crop]
+            
+            for key in self.keys:
+                if key in data_dict.keys():
+                    data_dict[key] = data_dict[key][idx_crop]
 
         return data_dict
 
@@ -1173,7 +1139,22 @@ class FPSSeed(object):
 
         data_dict['seed_ids'] = ids.reshape(1, -1).numpy()
         return data_dict
-    
+
+@TRANSFORMS.register_module()
+class ClipFeature(object):
+
+    def __init__(self, key, min_value, max_value):
+        self.key = key
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def __call__(self, data_dict):
+        
+        data_dict[self.key] = np.minimum(data_dict[self.key], self.max_value)
+        data_dict[self.key] = np.maximum(data_dict[self.key], self.min_value)
+
+        return data_dict
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []
@@ -1185,3 +1166,4 @@ class Compose(object):
         for t in self.transforms:
             data_dict = t(data_dict)
         return data_dict
+
