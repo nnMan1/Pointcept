@@ -41,7 +41,7 @@ dataset = build_dataset(dict(
                                 return_grid_coord=True,
                             ),
                             dict(type="SphereCrop", point_max=200000, mode="random",
-                                 keys=("coord", "grid_coord" "segment", "instance", "border_dist"),
+                                 keys=("coord", "grid_coord", "segment", "instance", "border_dist"),
                                  ),
                             dict(type="CenterShift", apply_z=False),
                             # dict(type="NormalizeColor"),
@@ -69,51 +69,33 @@ dataloader = torch.utils.data.DataLoader(
 
 ptv3_cfg =  dict(
     type="EdgesDetector",
-    backbone=dict(
-        type="PT-v3m1",
+     backbone=dict(
+        type="SpUNet-v1m1",
         in_channels=3,
-        order=["z", "z-trans", "hilbert", "hilbert-trans"],
-        stride=(2, 2, 2, 2),
-        enc_depths=(2, 2, 2, 6, 2),
-        enc_channels=(32, 64, 128, 256, 512),
-        enc_num_head=(2, 4, 8, 16, 32),
-        enc_patch_size=(1024, 1024, 1024, 1024, 1024),
-        dec_depths=(2, 2, 2, 2),
-        dec_channels=(64, 64, 128, 256),
-        dec_num_head=(4, 4, 8, 16),
-        dec_patch_size=(1024, 1024, 1024, 1024),
-        mlp_ratio=4,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        drop_path=0.3,
-        shuffle_orders=True,
-        pre_norm=True,
-        enable_rpe=False,
-        enable_flash=True,
-        upcast_attention=False,
-        upcast_softmax=False,
-        cls_mode=False,
-        pdnorm_bn=False,
-        pdnorm_ln=False,
-        pdnorm_decouple=True,
-        pdnorm_adaptive=False,
-        pdnorm_affine=True,
-        pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+        num_classes=1,
+        channels=(32, 64, 128, 128, 96, 96),
+        layers=(2, 3, 4, 2, 2, 2),
     ),
     criteria=[
-        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
-        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
+        dict(type="BCELoss", loss_weight=1.0)
     ],
 )
 
-model = build_model(ptv3_cfg)
+model = build_model(ptv3_cfg).cuda()
 
 print(model)
-exit()
 
 for d in dataloader:
+
+    for k in d.keys():
+        try:
+            d[k] = d[k].cuda()
+        except:
+            print(k)
+
+    print(d['border_dist'].unique())
+    print(model(d))
+    exit(1)
 
     data = VData.from_dict({
         'points': d['coord'],

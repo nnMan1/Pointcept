@@ -47,10 +47,10 @@ class EdgesDetector(nn.Module):
             # currently, only support one batch one condition
             input_dict["condition"] = input_dict["condition"][0]
 
-        seg_logits = self.backbone(input_dict)
+        seg_logits = self.backbone(input_dict).squeeze(-1)
         # train
         if self.training:
-            loss = self.criteria(seg_logits, input_dict["border_distance"])
+            loss = self.criteria(seg_logits, input_dict["border_dist"])
 
             if loss is None:
                 pass
@@ -58,7 +58,7 @@ class EdgesDetector(nn.Module):
             return dict(loss=loss)
         # eval
         elif "segment" in input_dict.keys():
-            loss = self.criteria(seg_logits, input_dict["border_distance"])
+            loss = self.criteria(seg_logits, input_dict["border_dist"])
             return dict(loss=loss, seg_logits=seg_logits)
         # test
         else:

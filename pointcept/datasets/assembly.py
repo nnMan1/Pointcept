@@ -107,7 +107,7 @@ class Assembly(Dataset):
             basepath, name = os.path.split(path)
             id = int(os.path.splitext(name)[0])    
 
-            max_idx = sorted([int(os.path.splitext(p)[0]) for p in os.listdir(basepath)], reverse=True)[0]
+            max_idx = sorted([int(os.path.splitext(p)[0]) for p in os.listdir(basepath) if os.path.splitext(p)[1] == '.json'], reverse=True)[0]
 
             data = {}
 
