@@ -32,6 +32,7 @@ dataset = build_dataset(dict(
                             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
                             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
                             dict(type="ClipFeature", key="border_dist", min_value=0, max_value=2),
+                            dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
                             dict(
                                 type="GridSample",
                                 grid_size=0.2,
@@ -93,14 +94,14 @@ for d in dataloader:
         except:
             print(k)
 
-    print(d['border_dist'].unique())
-    print(model(d))
-    exit(1)
+    d['border_dist'] = d['border_dist'].float()
+    # pred = model(d)
+    # print(pred.keys())
 
     data = VData.from_dict({
-        'points': d['coord'],
-        'labels': d['instance'],
-        'border_dist': d['border_dist'] / 4
+        'points': d['coord'].cpu(),
+        'labels': d['instance'].cpu(),
+        'border_dist': d['border_dist'].cpu() / 4
     })
 
     print(data.border_dist.max(), data.border_dist.min())

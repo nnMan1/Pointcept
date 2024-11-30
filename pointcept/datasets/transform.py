@@ -1155,6 +1155,26 @@ class ClipFeature(object):
 
         return data_dict
 
+@TRANSFORMS.register_module()
+class ScaleValues(object):
+
+    def __init__(self, key, min_value, max_value, n_min_value=0, n_max_value=1):
+        self.key = key
+        self.min_value = min_value
+        self.max_value = max_value
+        self.n_min_value = n_min_value
+        self.n_max_value = n_max_value
+
+    def __call__(self, data_dict):
+        
+        if self.key in data_dict.keys():
+            data_dict[self.key] = data_dict[self.key] - self.min_value
+            data_dict[self.key] = data_dict[self.key] / (self.max_value - self.min_value)
+            data_dict[self.key] = data_dict[self.key] * (self.n_max_value - self.n_min_value)
+            data_dict[self.key] = data_dict[self.key] + self.n_min_value
+
+        return data_dict
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []
