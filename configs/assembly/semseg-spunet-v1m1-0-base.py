@@ -71,7 +71,7 @@ data = dict(
                     dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
                     dict(
                         type="GridSample",
-                        grid_size=0.2,
+                        grid_size=0.3,
                         hash_type="fnv",
                         mode="train",
                         keys=("coord", "segment", "instance", "border_dist"),
@@ -103,7 +103,7 @@ data = dict(
                     dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
                     dict(
                         type="GridSample",
-                        grid_size=0.2,
+                        grid_size=0.3,
                         hash_type="fnv",
                         mode="train",
                         keys=("coord", "segment", "instance", "border_dist"),
@@ -134,7 +134,7 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=0.3,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
