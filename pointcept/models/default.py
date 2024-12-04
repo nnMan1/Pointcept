@@ -52,10 +52,6 @@ class EdgesDetector(nn.Module):
         # train
         if self.training:
             loss = self.criteria(seg_logits, input_dict["border_dist"])
-
-            if loss is None:
-                pass
-
             return dict(loss=loss)
         # eval
         elif "border_dist" in input_dict.keys():

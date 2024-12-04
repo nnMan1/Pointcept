@@ -67,8 +67,7 @@ data = dict(
                     dict(type="ChromaticJitter", p=0.95, std=0.05),
                     # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
                     # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
-                    dict(type="ClipFeature", key="border_dist", min_value=0, max_value=2),
-                    dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
+                    dict(type="RBFunction", key="border_dist", gamma=0.3),
                     dict(
                         type="GridSample",
                         grid_size=0.3,
@@ -77,7 +76,7 @@ data = dict(
                         keys=("coord", "segment", "instance", "border_dist"),
                         return_grid_coord=True,
                     ),
-                    dict(type="SphereCrop", point_max=200000, mode="random",
+                    dict(type="SphereCrop", point_max=100000, mode="random",
                             keys=("coord", "grid_coord", "segment", "instance", "border_dist"),
                             ),
                     dict(type="CenterShift", apply_z=False),
@@ -98,9 +97,8 @@ data = dict(
         split="val",
         data_root=data_root,
         transform=[
-                    dict(type="CenterShift", apply_z=True),
-                    dict(type="ClipFeature", key="border_dist", min_value=0, max_value=2),
-                    dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
+                    dict(type="CenterShift", apply_z=True),                    
+                    dict(type="RBFunction", key="border_dist", gamma=0.3),
                     dict(
                         type="GridSample",
                         grid_size=0.3,
@@ -142,8 +140,7 @@ data = dict(
             ),
             crop=None,
             post_transform=[
-                dict(type="ClipFeature", key="border_dist", min_value=0, max_value=2),
-                dict(type="ScaleValues", key="border_dist", min_value=2, max_value=0),
+                dict(type="RBFunction", key="border_dist", gamma=0.3),
                 dict(type="CenterShift", apply_z=False),
                 dict(type="ToTensor"),
                 dict(
@@ -275,3 +272,11 @@ data = dict(
         ),
     ),
 )
+
+hooks = [
+    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="InformationWriter"),
+    dict(type="EdgeDetectionEvaluator",),
+    dict(type="CheckpointSaver", save_freq=None),
+]

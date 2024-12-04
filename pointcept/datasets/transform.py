@@ -1156,7 +1156,7 @@ class ClipFeature(object):
         return data_dict
 
 @TRANSFORMS.register_module()
-class ScaleValues(object):
+class ScaleFeature(object):
 
     def __init__(self, key, min_value, max_value, n_min_value=0, n_max_value=1):
         self.key = key
@@ -1173,6 +1173,18 @@ class ScaleValues(object):
             data_dict[self.key] = data_dict[self.key] * (self.n_max_value - self.n_min_value)
             data_dict[self.key] = data_dict[self.key] + self.n_min_value
 
+        return data_dict
+
+@TRANSFORMS.register_module()
+class RBFunction(object):
+
+    def __init__(self, key, gamma=1):
+        self.key = key
+        self.gamma = gamma
+
+    def __call__(self, data_dict):
+        
+        data_dict[self.key] = np.exp(- self.gamma * data_dict[self.key] ** 2)
         return data_dict
 
 class Compose(object):

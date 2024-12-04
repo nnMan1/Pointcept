@@ -77,13 +77,10 @@ class Assembly(Dataset):
         data_list = [os.path.splitext(f.split('/')[-1])[0] for f in data_list]
 
         dl = []
-        
-        if 'train' in data_list:
-            pass
 
         for f in data_list:
            dl += glob.glob(f'{self.data_root}/scans5/*/{f}/*.json')
-
+            
         return dl
 
     def get_data(self, idx):
@@ -112,14 +109,17 @@ class Assembly(Dataset):
             data = {}
 
             for offset in range(k):
-                with open(os.path.join(basepath, f'{(id+offset) % (max_idx + 1)}.json'), 'r') as file:
-                    tmp = json.load(file)
+                try:
+                    with open(os.path.join(basepath, f'{(id+offset) % (max_idx + 1)}.json'), 'r') as file:
+                        tmp = json.load(file)
 
-                for key, value in tmp.items():
-                    if key in data.keys():
-                        data[key] = np.concatenate([data[key], np.asarray(value)])
-                    else:
-                        data[key] = np.asarray(value) 
+                    for key, value in tmp.items():
+                        if key in data.keys():
+                            data[key] = np.concatenate([data[key], np.asarray(value)])
+                        else:
+                            data[key] = np.asarray(value)
+                except:
+                    pass
 
             return data     
     
