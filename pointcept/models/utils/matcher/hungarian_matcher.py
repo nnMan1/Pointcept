@@ -134,7 +134,7 @@ class HungarianMatcher(nn.Module):
                     indices.append((None, None))
                     batch_start = batch_end
                     continue
-                 
+                
                 tgt_mask = F.one_hot(tgt_mask+1).T[1:]
                 instances_seg = (tgt_mask * tgt_segm).max(1)[0]
                 cost_class = 1 - out_seg[:, instances_seg]
@@ -150,11 +150,6 @@ class HungarianMatcher(nn.Module):
                 cost_dice = batch_dice_loss_jit(
                     out_mask, tgt_mask
                 )
-
-                if torch.isinf(cost_mask).sum() > 0 or torch.isnan(cost_mask).sum() > 0:
-                    cost_mask = batch_sigmoid_ce_loss(
-                        out_mask, tgt_mask
-                    )
 
                 C = (
                     self.cost_mask * cost_mask
@@ -194,7 +189,7 @@ class HungarianMatcher(nn.Module):
             tmp = tgt_mask[:, tgt_ids].argmax(0)
             tmp = tgt_segm[tmp]
 
-            tgt_segm = torch.zeros_like(out_seg[:, 0], dtype=torch.int64)
+            tgt_segm = torch.ones_like(out_seg[:, 0], dtype=torch.int64) * (out_seg.shape[1] - 1)
             tgt_segm[pred_ids] = tmp
 
 
@@ -315,7 +310,6 @@ class HungarianMatcher(nn.Module):
         
         return matched_outputs, matched_targets, matched_sem_outputs, matched_sem_targets, indices
 
-
     # @torch.no_grad()
     def forward(self, outputs, targets, offset):
         """Performs the matching
@@ -337,7 +331,7 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        return self.my_optimized_forward_v2(outputs, targets, offset)
+        return self.my_optimized_forward(outputs, targets, offset)
 
     def __repr__(self, _repr_indent=4):
         head = "Matcher " + self.__class__.__name__

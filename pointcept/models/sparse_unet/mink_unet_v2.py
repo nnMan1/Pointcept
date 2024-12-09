@@ -1,4 +1,5 @@
 import torch
+from pointops import batch2offset
 import MinkowskiEngine as ME
 import MinkowskiEngine.MinkowskiOps as me
 from MinkowskiEngine import MinkowskiReLU
@@ -9,6 +10,18 @@ from .mink_unet_sparse.resnet_block import BasicBlock, Bottleneck
 
 from pointcept.models.builder import MODELS
 
+def minkovski_batch_to_coord_feature(batch, original_coords):
+    coords = batch.coordinates
+    features = batch.features
+    offset = batch2offset(coords[:, 0])
+
+    return {
+        'coords': coords[:, 1:], 
+        'features': features, 
+        'offset': offset,
+        'original_ids': original_coords.coordinate_manager.stride_map(original_coords.coordinate_map_key, batch.coordinate_map_key)[1],
+    }
+    
 
 class Res16UNetBase(ResNetBase):
     BLOCK = None
@@ -291,7 +304,8 @@ class Res16UNetBase(ResNetBase):
         out = self.relu(out)
         out = self.block4(out)
 
-        feature_maps.append(out)
+        feature_maps.append(minkovski_batch_to_coord_feature(out, x))
+        
 
         # pixel_dist=8
         out = self.convtr4p16s2(out)
@@ -301,7 +315,7 @@ class Res16UNetBase(ResNetBase):
         out = me.cat(out, out_b3p8)
         out = self.block5(out)
 
-        feature_maps.append(out)
+        feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         # pixel_dist=4
         out = self.convtr5p8s2(out)
@@ -311,7 +325,7 @@ class Res16UNetBase(ResNetBase):
         out = me.cat(out, out_b2p4)
         out = self.block6(out)
 
-        feature_maps.append(out)
+        feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         # pixel_dist=2
         out = self.convtr6p4s2(out)
@@ -321,7 +335,7 @@ class Res16UNetBase(ResNetBase):
         out = me.cat(out, out_b1p2)
         out = self.block7(out)
 
-        feature_maps.append(out)
+        feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         # pixel_dist=1
         out = self.convtr7p2s2(out)
@@ -331,12 +345,12 @@ class Res16UNetBase(ResNetBase):
         out = me.cat(out, out_p1)
         out = self.block8(out)
 
-        feature_maps.append(out)
+        feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         if not self.out_fpn:
             return out
         else:
-            return out, feature_maps
+            return out.features, feature_maps
 
 
 class Res16UNet14(Res16UNetBase):

@@ -31,11 +31,14 @@ RUN pip3 install --upgrade pip && \
     pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
 
 # # Build MinkowskiEngine
-RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
-WORKDIR /workspace/MinkowskiEngine
-RUN python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas \
-	&& cd /workspace \
-	&& rm -r MinkowskiEngine
+RUN export CUDA_HOME=/usr/local/cuda-${CUDA_VERSION} pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --install-option="--blas_include_dirs=${CONDA_PREFIX}/include" --install-option="--blas=openblas"
+
+
+# RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
+# WORKDIR /workspace/MinkowskiEngine
+# RUN python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas \
+# 	&& cd /workspace \
+# 	&& rm -r MinkowskiEngine
 	
 WORKDIR /workspace
 

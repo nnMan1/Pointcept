@@ -58,7 +58,7 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
             rand_idx = []
             mask_idx = []
 
-            batch_start = torch.cat([torch.tensor([0]), offset[:-1]])
+            batch_start = torch.cat([torch.tensor([0], device=offset.device), offset[:-1]])
 
             max_size = (offset - batch_start).max()
 
@@ -118,6 +118,7 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
         pred_masks = []
         pred_stabilities = []
         pred_ious_ = []
+        ret_classes = []
 
         if ious == None:
              ious = stabilities
@@ -130,42 +131,48 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
             preds = masks[batch_start: batch_end]
             stability = stabilities[i]
             cls = classes[i]
-
+            mask_id = torch.arange(len(stability))[..., None].repeat(1, stability.shape[-1])
+            class_id = torch.arange(stability.shape[-1])[None, ...].repeat(len(stability), 1)
             iou = ious[i]
 
-            ids = torch.arange(len(stability))
+            stability, ids = stability.flatten().topk(100)
+            mask_id = mask_id.flatten()[ids]
+            class_id = class_id.flatten()[ids]
 
-            filter = ((preds > 0).sum(0) > 100).cpu()
+            # ids = torch.arange(len(stability))
+
+            # filter = ((preds > 0).sum(0) > 100).cpu()
+
 
             # st_tras = 0.1
 
             # filter = (stability > st_tras) #& (pred_ious > 0.3)
-            preds = preds[:, filter]
-            stability = stability[filter]
-            iou = iou[filter]
-            ids = ids[filter]
+            preds = preds[mask_id]
+            stability = stability[mask_id]
+            iou = iou[mask_id]
             
-            keep = nms(preds, stability, 1).cpu()
-            preds = preds[:, keep]
-            stability = stability[keep]
-            iou = iou[keep]
-            ids = ids[keep]
+            # keep = nms(preds, stability, 1).cpu()
+            # preds = preds[:, keep]
+            # stability = stability[keep]
+            # iou = iou[keep]
+            # ids = ids[keep]
 
             pred_masks.append(preds)
             pred_stabilities.append(stability)
             pred_ious_.append(iou.cpu())
-            pred_ids.append(ids)
+            pred_ids.append(mask_id)
+            ret_classes.append(class_id)
 
             batch_start = batch_end
 
-        return pred_ids, pred_stabilities
+        return pred_masks, pred_stabilities, ret_classes
 
 def compute_stats(masks, data, offset, instance_ignore_index=-1):
         
         return_dict = {}
         
         m = masks['outputs_mask'].clone()
-        return_dict['pred_scores'] = torch.zeros(len(offset), m.shape[1])
+        return_dict['pred_scores'] = torch.zeros(len(offset), masks['outputs_class'].shape[1],  masks['outputs_class'].shape[2] - 1)
         return_dict['stability_score'] = torch.zeros(len(offset), m.shape[1])
         return_dict['bious'] =  torch.zeros(len(offset), m.shape[1], device='cuda')
         batch_start = 0
@@ -189,7 +196,7 @@ def compute_stats(masks, data, offset, instance_ignore_index=-1):
                 return_dict['bious'][i] = torch.zeros(m.shape[1])
 
             return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
-            return_dict['pred_scores'][i] = masks['outputs_class'][i].softmax(-1)[..., 0:].max(-1)[0] * (m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15)
+            return_dict['pred_scores'][i] = (masks['outputs_class'][i].softmax(-1) * ((m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15))[:, None])[..., :-1]
             
         return return_dict
    

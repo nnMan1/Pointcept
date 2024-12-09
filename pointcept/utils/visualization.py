@@ -129,7 +129,7 @@ def nms(masks: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
             iou = inter / union
             iou = iou[i+1:]
 
-            overlapped = torch.nonzero(iou > iou_threshold).cpu()
+            overlapped = torch.nonzero(iou > 0.5).cpu()
             keep[order[overlapped + i + 1]] = 0
 
     return torch.where(keep)[0]

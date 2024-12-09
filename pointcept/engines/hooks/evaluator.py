@@ -370,8 +370,7 @@ class InsSegEvaluator(HookBase):
             pred_inst["confidence"] = pred["pred_scores"][i]
 
             if pred["pred_masks"][i].dtype in (torch.float32, np.float32):
-                pred["pred_masks"][i] = 1 / (1 + np.exp(-pred["pred_masks"][i]))
-                pred["pred_masks"][i] = pred["pred_masks"][i] > 0.5
+                pred["pred_masks"][i] = pred["pred_masks"][i] > 0
  
             pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
             pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
@@ -395,9 +394,11 @@ class InsSegEvaluator(HookBase):
                     pred_inst_["intersection"] = intersection
                     matched_gt.append(gt_inst_)
                     gt_inst["matched_pred"].append(pred_inst_)
+
             pred_inst["matched_gt"] = matched_gt
             pred_instances[segment_name].append(pred_inst)
             instance_id += 1
+            
         return gt_instances, pred_instances
 
     def evaluate_matches(self, scenes):

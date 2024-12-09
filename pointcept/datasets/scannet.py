@@ -86,12 +86,20 @@ class ScanNetDataset(Dataset):
                 data_list += glob.glob(os.path.join(self.data_root, split, "*.pth"))
         else:
             raise NotImplementedError
+        
+        # if self.split == 'train':
+        #     data_list = data_list[:10]
+        
         return data_list
 
     def get_data(self, idx):
         data_path = self.data_list[idx % len(self.data_list)]
         if not self.cache:
-            data = torch.load(data_path)
+            try:
+                data = torch.load(data_path)
+            except:
+                print(data_path)
+                raise Exception(data_path)
         else:
             data_name = data_path.replace(os.path.dirname(self.data_root), "").split(
                 "."
@@ -204,6 +212,7 @@ class ScanNet200Dataset(ScanNetDataset):
             instance = data["instance_gt"].reshape([-1])
         else:
             instance = np.ones(coord.shape[0]) * -1
+
         data_dict = dict(
             coord=coord,
             normal=normal,
