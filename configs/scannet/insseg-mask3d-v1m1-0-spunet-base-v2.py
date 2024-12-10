@@ -120,7 +120,7 @@ model = dict(
 
 # scheduler settings
 epoch = 600
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
+optimizer = dict(type="AdamW", lr=0.001, weight_decay=0.00)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],

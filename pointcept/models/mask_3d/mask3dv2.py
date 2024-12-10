@@ -320,7 +320,7 @@ class QueryRefinement(nn.Module):
         output = self.cross_attention(
                     queries,
                     src_pcd,
-                    memory_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
+                    memory_mask=None, #attn_mask.repeat_interleave(self.num_heads, dim=0),
                     memory_key_padding_mask=None,  # here we do not apply masking on padded region
                     pos=pos_encoding,
                     query_pos=query_pos_encoding,

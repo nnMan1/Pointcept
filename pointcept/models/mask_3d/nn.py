@@ -102,9 +102,6 @@ class SelfAttentionLayer(nn.Module):
     def forward_post(
         self, tgt, tgt_mask=None, tgt_key_padding_mask=None, query_pos=None
     ):
-        
-        if tgt.isnan().sum() > 0:
-            pass
 
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(
@@ -114,9 +111,6 @@ class SelfAttentionLayer(nn.Module):
             attn_mask=tgt_mask,
             key_padding_mask=tgt_key_padding_mask,
         )[0]
-
-        if tgt2.isnan().sum() > 0:
-            pass
     
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
