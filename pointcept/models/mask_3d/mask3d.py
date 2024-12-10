@@ -287,7 +287,6 @@ class Mask3D(nn.Module):
 
         return return_dict
      
-     
 class MaskModule(nn.Module):
 
     def __init__(self, hidden_dim, num_classes, return_attn_masks, use_seg_masks=False):
