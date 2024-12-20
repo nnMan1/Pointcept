@@ -1,18 +1,18 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4  # bs: total bs in all gpus
+batch_size = 3 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
-enable_amp = True
+enable_amp = False
 evaluate = True
-resume=True
+# resume=True
 weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1/model/model_last.pth'
 
 class_names = [
-    "wall",
-    "floor",
+    # "wall",
+    # "floor",
     "cabinet",
     "bed",
     "chair",
@@ -32,10 +32,10 @@ class_names = [
     "bathtub",
     "otherfurniture",
 ]
-num_classes = 20
+num_classes = 18
 fts_sizes = 128
 dim_feedforward=1024
-segment_ignore_index = (-1, 0, 1)
+segment_ignore_index = (-1,)
 
 # model settings
 model = dict(
@@ -51,7 +51,7 @@ model = dict(
      ),
      decoder=dict(
         in_channels=fts_sizes,
-        hlevels=5,
+        hlevels=4,
         positional_encoding=dict(
             type='PositionEmbeddingCoordsSine',
             pos_type="fourier",
@@ -120,14 +120,10 @@ model = dict(
 
 # scheduler settings
 epoch = 600
-optimizer = dict(type="AdamW", lr=0.001, weight_decay=0.00)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
 scheduler = dict(
     type="OneCycleLR",
-    max_lr=optimizer["lr"],
-    pct_start=0.01,
-    anneal_strategy="cos",
-    div_factor=10.0,
-    final_div_factor=1000.0,
+    max_lr=optimizer["lr"]
 )
 
 # dataset settings
@@ -170,7 +166,7 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
@@ -228,7 +224,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type="FPSSeed", n_points=100),
+            dict(type="FPSSeed", n_points=150),
             dict(type="ToTensor"),
             dict(
                 type="Collect",

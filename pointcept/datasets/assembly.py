@@ -80,6 +80,9 @@ class Assembly(Dataset):
 
         for f in data_list:
            dl += glob.glob(f'{self.data_root}/scans5/*/{f}/*.json')
+
+        if self.split == 'train':
+            dl = dl[:10]
             
         return dl
 

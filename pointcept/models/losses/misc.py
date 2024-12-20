@@ -220,9 +220,7 @@ class DiceLoss(nn.Module):
         pred = pred.transpose(0, 1).contiguous()
         # (B, d_1, d_2, ..., d_k) --> (B * d_1 * d_2 * ... * d_k,)
         # target = target.view(-1).contiguous()
-        assert pred.size(0) == target.size(
-            0
-        ), "The shape of pred doesn't match the shape of target"
+        assert pred.size(0) == target.size(0), "The shape of pred doesn't match the shape of target"
         # valid_mask = target != self.ignore_index
         # target = target[valid_mask]
         # pred = pred[valid_mask]

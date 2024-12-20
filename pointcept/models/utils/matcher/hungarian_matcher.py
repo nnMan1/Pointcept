@@ -123,7 +123,7 @@ class HungarianMatcher(nn.Module):
         for i, batch_end in enumerate(offset):
 
             with torch.no_grad():
-                out_mask = outputs['outputs_mask'][batch_start:batch_end].T
+                out_mask = outputs['outputs_mask'][batch_start:batch_end].T.float()
                 out_seg = outputs['outputs_class'][i].softmax(-1) 
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_segm = targets['segment'][batch_start:batch_end]
@@ -159,6 +159,7 @@ class HungarianMatcher(nn.Module):
 
 
                 C = C.cpu().numpy()
+
                 indices.append(linear_sum_assignment(C))
 
             batch_start = batch_end

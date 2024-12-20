@@ -20,7 +20,7 @@ dataset = build_dataset(dict(
                                 grid_size=0.3,
                                 hash_type="fnv",
                                 mode="train",
-                                keys=("coord", "segment", "instance", "border_dist"),
+                                keys=(coord", "segment", "instance", "border_dist"),
                                 return_grid_coord=True,
                             ),
                             # dict(type="SphereCrop", point_max=100000, mode="random",
@@ -94,5 +94,12 @@ for i, b in enumerate(dataset):
     })
 
     o3d.io.write_point_cloud(f'data2_{i}.ply', data.to_o3d_pointcloud(color='border_dist'))
+
+    data = VData.from_dict({
+        'points': b['coord'].cpu(),
+        'border_dist': b['border_dist'].cpu() 
+    })
+
+    o3d.io.write_point_cloud(f'data2_gt_{i}.ply', data.to_o3d_pointcloud(color='border_dist'))
 
     # input()    

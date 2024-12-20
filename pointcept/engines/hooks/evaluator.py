@@ -231,12 +231,16 @@ class EdgeDetectionEvaluator(HookBase):
                 )
                 pred = pred[idx.flatten().long()]
                 border_dist = input_dict["origin_border_dist"]
+
             intersection, union, target = intersection_and_union_gpu(
-                pred,
-                border_dist,
+                (pred>0.5).int(),
+                (border_dist > 0.5).int(),
                 self.trainer.cfg.data.num_classes,
                 self.trainer.cfg.data.ignore_index,
             )
+                
+            intersection = ((pred>0.5).int() * (border_dist > 0.5).int()).sum()
+            union =  ((pred>0.5).int() * (border_dist > 0.5).int()).sum() - intersection
 
             avg_dist = torch.abs(pred - border_dist).mean().cpu().numpy()
 

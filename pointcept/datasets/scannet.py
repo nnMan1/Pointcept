@@ -88,7 +88,7 @@ class ScanNetDataset(Dataset):
             raise NotImplementedError
         
         # if self.split == 'train':
-        #     data_list = data_list[:10]
+        #     data_list = data_list[:5]
         
         return data_list
 
@@ -124,10 +124,14 @@ class ScanNetDataset(Dataset):
 
         uni = np.unique(seg_indices)
 
+        #TODO: OVO NIJE DOBRO
+        segment = segment - 2
+        segment[segment < 0] = -1
+
         for i, v in enumerate(uni):
             seg_indices[seg_indices == v] = i
 
-        group_segment = torch_scatter.scatter_mean(torch.tensor(segment), torch.tensor(seg_indices)).numpy()
+        group_segment = torch_scatter.scatter_mean(torch.tensor(segment), seg_indices).numpy()
 
         data_dict = dict(
             coord=coord,

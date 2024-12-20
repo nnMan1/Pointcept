@@ -5,8 +5,8 @@ batch_size = 4 # bs: total bs in all gpus
 mix_prob = 0
 empty_cache = True
 enable_amp = False
-# resume=True
-# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
+resume=True
+weight='exp/assembly/semseg-spunet-v1m1-0-base/model/model_best.pth'
 
 # model settings
 model = dict(
@@ -97,8 +97,10 @@ data = dict(
         split="val",
         data_root=data_root,
         transform=[
-                    dict(type="CenterShift", apply_z=True),                    
-                    dict(type="RBFunction", key="border_dist", gamma=0.3),
+                    dict(type="CenterShift", apply_z=True),   
+                    # dict(type="RBFunction", key="border_dist", gamma=0.3),
+                    dict(type='ClipFeature', key='border_dist', min_value=0, max_value=2),
+                    dict(type='ScaleFeature', key='border_dist', min_value=2, max_value=0),
                     dict(
                         type="GridSample",
                         grid_size=0.3,

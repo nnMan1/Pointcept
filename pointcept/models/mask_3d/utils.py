@@ -135,7 +135,7 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
             class_id = torch.arange(stability.shape[-1])[None, ...].repeat(len(stability), 1)
             iou = ious[i]
 
-            stability, ids = stability.flatten().topk(100)
+            stability, ids = stability.flatten().topk(150)
             mask_id = mask_id.flatten()[ids]
             class_id = class_id.flatten()[ids]
 
@@ -143,12 +143,10 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
 
             # filter = ((preds > 0).sum(0) > 100).cpu()
 
-
             # st_tras = 0.1
 
             # filter = (stability > st_tras) #& (pred_ious > 0.3)
             preds = preds[mask_id]
-            stability = stability[mask_id]
             iou = iou[mask_id]
             
             # keep = nms(preds, stability, 1).cpu()
@@ -178,18 +176,15 @@ def compute_stats(masks, data, offset, instance_ignore_index=-1):
         batch_start = 0
         
         for i, batch_end in enumerate(offset):
-            m = masks['outputs_mask'][batch_start:batch_end]
+            m = masks['outputs_mask'][batch_start:batch_end].clone()
             m = F.sigmoid(m)
-            t = data['instance'][batch_start:batch_end]
+            t = data['instance'][batch_start:batch_end].clone()
 
             filter = t != instance_ignore_index
             filter = filter.cpu()
 
-            m = m[filter]
-            t = t[filter]
-
             if filter.sum() > 0:
-                t = F.one_hot(t).float()
+                t = F.one_hot(t + 1).float()[:, 1:]
                 biou = batch_iou((m.T > 0.5).float(), t.T)
                 return_dict['bious'][i] = biou.max(-1)[0]
             else:
@@ -227,13 +222,11 @@ def db_scan(data, preds):
 
     clsses = preds['outputs_class'][0]
     masks = preds['outputs_mask'].T
-    coords = data['coord'].cpu()
+    coords = data['coord']
 
     for mask, cls in zip(masks, clsses):
 
-        mask = mask.cpu()
         curr_masks = mask > 0
-        curr_masks = curr_masks
         
         if coords[curr_masks].shape[0] > 0:
             clusters = (
@@ -242,12 +235,12 @@ def db_scan(data, preds):
                                     min_samples=1,
                                     n_jobs=-1,
                                 )
-                                .fit(coords[curr_masks])
+                                .fit(coords[curr_masks].cpu())
                                 .labels_
                             )
             
-            new_mask = torch.zeros(curr_masks.shape, dtype=int)
-            new_mask[curr_masks] = (torch.from_numpy(clusters) + 1)
+            new_mask = torch.zeros(curr_masks.shape, dtype=int, device=curr_masks.device)
+            new_mask[curr_masks] = (torch.from_numpy(clusters).to(curr_masks.device) + 1)
             
 
             for cluster_id in np.unique(clusters):
@@ -258,10 +251,8 @@ def db_scan(data, preds):
                     new_preds["pred_logits"].append(
                         cls
                     )
-
-    print(len(new_preds['pred_logits']))
             
-    preds['outputs_class'] = torch.stack(new_preds['pred_logits']).to(preds['outputs_class'].device)
+    preds['outputs_class'] = torch.stack(new_preds['pred_logits']).to(preds['outputs_class'].device)[None, :]
     preds['outputs_mask'] = torch.stack(new_preds['pred_masks']).T.to(preds['outputs_class'].device)
 
     return preds

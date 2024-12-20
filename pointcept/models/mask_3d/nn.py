@@ -191,10 +191,13 @@ class CrossAttentionLayer(nn.Module):
             attn_mask=memory_mask,
             key_padding_mask=memory_key_padding_mask,
         )[0]
-        tgt = tgt + self.dropout(tgt2)
-        tgt = self.norm(tgt)
+        tgt_ = tgt + self.dropout(tgt2)
+        tgt_ = self.norm(tgt_)
 
-        return tgt
+        if torch.isnan(tgt_).sum() > 0:
+            pass
+
+        return tgt_
 
     def forward_pre(
         self,
