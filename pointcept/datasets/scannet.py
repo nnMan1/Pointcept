@@ -124,7 +124,7 @@ class ScanNetDataset(Dataset):
 
         uni = np.unique(seg_indices)
 
-        #TODO: OVO NIJE DOBRO
+        # #TODO: OVO NIJE DOBRO
         segment = segment - 2
         segment[segment < 0] = -1
 

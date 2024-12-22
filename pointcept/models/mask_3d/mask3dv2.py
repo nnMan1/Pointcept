@@ -383,9 +383,9 @@ class Mask3D(nn.Module):
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
         weight[-1] = 0.1
 
-        self.loss_ce = nn.CrossEntropyLoss(weight=weight)
-        self.loss_dice = DiceLoss()
-        self.loss_focal = nn.BCEWithLogitsLoss()
+        self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
+        self.mask_dice_loss = DiceLoss()
+        self.mask_bce_loss = nn.BCEWithLogitsLoss()
         
         # self.iou_ce_loss = nn.BCEWithLogitsLoss()
         # self.iou_mse_loss = nn.MSELoss()
@@ -407,18 +407,19 @@ class Mask3D(nn.Module):
         return torch.stack(sampled_coords)
 
     def __prepare_seg_indices(self, seg_indices, offset):
-        bb = 0
+
+        bs = 0
         off = 0
 
         offs = []
 
         for be in offset:
-            tmp = seg_indices[bb:be]
+            tmp = seg_indices[bs:be]
             _, inverse_indices = torch.unique(tmp, return_inverse=True)
-            seg_indices[bb:be] = inverse_indices + off
-            off = seg_indices.max() + 1 
+            seg_indices[bs:be] = inverse_indices + off
+            off = seg_indices[:be].max() + 1 
             offs.append(off)
-            bb = be
+            bs = be
     
         return seg_indices, torch.tensor(offs)
 
@@ -431,9 +432,9 @@ class Mask3D(nn.Module):
             instance = data['instance']
             segment = data['segment']
 
-            # data['instance'] = torch_scatter.scatter_mean(instance, seg_indices)
-            # data['segment'] =  torch_scatter.scatter_mean(segment, seg_indices)
-            # offset_key = 'group_offset'
+            data['instance'] = torch_scatter.scatter_mean(instance, seg_indices)
+            data['segment'] =  torch_scatter.scatter_mean(segment, seg_indices)
+            offset_key = 'group_offset'
 
 
         axiliary_losses = {'seg_ce': [],
@@ -442,14 +443,12 @@ class Mask3D(nn.Module):
                            'matched_iou': []}
 
         for p in pred:
-            
-            p['outputs_mask'] = p['outputs_mask'][data['seg_indices']]
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data[offset_key])
 
             for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-                axiliary_losses['seg_ce'].append(self.loss_ce(p_seg, t_seg))
-                axiliary_losses['mask_ce'].append(self.loss_focal(mask, target.float()))
-                axiliary_losses['mask_dice'].append(self.loss_dice(mask, target))
+                axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
+                axiliary_losses['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
+                axiliary_losses['mask_dice'].append(self.mask_dice_loss(mask, target))
         
         intersections = []
         unions = []
@@ -468,15 +467,13 @@ class Mask3D(nn.Module):
                 axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
 
         
-        axiliary_losses['loss'] = 5 * 65 * axiliary_losses['mask_ce'] + 2 * 65 * axiliary_losses['mask_dice'] + 2 * 12 * axiliary_losses['seg_ce'] 
+        axiliary_losses['loss'] = 5 * 65 * axiliary_losses['mask_ce'] + 2 * 65 *  axiliary_losses['mask_dice'] + 2 * 12 * axiliary_losses['seg_ce'] 
         
         return axiliary_losses
 
     def forward(self, data):
 
         if 'seg_indices' in data.keys():
-
-            seg_indices = data['seg_indices']
             data['seg_indices'], data['group_offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
         features = self.encoder(data)
@@ -487,17 +484,17 @@ class Mask3D(nn.Module):
         
         if not self.training:
             masks = pred[-1]
-            # masks['outputs_mask'] = masks['outputs_mask'][seg_indices.cpu()]
+            masks['outputs_mask'] = masks['outputs_mask'][data['seg_indices'].cpu()]
             
             # masks = db_scan(data, masks)
 
-            # data['segment'] = data['segment'][seg_indices]
-            # data['instance'] = data['instance'][seg_indices]
-            return_dict.update(compute_stats(masks, data, data['offset']))
+            data['segment'] = data['segment'][data['seg_indices']]
+            data['instance'] = data['instance'][data['seg_indices']]
+            return_dict.update(compute_stats(masks, data, data['group_offset']))
 
             return_dict['pred_classes'] = masks['outputs_class'][..., :-1] #We remove dummy class from predictions
             
-            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['outputs_mask'].T.cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['offset'])
+            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['outputs_mask'].T.cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['group_offset'])
             
             return_dict['pred_masks'] = return_dict['pred_masks'][0]
             return_dict['pred_scores'] = return_dict['pred_scores'][0]

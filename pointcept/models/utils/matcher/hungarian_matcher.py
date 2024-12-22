@@ -111,8 +111,6 @@ class HungarianMatcher(nn.Module):
     # @torch.no_grad()
     def my_optimized_forward(self, outputs, targets, offset):
 
-        batch_start = 0
-
         indices = []
         matched_outputs = []
         matched_targets = []
@@ -120,6 +118,8 @@ class HungarianMatcher(nn.Module):
         matched_sem_targets = []
 
         Cs = []
+
+        batch_start = 0
         for i, batch_end in enumerate(offset):
 
             with torch.no_grad():
