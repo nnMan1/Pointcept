@@ -41,8 +41,12 @@ class ScanNetDataset(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        ignore_semantic = (-1, 0, 1),
+        ignore_instance = (-1, )
     ):
         super(ScanNetDataset, self).__init__()
+        self.ignore_semantic = ignore_semantic
+        self.ifnore_instance = ignore_instance
         self.data_root = data_root
         self.split = split
         self.transform = Compose(transform)

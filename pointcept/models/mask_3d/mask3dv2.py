@@ -490,11 +490,11 @@ class Mask3D(nn.Module):
 
             data['segment'] = data['segment'][data['seg_indices']]
             data['instance'] = data['instance'][data['seg_indices']]
-            return_dict.update(compute_stats(masks, data, data['group_offset']))
+            return_dict.update(compute_stats(masks, data, data['offset']))
 
             return_dict['pred_classes'] = masks['outputs_class'][..., :-1] #We remove dummy class from predictions
             
-            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['outputs_mask'].T.cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['group_offset'])
+            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['outputs_mask'].T.cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['offset'])
             
             return_dict['pred_masks'] = return_dict['pred_masks'][0]
             return_dict['pred_scores'] = return_dict['pred_scores'][0]

@@ -7,12 +7,12 @@ mix_prob = 0
 empty_cache = False
 enable_amp = False
 evaluate = True
-# resume=True
-# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1/model/model_last.pth'
+resume=True
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1/model/model_last.pth'
 
 class_names = [
-    "wall",
-    "floor",
+    # "wall",
+    # "floor",
     "cabinet",
     "bed",
     "chair",
@@ -35,7 +35,7 @@ class_names = [
 num_classes = 18
 fts_sizes = 128
 dim_feedforward=1024
-segment_ignore_index = (-1, 0, 1)
+segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
