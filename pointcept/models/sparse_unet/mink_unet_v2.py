@@ -348,7 +348,7 @@ class Res16UNetBase(ResNetBase):
         feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         if not self.out_fpn:
-            return out
+            return out.features
         else:
             return out.features, feature_maps
 

@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 1 # bs: total bs in all gpus
-num_worker = 8
+batch_size = 2 # bs: total bs in all gpus
+num_worker = 1
 mix_prob = 0
 empty_cache = False
 enable_amp = False
@@ -39,19 +39,19 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="Mask-3D",
-     encoder=dict(
+    type="SPFormer",
+    num_query = 400,
+    encoder=dict(
         backbone=dict(
                 type="Res16UNet34C",
                 in_channels = 6,
-                out_channels = 128,
-                out_fpn=True, #return intermidiate features
+                out_channels = 128
             ),
         out_channels=fts_sizes
      ),
      decoder=dict(
         in_channels=fts_sizes,
-        hlevels=4,
+        hlevels=6,
         positional_encoding=dict(
             type='PositionEmbeddingCoordsSine',
             pos_type="fourier",
@@ -69,50 +69,13 @@ model = dict(
         ],
         query_refinement_modules=[
             dict(
-                in_channels=256,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                sample_size=200,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=256,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                sample_size=800,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
-                sample_size=3200,
                 pre_norm=False,
                 num_heads=8, 
                 dropout=0
             ),
-            dict(
-                in_channels=96,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                sample_size=12800,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=96,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                sample_size=51200,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            )
         ],
     ),
     instance_ignore_index=-1,

@@ -113,15 +113,12 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
         
         return batched_data, rand_idx, mask_idx
 
-def select_masks(masks, classes, stabilities, ious=None, offset=None):
+def select_masks(masks, classes, scores, offset=None):
 
         pred_masks = []
-        pred_stabilities = []
+        pred_scores = []
         pred_ious_ = []
         ret_classes = []
-
-        if ious == None:
-             ious = stabilities
 
         pred_ids = []
 
@@ -129,41 +126,29 @@ def select_masks(masks, classes, stabilities, ious=None, offset=None):
 
         for i, batch_end in enumerate(offset):
             preds = masks[batch_start: batch_end]
-            stability = stabilities[i]
+            score = scores[i]
             cls = classes[i]
-            mask_id = torch.arange(len(stability))[..., None].repeat(1, stability.shape[-1])
-            class_id = torch.arange(stability.shape[-1])[None, ...].repeat(len(stability), 1)
-            iou = ious[i]
+            mask_id = torch.arange(len(score))[..., None].repeat(1, score.shape[-1])
+            class_id = torch.arange(score.shape[-1])[None, ...].repeat(len(score), 1)
 
-            stability, ids = stability.flatten().topk(150)
+            score, ids = score.flatten().topk(100)
             mask_id = mask_id.flatten()[ids]
             class_id = class_id.flatten()[ids]
 
-            # ids = torch.arange(len(stability))
-
-            # filter = ((preds > 0).sum(0) > 100).cpu()
-
-            # st_tras = 0.1
-
-            # filter = (stability > st_tras) #& (pred_ious > 0.3)
-            preds = preds[:, mask_id]
-            iou = iou[mask_id]
+            mask_pred = preds[:, mask_id]
+            mask_pred_sigmoid = mask_pred.sigmoid()
+            mask_pred = (mask_pred > 0).float()
+            mask_scores = (mask_pred_sigmoid * mask_pred).sum(1) / (mask_pred.sum(1) + 1e-6)
+            score = score * mask_scores
             
-            # keep = nms(preds, stability, 1).cpu()
-            # preds = preds[:, keep]
-            # stability = stability[keep]
-            # iou = iou[keep]
-            # ids = ids[keep]
-
             pred_masks.append(preds)
-            pred_stabilities.append(stability)
-            pred_ious_.append(iou.cpu())
+            pred_scores.append(score)
             pred_ids.append(mask_id)
             ret_classes.append(class_id)
 
             batch_start = batch_end
 
-        return pred_masks, pred_stabilities, ret_classes
+        return pred_masks, pred_scores, ret_classes
 
 def compute_stats(masks, data, offset, instance_ignore_index=-1):
         
@@ -191,7 +176,7 @@ def compute_stats(masks, data, offset, instance_ignore_index=-1):
                 return_dict['bious'][i] = torch.zeros(m.shape[1])
 
             return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
-            return_dict['pred_scores'][i] = (masks['output_class'][i].softmax(-1) * ((m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15))[:, None])[..., :-1]
+            return_dict['pred_scores'][i] = (masks['output_class'][i].softmax(-1) * masks['output_score'][i])[..., :-1]
             
         return return_dict
    
@@ -220,8 +205,8 @@ def db_scan(data, preds):
                         "pred_logits": list(),
                     }
 
-    clsses = preds['outputs_class'][0]
-    masks = preds['outputs_mask'].T
+    clsses = preds['output_class'][0]
+    masks = preds['output_mask'].T
     coords = data['coord']
 
     for mask, cls in zip(masks, clsses):
@@ -252,7 +237,7 @@ def db_scan(data, preds):
                         cls
                     )
             
-    preds['outputs_class'] = torch.stack(new_preds['pred_logits']).to(preds['outputs_class'].device)[None, :]
-    preds['outputs_mask'] = torch.stack(new_preds['pred_masks']).T.to(preds['outputs_class'].device)
+    preds['output_class'] = torch.stack(new_preds['pred_logits']).to(preds['output_class'].device)[None, :]
+    preds['output_mask'] = torch.stack(new_preds['pred_masks']).T.to(preds['output_class'].device)
 
     return preds

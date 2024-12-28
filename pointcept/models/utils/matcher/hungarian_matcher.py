@@ -123,8 +123,8 @@ class HungarianMatcher(nn.Module):
         for i, batch_end in enumerate(offset):
 
             with torch.no_grad():
-                out_mask = outputs['outputs_mask'][batch_start:batch_end].T.float()
-                out_seg = outputs['outputs_class'][i].softmax(-1) 
+                out_mask = outputs['output_mask'][batch_start:batch_end].T.float()
+                out_seg = outputs['output_class'][i].softmax(-1) 
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_segm = targets['segment'][batch_start:batch_end]
                 
@@ -137,7 +137,7 @@ class HungarianMatcher(nn.Module):
                 
                 tgt_mask = F.one_hot(tgt_mask+1).T[1:]
                 instances_seg = (tgt_mask * tgt_segm).max(1)[0]
-                cost_class = 1 - out_seg[:, instances_seg]
+                cost_class = - out_seg[:, instances_seg]
 
                 tgt_mask = tgt_mask.float()
 
@@ -169,8 +169,8 @@ class HungarianMatcher(nn.Module):
         for i, batch_end in enumerate(offset):
         
             pred_ids, tgt_ids,  = indices[i]
-            out_mask = outputs['outputs_mask'][batch_start:batch_end]
-            out_seg = outputs['outputs_class'][i]
+            out_mask = outputs['output_mask'][batch_start:batch_end]
+            out_seg = outputs['output_class'][i]
             tgt_mask = targets['instance'][batch_start:batch_end]
             tgt_segm = targets['segment'][batch_start:batch_end]
 
