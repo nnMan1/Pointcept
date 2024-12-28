@@ -467,7 +467,8 @@ class Mask3D(nn.Module):
                 axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
 
         
-        axiliary_losses['loss'] = 5 * 65 * axiliary_losses['mask_ce'] + 2 * 65 *  axiliary_losses['mask_dice'] + 2 * 12 * axiliary_losses['seg_ce'] 
+        # axiliary_losses['loss'] = 5 * 65 * axiliary_losses['mask_ce'] + 2 * 65 *  axiliary_losses['mask_dice'] + 2 * 12 * axiliary_losses['seg_ce'] 
+        axiliary_losses['loss'] = 5 * axiliary_losses['mask_ce'] + 2 * axiliary_losses['mask_dice'] + 2 * axiliary_losses['seg_ce'] 
         
         return axiliary_losses
 

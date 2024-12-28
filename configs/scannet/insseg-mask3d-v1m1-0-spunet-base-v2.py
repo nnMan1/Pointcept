@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = False
 evaluate = True
 resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1/model/model_last.pth'
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1-2/model/model_last.pth'
 
 class_names = [
     # "wall",
@@ -123,7 +123,11 @@ epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
 scheduler = dict(
     type="OneCycleLR",
-    max_lr=optimizer["lr"]
+    max_lr=optimizer["lr"],
+    pct_start=0.01,
+    anneal_strategy="cos",
+    div_factor=10.0,
+    final_div_factor=1000.0,
 )
 
 # dataset settings
@@ -166,7 +170,7 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
