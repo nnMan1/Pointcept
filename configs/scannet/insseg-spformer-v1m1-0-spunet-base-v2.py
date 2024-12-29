@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 4 # bs: total bs in all gpus
-num_worker = 1
+num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = False
@@ -43,10 +43,13 @@ model = dict(
     num_query = 400,
     encoder=dict(
         backbone=dict(
-                type="Res16UNet34C",
-                in_channels = 6,
-                out_channels = 128
-            ),
+        type="SpUNet-v1m1",
+            in_channels=6,
+            num_classes=0,
+            channels=(32, 64, 96, 128, 160, 160, 128, 96, 64, 32),
+            layers=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2),
+        ),
+        backbone_out_channels=32,
         out_channels=fts_sizes
      ),
      decoder=dict(

@@ -14,14 +14,14 @@ from .utils import compute_stats, select_masks, db_scan
 
 class Encoder(nn.Module):
 
-    def __init__(self, backbone, out_channels):
+    def __init__(self, backbone, out_channels, backbone_out_channels):
         super().__init__()
         self.out_channels = out_channels
 
         self.backbone = build_model(backbone) 
 
         self.mask_features_head = nn.Sequential(
-            nn.Linear(self.backbone.PLANES[7], out_channels), 
+            nn.Linear(backbone_out_channels, out_channels), 
             nn.LayerNorm(out_channels), 
             nn.ReLU()
         )
