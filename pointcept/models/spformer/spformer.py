@@ -365,7 +365,7 @@ class SPFormer(nn.Module):
 
             return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['output_mask'].cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['offset'])
             
-            return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices']].T
+            return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices'].cpu()].T
             return_dict['pred_scores'] = return_dict['pred_scores'][0]
             return_dict['pred_classes'] = return_dict['pred_classes'][0]
 

@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 2 # bs: total bs in all gpus
+batch_size = 4 # bs: total bs in all gpus
 num_worker = 1
 mix_prob = 0
 empty_cache = False
 enable_amp = False
 evaluate = True
-resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1-2/model/model_last.pth'
+# resume=True
+# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1-2/model/model_last.pth'
 
 class_names = [
     # "wall",

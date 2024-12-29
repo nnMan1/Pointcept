@@ -138,10 +138,10 @@ def select_masks(masks, classes, scores, offset=None):
             mask_pred = preds[:, mask_id]
             mask_pred_sigmoid = mask_pred.sigmoid()
             mask_pred = (mask_pred > 0).float()
-            mask_scores = (mask_pred_sigmoid * mask_pred).sum(1) / (mask_pred.sum(1) + 1e-6)
+            mask_scores = (mask_pred_sigmoid * mask_pred).sum(0) / (mask_pred.sum(0) + 1e-6)
             score = score * mask_scores
             
-            pred_masks.append(preds)
+            pred_masks.append(mask_pred)
             pred_scores.append(score)
             pred_ids.append(mask_id)
             ret_classes.append(class_id)
