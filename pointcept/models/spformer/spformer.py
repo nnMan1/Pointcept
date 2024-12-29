@@ -323,7 +323,7 @@ class SPFormer(nn.Module):
                 axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
                 axiliary_losses['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
                 axiliary_losses['mask_dice'].append(self.mask_dice_loss(mask, target))
-                axiliary_losses['score_loss'].append(torch.nn.functional.mse_loss(mask, target.float()))
+                axiliary_losses['score_loss'].append(torch.nn.functional.mse_loss(mask.sigmoid(), target.float()))
         
         intersections = []
         unions = []
