@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = False
 evaluate = True
 # resume=True
-# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base-v2-1-2/model/model_last.pth'
+# weight='exp/scannet/insseg-spformer-v1m1-0-spunet-base-v3/model/model_last.pth'
 
 class_names = [
     # "wall",
@@ -33,7 +33,7 @@ class_names = [
     "otherfurniture",
 ]
 num_classes = 18
-fts_sizes = 128
+fts_sizes = 256
 dim_feedforward=1024
 segment_ignore_index = (-1, )
 
@@ -43,11 +43,18 @@ model = dict(
     num_query = 400,
     encoder=dict(
         backbone=dict(
-        type="SpUNet-v1m1",
-            in_channels=6,
-            num_classes=0,
-            channels=(32, 64, 96, 128, 160, 160, 128, 96, 64, 32),
-            layers=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2),
+            input_channel=6,
+            blocks=5,
+            block_reps=2,
+            media=32,
+            normalize_before=True,
+            return_blocks=True,
+            pool='mean'
+        # type="SpUNet-v1m1",
+        #     in_channels=6,
+        #     num_classes=0,
+        #     channels=(32, 64, 96, 128, 160, 160, 128, 96, 64, 32),
+        #     layers=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2),
         ),
         backbone_out_channels=32,
         out_channels=fts_sizes
@@ -55,13 +62,6 @@ model = dict(
      decoder=dict(
         in_channels=fts_sizes,
         hlevels=6,
-        positional_encoding=dict(
-            type='PositionEmbeddingCoordsSine',
-            pos_type="fourier",
-            d_pos=128,
-            gauss_scale=1,
-            normalize=True,
-        ),
         mask_modules=[
             dict(
                 num_classes=num_classes, 
@@ -72,28 +72,65 @@ model = dict(
         ],
         query_refinement_modules=[
             dict(
-                in_channels=128,
+                in_channels=256,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
                 dropout=0
             ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
         ],
     ),
     instance_ignore_index=-1,
 )
 
 # scheduler settings
-epoch = 600
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
+epoch = 500
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
-    type="OneCycleLR",
-    max_lr=optimizer["lr"],
-    pct_start=0.01,
-    anneal_strategy="cos",
-    div_factor=10.0,
-    final_div_factor=1000.0,
+    type="PolyLR",
+    total_steps=1500*100,
+    power=0.9,
 )
 
 # dataset settings

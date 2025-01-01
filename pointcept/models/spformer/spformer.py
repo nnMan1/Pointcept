@@ -11,6 +11,7 @@ from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from .nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
+from .backbone import SpUNet
 
 class Encoder(nn.Module):
 
@@ -18,7 +19,8 @@ class Encoder(nn.Module):
         super().__init__()
         self.out_channels = out_channels
 
-        self.backbone = build_model(backbone) 
+        # self.backbone = build_model(backbone) 
+        self.backbone = SpUNet(**backbone)
 
         self.mask_features_head = nn.Sequential(
             nn.Linear(backbone_out_channels, out_channels), 
@@ -40,71 +42,12 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, in_channels, positional_encoding, mask_modules, query_refinement_modules, hlevels):
+    def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels):
 
         super().__init__()
         
-        self.hlevels = hlevels
-
-        self.query_projection = GenericMLP(
-                input_dim=in_channels,
-                hidden_dims=[in_channels],
-                output_dim=in_channels,
-                use_conv=True,
-                output_use_activation=True,
-                hidden_use_bias=True,
-            )
-
-        self.pos_enc = build_positional_embedding(positional_encoding)
-
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
-
-        self.query_refinement = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
-
-    def __get_pos_encs(self, coords):
-
-        pos_encodings_pcd = []
-
-        for c in coords:
-            pos_encodings_pcd.append([])
-
-            bb = 0
-            for be in c['offset']:
-                scene_min = c['coords'][bb:be].min(dim=0)[0][None, ...]
-                scene_max = c['coords'][bb:be].max(dim=0)[0][None, ...]
-
-                with autocast(enabled=False):
-                    tmp = self.pos_enc(c['coords'][bb:be][None, ...].float(), input_range=[scene_min, scene_max])
-
-                pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
-                bb = be
-
-            pos_encodings_pcd[-1] = torch.cat(pos_encodings_pcd[-1])
-
-        return pos_encodings_pcd
-
-    def __embed_queries(self, data, query_points):
-
-        raw_coordinates = data['coord']
-        offset = data['offset']
-
-        mins, maxs = [], []
-
-        bs = 0
-        for i, be in enumerate(offset):
-            coords = raw_coordinates[bs:be]
-
-            mins.append(coords.min(dim=0)[0])
-            maxs.append(coords.max(dim=0)[0])
-
-            bs = be   
-
-        mins = torch.stack(mins)
-        maxs = torch.stack(maxs)
-    
-        query_pos = self.pos_enc(query_points.float(), input_range=[mins, maxs])
-
-        return query_pos
+        self.query_refinements = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
 
     def forward(self, data, query_features):
         
@@ -115,8 +58,7 @@ class Decoder(nn.Module):
 
         for mask_module in self.mask_modules:
             for _ in range(mask_module.reuse):
-
-                for level in range(self.hlevels):
+                for query_refinement in self.query_refinements:
 
                     mask_module_data = {
                         'query_feat': query_features,
@@ -128,7 +70,7 @@ class Decoder(nn.Module):
 
                     attention_mask = masks['attn_mask']
 
-                    query_features = self.query_refinement[0](
+                    query_features = query_refinement(
                                                     mask_features,
                                                     attention_mask,
                                                     data['offset'],
@@ -228,6 +170,7 @@ class QueryRefinement(nn.Module):
                     dim_feedforward=dim_feedforward,
                     dropout=self.dropout,
                     normalize_before=self.pre_norm,
+                    activation='gelu'
                 )
                     
     def forward(self, point_features, attn_mask, offset, queries):
@@ -303,7 +246,6 @@ class SPFormer(nn.Module):
         # self.iou_mse_loss = nn.MSELoss()
     
     def query_pooling(self, data):
-
         queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
         
         return queries
@@ -316,25 +258,28 @@ class SPFormer(nn.Module):
                            'matched_iou': [],
                            'score_loss': []}
         
+
+        intersections = []
+        unions = []
+        
         for p in pred:
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
+            matched_scores = [p['output_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
 
-            for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
+            for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
                 axiliary_losses['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
                 axiliary_losses['mask_dice'].append(self.mask_dice_loss(mask, target))
-                axiliary_losses['score_loss'].append(torch.nn.functional.mse_loss(mask.sigmoid(), target.float()))
+
+                with torch.no_grad():
+                    intersections.append(((mask > 0.5) * target).sum(0))
+                    unions.append(((mask > 0.5).sum(0) + target.sum(0)) - intersections[-1])
+                    
+                    ious = intersections[-1] / unions[-1]
+                    axiliary_losses['matched_iou'].append(ious.mean())
+
+                axiliary_losses['score_loss'].append(torch.nn.functional.mse_loss(score, ious))
         
-        intersections = []
-        unions = []
-
-        for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-            intersections.append(((mask > 0.5) * target).sum(0))
-            unions.append(((mask > 0.5).sum(0) + target.sum(0)) - intersections[-1])
-            
-            ious = intersections[-1] / unions[-1]
-            axiliary_losses['matched_iou'].append(ious.mean())
-
         for key, value in axiliary_losses.items():
             axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
         
