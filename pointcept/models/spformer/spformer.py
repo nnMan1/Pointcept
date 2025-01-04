@@ -22,21 +22,16 @@ class Encoder(nn.Module):
         # self.backbone = build_model(backbone) 
         self.backbone = SpUNet(**backbone)
 
-        self.mask_features_head = nn.Sequential(
-            nn.Linear(backbone_out_channels, out_channels), 
-            nn.LayerNorm(out_channels), 
-            nn.ReLU()
-        )
 
     def forward(self, data):
 
         offset = data['offset']
 
         pcd_features = self.backbone(data)
-        mask_features = self.mask_features_head(pcd_features)
+        # mask_features = self.mask_features_head(pcd_features)
         
         return {
-                'features': mask_features, 
+                'features': pcd_features, 
                 'offset': offset
             }
 
@@ -45,6 +40,9 @@ class Decoder(nn.Module):
     def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels):
 
         super().__init__()
+
+        self.mask_features_head = nn.Sequential(nn.Linear(in_channels, mask_modules[0]['hidden_dim']), nn.ReLU(), nn.Linear(mask_modules[0]['hidden_dim'], mask_modules[0]['hidden_dim']))
+        self.query_features_head = nn.Sequential(nn.Linear(in_channels, query_refinement_modules[0]['in_channels']), nn.LayerNorm(query_refinement_modules[0]['in_channels']), nn.ReLU())
         
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
         self.query_refinements = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
@@ -52,7 +50,10 @@ class Decoder(nn.Module):
     def forward(self, data, query_features):
         
         offset = data['offset']
-        mask_features = data['features']
+        features = data['features']
+
+        mask_point_features = self.mask_features_head(features)
+        query_point_features = self.query_features_head(features)
 
         out = []
 
@@ -62,7 +63,7 @@ class Decoder(nn.Module):
 
                     mask_module_data = {
                         'query_feat': query_features,
-                        'mask_features': mask_features,
+                        'mask_features': mask_point_features,
                         'offset': offset
                     }
 
@@ -71,7 +72,7 @@ class Decoder(nn.Module):
                     attention_mask = masks['attn_mask']
 
                     query_features = query_refinement(
-                                                    mask_features,
+                                                    query_point_features,
                                                     attention_mask,
                                                     data['offset'],
                                                     query_features,
@@ -81,7 +82,7 @@ class Decoder(nn.Module):
 
         mask_module_data = {
                         'query_feat': query_features,
-                        'mask_features': mask_features,
+                        'mask_features': mask_point_features,
                         'offset': offset
                     }
 
@@ -149,16 +150,14 @@ class QueryRefinement(nn.Module):
         self.num_heads = num_heads
         self.dropout = dropout
         self.sample_size = sample_size
-
+        
         self.cross_attention = CrossAttentionLayer(
                     d_model=self.mask_dim,
                     nhead=self.num_heads,
                     dropout=self.dropout,
                     normalize_before=self.pre_norm,
                 )
-        
-        self.lin_squeez =  nn.Linear(in_channels, self.mask_dim)
-            
+                    
         self.self_attention = SelfAttentionLayer(
                     d_model=self.mask_dim,
                     nhead=self.num_heads,
@@ -224,7 +223,7 @@ class SPFormer(nn.Module):
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
 
-        self.__query = nn.Embedding(num_query, encoder['out_channels'])
+        self.__query = nn.Embedding(num_query, 256)
 
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
@@ -266,20 +265,32 @@ class SPFormer(nn.Module):
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
             matched_scores = [p['output_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
 
+            t = {'seg_ce': [],
+                 'mask_ce': [],
+                 'mask_dice': [],
+                 'matched_iou': [],
+                 'score_loss': []}
+
             for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-                axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
-                axiliary_losses['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
-                axiliary_losses['mask_dice'].append(self.mask_dice_loss(mask, target))
+                t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
+                t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
+                t['mask_dice'].append(self.mask_dice_loss(mask, target))
 
                 with torch.no_grad():
-                    intersections.append(((mask > 0.5) * target).sum(0))
-                    unions.append(((mask > 0.5).sum(0) + target.sum(0)) - intersections[-1])
+                    intersections.append(((mask > 0) * target).sum(0))
+                    unions.append(((mask > 0).sum(0) + target.sum(0)) - intersections[-1])
                     
                     ious = intersections[-1] / unions[-1]
-                    axiliary_losses['matched_iou'].append(ious.mean())
+                    t['matched_iou'].append(ious.mean())
 
-                axiliary_losses['score_loss'].append(torch.nn.functional.mse_loss(score, ious))
-        
+                t['score_loss'].append(torch.nn.functional.mse_loss(score, ious))
+
+            for key, value in axiliary_losses.items():
+                if key != 'matched_iou':
+                    axiliary_losses[key].append(torch.stack(t[key]).sum())
+                else:
+                    axiliary_losses[key].append(torch.stack(t[key]).mean())
+
         for key, value in axiliary_losses.items():
             axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
         

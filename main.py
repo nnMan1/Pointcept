@@ -95,16 +95,23 @@ fts_sizes = 256
 dim_feedforward=1024
 segment_ignore_index = (-1, )
 
-ptv3_cfg =  dict(
+model_cfg =  dict(
     type="SPFormer",
     num_query = 400,
     encoder=dict(
         backbone=dict(
-        type="SpUNet-v1m1",
-            in_channels=6,
-            num_classes=0,
-            channels=(32, 64, 96, 128, 160, 160, 128, 96, 64, 32),
-            layers=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2),
+            input_channel=6,
+            blocks=5,
+            block_reps=2,
+            media=32,
+            normalize_before=True,
+            return_blocks=True,
+            pool='mean'
+        # type="SpUNet-v1m1",
+        #     in_channels=6,
+        #     num_classes=0,
+        #     channels=(32, 64, 96, 128, 160, 160, 128, 96, 64, 32),
+        #     layers=(2, 2, 2, 2, 2, 2, 2, 2, 2, 2),
         ),
         backbone_out_channels=32,
         out_channels=fts_sizes
@@ -112,13 +119,6 @@ ptv3_cfg =  dict(
      decoder=dict(
         in_channels=fts_sizes,
         hlevels=6,
-        positional_encoding=dict(
-            type='PositionEmbeddingCoordsSine',
-            pos_type="fourier",
-            d_pos=128,
-            gauss_scale=1,
-            normalize=True,
-        ),
         mask_modules=[
             dict(
                 num_classes=num_classes, 
@@ -129,21 +129,63 @@ ptv3_cfg =  dict(
         ],
         query_refinement_modules=[
             dict(
-                in_channels=128,
+                in_channels=256,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
                 dropout=0
             ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
         ],
     ),
     instance_ignore_index=-1,
 )
 
-model = build_model(ptv3_cfg).cuda()
+model = build_model(model_cfg)
 
-print(model)
+model.backbone.load_state(torch.load('weights/sstnet/sstnet_pretrain.pth')['model'])
+
+# print(model)
 
 # for d in dataloader:
 

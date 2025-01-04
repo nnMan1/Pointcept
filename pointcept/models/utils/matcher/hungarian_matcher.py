@@ -183,7 +183,7 @@ class HungarianMatcher(nn.Module):
                 batch_start = batch_end
                 continue
 
-            tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
+            tgt_mask = F.one_hot(   +1)[:, 1:]
 
             out_mask = out_mask[:, pred_ids]
             
