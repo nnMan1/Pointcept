@@ -176,10 +176,6 @@ class QueryRefinement(nn.Module):
 
         point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
-
-        attn_mask.permute((0, 2, 1))[
-                    attn_mask.sum(1) == rand_idx[0].shape[0]
-                ] = False
                 
         m = torch.stack(mask_idx)
         attn_mask = torch.logical_or(attn_mask, m[..., None])
@@ -287,7 +283,7 @@ class SPFormer(nn.Module):
 
             for key, value in axiliary_losses.items():
                 if key != 'matched_iou':
-                    axiliary_losses[key].append(torch.stack(t[key]).sum())
+                    axiliary_losses[key].append(torch.stack(t[key]).mean())
                 else:
                     axiliary_losses[key].append(torch.stack(t[key]).mean())
 
@@ -313,23 +309,18 @@ class SPFormer(nn.Module):
 
 
         if not self.training:
-            masks = pred[-1]
 
-            return_dict.update(compute_stats(masks, data, data['offset']))
-
-            return_dict['pred_classes'] = masks['output_class'][..., :-1] #We remove dummy class from predictions
-
-            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['output_mask'].cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['offset'])
+            return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
             
-            return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices'].cpu()].T
-            return_dict['pred_scores'] = return_dict['pred_scores'][0]
-            return_dict['pred_classes'] = return_dict['pred_classes'][0]
+            # return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices'].cpu()].T
+            # return_dict['pred_scores'] = return_dict['pred_scores'][0]
+            # return_dict['pred_classes'] = return_dict['pred_classes'][0]
 
-            ids = (return_dict['pred_masks'] > 0).sum(-1) >  100
+            # ids = (return_dict['pred_masks'] > 0).sum(-1) >  100
 
-            return_dict['pred_masks'] = return_dict['pred_masks'][ids]
-            return_dict['pred_scores'] = return_dict['pred_scores'][ids]
-            return_dict['pred_classes'] = return_dict['pred_classes'][ids]
+            # return_dict['pred_masks'] = return_dict['pred_masks'][ids]
+            # return_dict['pred_scores'] = return_dict['pred_scores'][ids]
+            # return_dict['pred_classes'] = return_dict['pred_classes'][ids]
 
             data = self.superpoint_unpooling(data)
 

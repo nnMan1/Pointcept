@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = False
 enable_amp = False
 evaluate = True
-# resume=False
-# weight='exp/scannet/insseg-spformer-v1m1-0-spunet-base-v4/model/model_last.pth'
+# resume=True
+weight='backbones/sstnet_pretrain.pth'
 
 class_names = [
     # "wall",
@@ -251,7 +251,7 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(

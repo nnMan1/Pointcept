@@ -68,7 +68,6 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
             batch_start = 0
 
             for i, batch_end in enumerate(offset):
-                pcd = data[batch_start: batch_end]
                 pcd_size = batch_end - batch_start
 
                 if pcd_size < max_size:
@@ -106,50 +105,63 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
         batch_start = 0
         
         for i, batch_end in enumerate(offset):
-            batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
+            batched_data.append(data[batch_start:batch_end][rand_idx[i]])
             batch_start = batch_end
             
         batched_data = torch.stack(batched_data)
         
         return batched_data, rand_idx, mask_idx
 
-def select_masks(masks, classes, scores, offset=None):
+def select_masks(out, superpoints):
+        pred_labels = out['output_class'][0]
+        pred_masks = out['output_mask'].T
+        pred_scores = out['output_score'][0]
 
-        pred_masks = []
-        pred_scores = []
-        pred_ious_ = []
-        ret_classes = []
+        num_class = pred_labels.shape[1] - 1
+        num_query = pred_labels.shape[0]
+        score_thr = 0
+        n_point_thr = 100
+        
+        scores = F.softmax(pred_labels, dim=-1)[:, :-1]
+        scores *= pred_scores
+        labels = torch.arange(num_class, device=scores.device).unsqueeze(0).repeat(num_query, 1).flatten(0, 1)
+        scores, topk_idx = scores.flatten(0, 1).topk(100, sorted=False)
 
-        pred_ids = []
+        labels = labels[topk_idx]
 
-        batch_start = 0
+        topk_idx = torch.div(topk_idx, num_class, rounding_mode='floor')
+        mask_pred = pred_masks
+        mask_pred = mask_pred[topk_idx]
+        mask_pred_sigmoid = mask_pred.sigmoid()
+        # mask_pred before sigmoid()
+        mask_pred = (mask_pred > 0).float()  # [n_p, M]
+        mask_scores = (mask_pred_sigmoid * mask_pred).sum(1) / (mask_pred.sum(1) + 1e-6)
+        scores = scores * mask_scores
+        # get mask
+        mask_pred = mask_pred[:, superpoints].int()
 
-        for i, batch_end in enumerate(offset):
-            preds = masks[batch_start: batch_end]
-            score = scores[i]
-            cls = classes[i]
-            mask_id = torch.arange(len(score))[..., None].repeat(1, score.shape[-1])
-            class_id = torch.arange(score.shape[-1])[None, ...].repeat(len(score), 1)
+        # score_thr
+        score_mask = scores > score_thr
+        scores = scores[score_mask]  # (n_p,)
+        labels = labels[score_mask]  # (n_p,)
+        mask_pred = mask_pred[score_mask]  # (n_p, N)
 
-            score, ids = score.flatten().topk(100)
-            mask_id = mask_id.flatten()[ids]
-            class_id = class_id.flatten()[ids]
+        # npoint thr
+        mask_pointnum = mask_pred.sum(1)
+        npoint_mask = mask_pointnum > n_point_thr
+        scores = scores[npoint_mask]  # (n_p,)
+        labels = labels[npoint_mask]  # (n_p,)
+        mask_pred = mask_pred[npoint_mask]  # (n_p, N)
 
-            mask_pred = preds[:, mask_id]
-            mask_pred_sigmoid = mask_pred.sigmoid()
-            mask_pred = (mask_pred > 0).float()
-            mask_scores = (mask_pred_sigmoid * mask_pred).sum(0) / (mask_pred.sum(0) + 1e-6)
-            score = score * mask_scores
-            score = torch.pow(score, 1/3)
-            
-            pred_masks.append(mask_pred)
-            pred_scores.append(score)
-            pred_ids.append(mask_id)
-            ret_classes.append(class_id)
+        cls_pred = labels.cpu().numpy()
+        score_pred = scores.cpu().numpy()
+        mask_pred = mask_pred.cpu().numpy()
 
-            batch_start = batch_end
-
-        return pred_masks, pred_scores, ret_classes
+        return dict(
+            pred_masks=mask_pred,
+            pred_scores = score_pred,
+            pred_classes = cls_pred
+        )
 
 def compute_stats(masks, data, offset, instance_ignore_index=-1):
         

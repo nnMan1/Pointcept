@@ -29,7 +29,7 @@ class Args:
         self.num_machines = 1
         self.machine_rank = 0 
         self.dist_url = 'auto'
-        self.options={'save_path': 'exp/scannet/insseg-spformer-v1m1-0-spunet-base-v6'}
+        self.options={'save_path': 'exp/scannet/insseg-spformer-v1m1-0-spunet-base-v7'}
 
 def main():
     # sh scripts/train.sh -p python -g 1 -d fuselage -c semseg-spunet-v1m1-0-base_lr_split_groupingV2 -n semseg-spunet-v1m1-0-base_lr_split_groupingV2[]
