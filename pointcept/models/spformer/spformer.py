@@ -279,16 +279,21 @@ class SPFormer(nn.Module):
                     ious = intersections[-1] / unions[-1]
                     t['matched_iou'].append(ious.mean())
 
-                t['score_loss'].append(torch.nn.functional.mse_loss(score, ious))
+                filter = ious > 0.5
+
+                if filter.sum() > 0:
+                    t['score_loss'].append(torch.nn.functional.mse_loss(score[filter], ious[filter]))
+                else:  
+                    t['score_loss'].append(torch.tensor(0.0).to(score.device))
 
             for key, value in axiliary_losses.items():
-                if key != 'matched_iou':
-                    axiliary_losses[key].append(torch.stack(t[key]).mean())
-                else:
-                    axiliary_losses[key].append(torch.stack(t[key]).mean())
+                axiliary_losses[key].append(torch.stack(t[key]).mean())
 
         for key, value in axiliary_losses.items():
-            axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
+            if key in ['matched_iou', 'seg_ce']:
+                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
+            else:
+                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
         
         axiliary_losses['loss'] = 0.5 * axiliary_losses['seg_ce'] + \
                                   1.0 * axiliary_losses['mask_ce'] + \
