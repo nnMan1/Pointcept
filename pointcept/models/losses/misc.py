@@ -34,8 +34,6 @@ class BCELoss(nn.Module):
     def forward(self, pred, target):
         return self.loss(pred, target) * self.loss_weight
 
-
-
 @LOSSES.register_module()
 class CrossEntropyLoss(nn.Module):
     def __init__(
@@ -63,6 +61,28 @@ class CrossEntropyLoss(nn.Module):
     def forward(self, pred, target):
         return self.loss(pred, target) * self.loss_weight
 
+@LOSSES.register_module()
+class BCEWithLogitsLoss(nn.Module):
+    def __init__(
+        self,
+        weight=None,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(BCEWithLogitsLoss, self).__init__()
+        weight = torch.tensor(weight).cuda() if weight is not None else None
+        self.loss_weight = loss_weight
+        self.loss = nn.BCEWithLogitsLoss(
+            weight=weight,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
+
+    def forward(self, pred, target):
+        return self.loss(pred, target) * self.loss_weight
 
 @LOSSES.register_module()
 class SmoothCELoss(nn.Module):

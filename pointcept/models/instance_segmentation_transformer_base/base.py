@@ -2,25 +2,21 @@
 import torch
 import torch_scatter
 from torch import nn
-from torch.cuda.amp import autocast
 
-from pointcept.models.builder import MODELS, build_model
-from pointcept.positional_embeddings import build_positional_embedding
-from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
-from pointcept.models.utils.matcher.my_matcher import MyMatcher
-from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
+from .matchers import build_matcher
+from ..builder import MODELS, build_model
+from ..losses import build_criteria
 from .nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
-from .utils import compute_stats, select_masks, db_scan
-from ..sparse_unet import SSTNetBackbone
+from utils import *
+from abc import ABC, abstractmethod
 
-class Encoder(nn.Module):
+@MODELS.register_module("InstSegTransformerEncoder")
+class InstSegTransformerEncoder(nn.Module):
 
     def __init__(self, backbone, out_channels, backbone_out_channels):
         super().__init__()
         self.out_channels = out_channels
-
-        # self.backbone = build_model(backbone) 
-        self.backbone = SSTNetBackbone(**backbone)
+        self.backbone = build_model(backbone) 
 
 
     def forward(self, data):
@@ -35,9 +31,10 @@ class Encoder(nn.Module):
                 'offset': offset
             }
 
-class Decoder(nn.Module):
+@MODELS.register_module("InstSegTransformerDecoder")
+class InstSegTransformerDecoder(nn.Module):
 
-    def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels):
+    def __init__(self, in_channels, mask_modules, query_refinement_modules):
 
         super().__init__()
 
@@ -201,44 +198,29 @@ class QueryRefinement(nn.Module):
 
         return queries
 
-@MODELS.register_module("SPFormer")
-class SPFormer(nn.Module):
-    
-    def __init__(self, 
-                 num_query,
+@MODELS.register_module("InstanceSegmentationTransformerBase")
+class InstanceSegmentationTransformerBase(nn.Module, ABC):
+    def __init__(self,
                  encoder, 
-                 decoder,
-                 instance_ignore_index, 
+                 decoder, 
+                 matcher,
+                 criteria_seg,
+                 criteria_mask,
+                 use_segments = False,
+                 return_features = False
                 ):
 
         super().__init__()
 
-        self.instance_ignore_index = instance_ignore_index
-        self.encoder = Encoder(**encoder)   
+        self.use_segments = use_segments
+        self.return_features = return_features
 
-        self.superpoint_pooling = SuperpointPooling()
-        self.superpoint_unpooling = SuperpointUnpooling()
+        self.encoder = build_model(encoder)
+        self.decoder = build_model(decoder)
 
-        self.__query = nn.Embedding(num_query, 256)
-
-        for i, _ in enumerate(decoder['mask_modules']):
-            decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
-
-        self.decoder = Decoder(**decoder)
-        self.matcher = HungarianMatcher(cost_class=.5,
-                                        cost_dice=1,
-                                        cost_mask=1,
-                                        instance_ignore_index=instance_ignore_index)
-        
-        weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
-        weight[-1] = 0.1
-
-        self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
-        self.mask_dice_loss = DiceLoss()
-        self.mask_bce_loss = nn.BCEWithLogitsLoss()
-        
-        # self.iou_ce_loss = nn.BCEWithLogitsLoss()
-        # self.iou_mse_loss = nn.MSELoss()
+        self.matcher = build_matcher(matcher)
+        self.criteria_seg = build_criteria(criteria_seg)
+        self.criteria_mask = build_criteria(criteria_mask)
     
     def query_pooling(self, data):
         queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
@@ -247,86 +229,49 @@ class SPFormer(nn.Module):
 
     def __compute_loss(self, pred, data):
         
-        axiliary_losses = {'seg_ce': [],
-                           'mask_ce': [],
-                           'mask_dice': [],
-                           'matched_iou': [],
-                           'score_loss': []}
-        
-
-        intersections = []
-        unions = []
-        
+        axiliary_losses = {'seg_loss': torch.tensor(0.0),
+                           'seg_loss': torch.tensor(0.0)}
+                
         for p in pred:
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
             matched_scores = [p['output_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
 
-            t = {'seg_ce': [],
-                 'mask_ce': [],
-                 'mask_dice': [],
-                 'matched_iou': [],
-                 'score_loss': []}
+            t = {'seg_loss': torch.tensor(0.0),
+                 'mask_loss': torch.tensor(0.0)}
 
             for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-                t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
-                t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
-                t['mask_dice'].append(self.mask_dice_loss(mask, target))
-
-                with torch.no_grad():
-                    intersections.append(((mask > 0) * target).sum(0))
-                    unions.append(((mask > 0).sum(0) + target.sum(0)) - intersections[-1])
-                    
-                    ious = intersections[-1] / unions[-1]
-                    t['matched_iou'].append(ious.mean())
-
-                filter = ious > 0.5
-
-                if filter.sum() > 0:
-                    t['score_loss'].append(torch.nn.functional.mse_loss(score[filter], ious[filter]))
-                else:  
-                    t['score_loss'].append(torch.tensor(0.0).to(score.device))
+                t['seg_loss'] += self.criteria_seg(p_seg, t_seg, score)
+                t['mask_loss'] += self.criteria_mask(mask, target)
 
             for key, value in axiliary_losses.items():
-                axiliary_losses[key].append(torch.stack(t[key]).mean())
+                axiliary_losses[key] += torch.stack(t[key]).mean() / len(matched_scores)
 
         for key, value in axiliary_losses.items():
-            if key in ['matched_iou', 'seg_ce']:
-                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
-            else:
-                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
+            axiliary_losses[key] /= len(pred)
         
-        axiliary_losses['loss'] = 0.5 * axiliary_losses['seg_ce'] + \
-                                  1.0 * axiliary_losses['mask_ce'] + \
-                                  1.0 * axiliary_losses['mask_dice']  + \
-                                  0.5 * axiliary_losses['score_loss'] 
+        axiliary_losses['loss'] = axiliary_losses['seg_loss'] + axiliary_losses['mask_loss']
+
         return axiliary_losses
 
     def forward(self, data):
 
         data.update(self.encoder(data))
 
-        data = self.superpoint_pooling(data)
+        if self.use_segments:
+            data = self.superpoint_pooling(data)
+
         queries = self.query_pooling(data)    
-
         pred = self.decoder(data, queries)  
+        return_dict = self.__compute_loss(pred, data) 
 
-        return_dict = self.__compute_loss(pred, data)  
-
+        if self.return_features:
+            return_dict['features'] = data['features']
 
         if not self.training:
 
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
             
-            # return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices'].cpu()].T
-            # return_dict['pred_scores'] = return_dict['pred_scores'][0]
-            # return_dict['pred_classes'] = return_dict['pred_classes'][0]
-
-            # ids = (return_dict['pred_masks'] > 0).sum(-1) >  100
-
-            # return_dict['pred_masks'] = return_dict['pred_masks'][ids]
-            # return_dict['pred_scores'] = return_dict['pred_scores'][ids]
-            # return_dict['pred_classes'] = return_dict['pred_classes'][ids]
-
-            data = self.superpoint_unpooling(data)
+            if self.use_segments:
+                data = self.superpoint_unpooling(data)
 
         return return_dict

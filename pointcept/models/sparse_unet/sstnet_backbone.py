@@ -8,6 +8,7 @@ from torch import nn
 from typing import Callable, Dict, List, Optional, Union
 from pointcept.models.utils import offset2batch
 import torch_scatter
+from ..builder import MODELS
 
 
 class ResidualBlock(SparseModule):
@@ -171,7 +172,8 @@ class UBlock(nn.Module):
         else:
             return output
 
-class SpUNet(nn.Module):
+@MODELS.register_module()
+class SSTNetBackbone(nn.Module):
 
     def __init__(self,input_channel: int = 6,
         blocks: int = 5,
@@ -181,6 +183,8 @@ class SpUNet(nn.Module):
         return_blocks=True,
         pool='mean'):
         super().__init__()
+
+        self.return_blocks = return_blocks
 
         # backbone and pooling
         self.input_conv = spconv.SparseSequential(
@@ -223,20 +227,10 @@ class SpUNet(nn.Module):
         )
 
         x = self.input_conv(x)
-        x, _ = self.unet(x)
+        x,blocks = self.unet(x)
         x = self.output_layer(x)
 
+        if self.return_blocks:
+            return x.features, [b.features for b in blocks]
+
         return x.features
-
-
-if __name__ == '__main__':
-    # input_channel: 6
-    #   blocks: 5
-    #   block_reps: 2
-    #   media: 32
-    #   normalize_before: True
-    #   return_blocks: True
-    #   pool: mean
-    #   num_class: 18
-    model = SpUNet(6, 5, 2, 32, True, True, 'mean', 18)
-    print(model)

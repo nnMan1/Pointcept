@@ -11,8 +11,12 @@ from torch.cuda.amp import autocast
 from multiprocessing import Pool
 import torch_scatter
 
-# from detectron2.projects.point_rend.point_features import point_sample
+from pointcept.utils.registry import Registry
 
+MATCHERS = Registry("matchers")
+
+def build_matcher(cfg):
+    return MATCHERS.build(cfg)
 
 def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
@@ -30,12 +34,6 @@ def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     denominator = inputs.sum(-1)[:, None] + targets.sum(-1)[None, :]
     loss = 1 - (numerator + 1) / (denominator + 1)
     return loss
-
-
-batch_dice_loss_jit = torch.jit.script(
-    batch_dice_loss
-)  # type: torch.jit.ScriptModule
-
 
 def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
@@ -64,12 +62,7 @@ def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
 
     return loss
 
-
-batch_sigmoid_ce_loss_jit = torch.jit.script(
-    batch_sigmoid_ce_loss
-)  # type: torch.jit.ScriptModule
-
-
+@MATCHERS.register_module("HungarianMatcher")
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
 
@@ -106,9 +99,6 @@ class HungarianMatcher(nn.Module):
 
         self.num_points = num_points
 
-        # self.p = Pool(128)
-
-    # @torch.no_grad()
     def my_optimized_forward(self, outputs, targets, offset):
 
         indices = []
@@ -138,23 +128,10 @@ class HungarianMatcher(nn.Module):
                 cost_class = - out_seg[:, instances_seg]
 
                 tgt_mask = tgt_mask.float()
+                cost_mask = batch_sigmoid_ce_loss(out_mask, tgt_mask)
+                cost_dice = batch_dice_loss(out_mask, tgt_mask)
 
-                # Compute the focal loss between masks
-                cost_mask = batch_sigmoid_ce_loss_jit(
-                    out_mask, tgt_mask
-                )
-
-                # Compute the dice loss betwen masks
-                cost_dice = batch_dice_loss_jit(
-                    out_mask, tgt_mask
-                )
-
-                C = (
-                    self.cost_mask * cost_mask
-                    + self.cost_class * cost_class
-                    + self.cost_dice * cost_dice
-                )
-
+                C = self.cost_mask * cost_mask + self.cost_class * cost_class + self.cost_dice * cost_dice
 
                 C = C.cpu().numpy()
 
@@ -170,10 +147,7 @@ class HungarianMatcher(nn.Module):
             out_mask = outputs['output_mask'][batch_start:batch_end]
             out_seg = outputs['output_class'][i]
             tgt_mask = targets['instance'][batch_start:batch_end]
-            tgt_segm = targets['segment'][batch_start:batch_end]
-
-            # nonassigned_pred_ids = [i for i in range(out_mask.shape[-1]) if i not in pred_ids]
-            
+            tgt_segm = targets['segment'][batch_start:batch_end]            
 
             filter = tgt_mask != self.instance_ignore_index
 
@@ -192,7 +166,7 @@ class HungarianMatcher(nn.Module):
             tgt_segm[pred_ids] = tmp
 
 
-            tgt_mask = tgt_mask[:, tgt_ids]#.argmax(-1)
+            tgt_mask = tgt_mask[:, tgt_ids]
                         
             matched_outputs.append(out_mask)
             matched_targets.append(tgt_mask)
@@ -201,9 +175,6 @@ class HungarianMatcher(nn.Module):
 
             batch_start = batch_end
             
-        # print('Mapping time: ', time.time() - mapping_start)      
-        # print('HM time: ', time.time() - start_time)      
-        # print('Data_len: ', len(Cs))      
         return matched_outputs, matched_targets, matched_sem_outputs, matched_sem_targets, indices
 
     
@@ -239,3 +210,4 @@ class HungarianMatcher(nn.Module):
         ]
         lines = [head] + [" " * _repr_indent + line for line in body]
         return "\n".join(lines)
+
