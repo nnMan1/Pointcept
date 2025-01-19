@@ -22,6 +22,7 @@ from .assembly import Assembly
 from .abc_dataset import ABCDataset
 from .cetim import Cetim
 from .fuselage import Fuselage
+from .mcb_dataset import MCBDataset 
 
 # dataloader
 from .dataloader import MultiDatasetDataloader
