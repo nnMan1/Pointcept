@@ -1,6 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 # misc custom setting
-batch_size = 16  # bs: total bs in all gpus
+batch_size = 64  # bs: total bs in all gpus
+num_worker = 20
+eval_epoch = 50  
 # batch_size_val = 8
 empty_cache = False
 enable_amp = False
@@ -8,7 +10,7 @@ enable_amp = False
 # model settings
 model = dict(
     type="DefaultClassifier",
-    num_classes=5,
+    num_classes=18,
     backbone_embed_dim=256,
     backbone=dict(
         type="SpUNet-v1m1",
@@ -30,11 +32,31 @@ scheduler = dict(type="MultiStepLR", milestones=[0.6, 0.8], gamma=0.1)
 dataset_type = "MCBDataset"
 data_root = "data/mcb_dataset"
 cache_data = False
-class_names = ['Flanged plain bearings', 'T-nut', 'Screws and bolts with cylindrical head']
+class_names = [
+    'Eye screws',
+    'Setscrew',
+    'Tapping screws',
+    'Cap nuts',
+    'Castle nuts',
+    'Flange nut',
+    'Hexagonal nuts',
+    'Locknuts',
+    'Rivet nut',
+    'Slotted nuts',
+    'Square nuts',
+    'T-nut',
+    'Wingnuts',
+    'Screws and bolts with countersunk head',
+    'Screws and bolts with cylindrical head',
+    'Screws and bolts with hexagonal head',
+    'Washer bolt',
+    'other'
+]
 
 data = dict(
     num_classes=len(class_names),
     ignore_index=-1,
+    names=class_names,
     train=dict(
         type=dataset_type,
         split="train",
@@ -49,7 +71,7 @@ data = dict(
             dict(type="RandomScale", scale=[0.9, 1.1]),
             dict(type="RandomShift", shift=((-0.2, 0.2), (-0.2, 0.2), (-0.2, 0.2))),
             # dict(type="RandomFlip", p=0.5),
-            # dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             dict(
                 type="GridSample",

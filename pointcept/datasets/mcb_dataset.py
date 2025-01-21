@@ -3,7 +3,7 @@ import glob
 import h5py
 import numpy as np
 import torch
-import open3d as o3d
+import trimesh
 import os.path as osp
 from copy import deepcopy
 from torch.utils.data import Dataset
@@ -52,14 +52,12 @@ class MCBDataset(Dataset):
         cache=False,
         loop=1,
         class_names = class_names, 
-        include_other_classes = False
     ):
         super(MCBDataset, self).__init__()
         self.data_root = data_root
         self.split = split
 
         self.class_names = class_names
-        self.include_other_class = include_other_classes
         
         self.label_to_id = {label: id for id, label in enumerate(class_names)}
 
@@ -95,7 +93,7 @@ class MCBDataset(Dataset):
         
         data_list = []
 
-        class_names = ['*'] if self.include_other_class else self.class_names
+        class_names = ['*'] if 'other' in self.class_names else self.class_names
 
         if isinstance(self.split, str):
             for label in class_names:
@@ -113,15 +111,21 @@ class MCBDataset(Dataset):
 
         idx = idx % len(self.data_list)
 
-        data = self.data_list[idx]
+        try:
+            data = self.data_list[idx]
+            pcd = trimesh.load_mesh(data).sample(4096, return_index=False) # weighted by face area by default
+            coord = np.asarray(pcd)
 
-        pcd = o3d.io.read_triangle_mesh(data).sample_points_poisson_disk(4096)
+            if len(coord) == 0:
+                raise Exception("Number of points can not be 0")
+        except:
+            return self.get_data((idx + 1) % len(self.data_list))
         
-        coord = np.asarray(pcd.points)
         label = data.split('/')[-2]
-        label_id = self.label_to_id[label] if label in self.class_names else -1
+        label_id = self.label_to_id[label] if label in self.class_names else self.label_to_id['other']
         
         return {
+            'path': data,
             'coord': coord,
             'category': label_id,
             'path':  data
