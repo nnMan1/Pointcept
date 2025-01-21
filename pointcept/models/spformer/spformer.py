@@ -12,6 +12,7 @@ from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from .nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
 from .backbone import SpUNet
+from .query_decoder import QueryDecoder
 
 class Encoder(nn.Module):
 
@@ -117,7 +118,7 @@ class MaskModule(nn.Module):
         outputs_score = self.out_score(query_feat)
 
         output_masks = []
-        output_segments = []
+        attn_masks = []
         
         return_dict = {
             'output_class': output_class,
@@ -133,9 +134,15 @@ class MaskModule(nn.Module):
         return_dict['output_mask'] = outputs_mask
 
         if self.return_attn_masks:
-            attn_mask = outputs_mask.detach().sigmoid() < 0.5
-            return_dict['attn_mask'] = attn_mask
-                        
+            
+            bs = 0
+            for be in offset:
+                attn_masks.append((outputs_mask[bs:be].sigmoid() < 0.5).bool())
+                attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
+                bs = be
+
+            return_dict['attn_mask'] = torch.cat(attn_masks)
+
         return return_dict
 
 class QueryRefinement(nn.Module):
@@ -225,6 +232,19 @@ class SPFormer(nn.Module):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
         self.decoder = Decoder(**decoder)
+        # self.decoder = QueryDecoder(**{
+        #     'num_layer': 6,
+        #     'num_query': 400,
+        #     'd_model': 256,
+        #     'nhead': 8,
+        #     'hidden_dim': 1024,
+        #     'dropout': 0.0,
+        #     'activation_fn': 'gelu',
+        #     'iter_pred': True,
+        #     'attn_mask': True,
+        #     'pe': False
+        # }, in_channel=32, num_class=18)
+
         self.matcher = HungarianMatcher(cost_class=.5,
                                         cost_dice=1,
                                         cost_mask=1,
@@ -287,18 +307,24 @@ class SPFormer(nn.Module):
                     t['score_loss'].append(torch.tensor(0.0).to(score.device))
 
             for key, value in axiliary_losses.items():
-                axiliary_losses[key].append(torch.stack(t[key]).mean())
+                if key in ['mask_dice']:
+                    if len(t[key][:-1]) > 0:
+                        axiliary_losses[key].append(torch.stack(t[key][:-1]).mean() + t[key][-1])
+                    else:
+                        axiliary_losses[key].append(t[key][-1])
+                else:
+                    axiliary_losses[key].append(torch.stack(t[key]).mean())
 
         for key, value in axiliary_losses.items():
-            if key in ['matched_iou', 'seg_ce']:
+            if key in ['matched_iou']:
                 axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
             else:
-                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
+                axiliary_losses[key] = torch.stack(axiliary_losses[key]).sum()
         
         axiliary_losses['loss'] = 0.5 * axiliary_losses['seg_ce'] + \
                                   1.0 * axiliary_losses['mask_ce'] + \
                                   1.0 * axiliary_losses['mask_dice']  + \
-                                  0.5 * axiliary_losses['score_loss'] 
+                                  0.5 * axiliary_losses['score_loss']
         return axiliary_losses
 
     def forward(self, data):
@@ -308,24 +334,13 @@ class SPFormer(nn.Module):
         data = self.superpoint_pooling(data)
         queries = self.query_pooling(data)    
 
-        pred = self.decoder(data, queries)  
+        pred = self.decoder(data, queries) 
+        # pred = self.decoder(data['features'], data['offset']) 
 
         return_dict = self.__compute_loss(pred, data)  
 
-
         if not self.training:
-
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
-            
-            # return_dict['pred_masks'] = return_dict['pred_masks'][0][data['seg_indices'].cpu()].T
-            # return_dict['pred_scores'] = return_dict['pred_scores'][0]
-            # return_dict['pred_classes'] = return_dict['pred_classes'][0]
-
-            # ids = (return_dict['pred_masks'] > 0).sum(-1) >  100
-
-            # return_dict['pred_masks'] = return_dict['pred_masks'][ids]
-            # return_dict['pred_scores'] = return_dict['pred_scores'][ids]
-            # return_dict['pred_classes'] = return_dict['pred_classes'][ids]
 
             data = self.superpoint_unpooling(data)
 

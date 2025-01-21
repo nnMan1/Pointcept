@@ -425,7 +425,7 @@ class Res16UNet34A(Res16UNet34):
 class Res16UNet34B(Res16UNet34):
     PLANES = (32, 64, 128, 256, 256, 128, 64, 32)
 
-@MODELS.register_module()
+@MODELS.register_module('')
 class Res16UNet34C(Res16UNet34):
     PLANES = (32, 64, 128, 256, 256, 128, 96, 96)
 

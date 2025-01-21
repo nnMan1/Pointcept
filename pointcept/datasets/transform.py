@@ -921,12 +921,13 @@ class GridSample(object):
 
 @TRANSFORMS.register_module()
 class SphereCrop(object):
-    def __init__(self, point_max=80000, sample_rate=None, mode="random", 
+    def __init__(self, point_max=80000, sample_rate=None, mode="random", ord=2,
                  keys=['coord', 'origin_coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'displacement', 'strength', 'seg_indices']):
         self.point_max = point_max
         self.sample_rate = sample_rate
         assert mode in ["random", "center", "all"]
         self.mode = mode
+        self.ord = ord
 
         self.keys = keys
 
@@ -988,7 +989,8 @@ class SphereCrop(object):
                 center = data_dict["coord"][data_dict["coord"].shape[0] // 2]
             else:
                 raise NotImplementedError
-            idx_crop = np.argsort(np.sum(np.square(data_dict["coord"] - center), 1))[
+            
+            idx_crop = np.argsort(np.linalg.norm(data_dict["coord"] - center, ord=self.ord, axis=1))[
                 :point_max
             ]
             

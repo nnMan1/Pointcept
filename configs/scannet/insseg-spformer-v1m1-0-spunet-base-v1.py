@@ -142,7 +142,7 @@ data = dict(
         data_root=data_root,
         transform=[ 
             dict(type="CenterShift", apply_z=True),
-            # dict(type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5),
+            dict(type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
@@ -151,7 +151,7 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [40/50, 160/50]]),
+            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [40, 160]]),
             # dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             # dict(type="ChromaticTranslation", p=0.95, ratio=0.1),\
             # dict(type="HueSaturationTranslation"),
@@ -183,7 +183,7 @@ data = dict(
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "coord"),
+                feat_keys=("color", "normal"),
             ),
         ],
         test_mode=False,
@@ -232,7 +232,7 @@ data = dict(
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "coord"),
+                feat_keys=("color", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],

@@ -213,6 +213,7 @@ class SpUNet(nn.Module):
         offset = data_dict["offset"]
         batch = offset2batch(offset)
         sparse_shape = torch.add(torch.max(grid_coord, dim=0).values, 1).tolist()
+       
         x = spconv.SparseConvTensor(
             features=feat,
             indices=torch.cat(
