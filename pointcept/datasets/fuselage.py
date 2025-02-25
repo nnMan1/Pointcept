@@ -68,6 +68,72 @@ class Fuselage(Dataset):
             )
         )
 
+    def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label):
+        ret = {}
+
+        points = data_dict['coord']
+
+        a_ids, b_ids, alphas = [], [], []
+
+        attp = 0
+        
+        while len(a_ids) < k: 
+            a_id, b_id = np.random.choice(interpolating_ids, (2, ))
+            alpha = np.random.uniform(0, 1)
+
+            pt = alpha * points[a_id] + (1 - alpha) * points[b_id]
+            if (np.linalg.norm(pt - center) < radius) | (attp == 50):
+                attp = 0
+                a_ids.append(a_id)
+                b_ids.append(b_id)
+                alphas.append(alpha)
+
+            attp += 1
+
+        a_ids = np.asarray(a_ids, dtype=np.int32)
+        b_ids = np.asarray(b_ids, dtype=np.int32)
+        alphas = np.asarray(alphas)[..., None]
+
+
+        for key in ['coord', 'normal']:
+            ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
+
+        ret['segment'] = np.ones(k, np.int32) * assign_sem_label
+        ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
+
+        return ret
+
+    def remove_radius(self,  data_dict, center, radius, label=-1):
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+        dists =  np.linalg.norm(points - center, axis=-1)
+
+        ids_keep= np.where(dists > radius) if label == -1 else np.where((dists > radius) | (labels != label))
+
+        for key, val in data_dict.items():
+            if isinstance(val, np.ndarray) and len(val) == len(points):
+                data_dict[key]= data_dict[key][ids_keep]
+
+        return data_dict
+    
+    def augment_rivet_hole_shape(self, data_dict, center, radius, direction):
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+        dists =  np.linalg.norm(points - center, axis=-1)
+
+        mask = dists < radius
+        delta = np.exp(-np.random.uniform(0.01, 1)/(1 - (dists[mask] / radius + 1e-15) ** 2))
+
+        direction = direction / np.linalg.norm(direction)
+        direction += + np.random.normal(0, 0.2, 3)
+        direction = direction / np.linalg.norm(direction)
+
+        points[mask] += 3 * delta[..., None] * direction
+
+        data_dict['coord'] = points
+
+        return data_dict
+
     def remove_rivet(self, data_dict):
         
         rivet_id = self.class_to_id['rivets']
@@ -94,23 +160,61 @@ class Fuselage(Dataset):
 
         remove_ids = np.where(clusters == cluster_id)
         center = points[ids[remove_ids]].mean(axis=0)
-        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max()
+        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.1
 
-        hole_diam_radious = rivet_diam + np.random.uniform(2, 4)
+        hole_diam_radius = max(rivet_diam + 2, 3)
 
         dists =  np.linalg.norm(points - center, axis=-1)
-        ids_interesting = np.where(dists < hole_diam_radious)
-        ids_remove = np.logical_and(dists < hole_diam_radious, labels == rivet_id)
+        ids_interesting = np.where(dists < hole_diam_radius)
+        # ids_remove = np.logical_and(dists < hole_diam_radius, labels == rivet_id)
+        ids_remove = dists < rivet_diam
 
-        ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.8, 1) * ids_remove.sum())
+        interpolating_ids = np.where((dists < hole_diam_radius) & (dists > rivet_diam))[0]
 
-        labels[ids_interesting] = hole_id
+        # ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.9, 1) * ids_remove.sum())
+
+        interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id))
+
+        labels[np.where(dists < rivet_diam)] = hole_id
 
         data_dict['segment'] = labels
 
         for key, val in data_dict.items():
             if isinstance(val, np.ndarray) and len(val) == len(points):
-                data_dict[key] = val[np.logical_not(ids_remove)]
+                data_dict[key][ids_remove] = interpolated[key]
+
+        if len(interpolated['coord']) == 0:
+            return data_dict
+
+        new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
+
+        if np.random.uniform() < 0.7:
+            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
+
+
+        new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
+
+        if np.random.uniform() < 0.7:
+            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(0, 3))
+
+
+
+        return data_dict
+
+    def remove_ranom_hole(self, data_dict):
+        panel_id = self.class_to_id['panel']
+        body_id = self.class_to_id['rivets']
+
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+
+        ids = np.where((labels == panel_id) | (labels == body_id))[0]
+
+        center_id = np.random.choice(ids, 1)[0]
+        center = points[center_id]
+        center_label = labels[center_id]
+        
+        data_dict = self.remove_radius(data_dict, center, np.random.uniform(2, 5), center_label)
 
         return data_dict
 
@@ -198,6 +302,7 @@ class Fuselage(Dataset):
             data_dict = self.remove_rivet(data_dict)
             data_dict = self.remove_rivet(data_dict)
             data_dict = self.remove_rivet(data_dict)
+            data_dict = self.remove_ranom_hole(data_dict)
 
 
         data_dict = self.transform(data_dict)
@@ -207,6 +312,7 @@ class Fuselage(Dataset):
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+        
         # segment = data_dict.pop("segment")
         segment = data_dict['segment']
         data_dict = self.transform(data_dict)

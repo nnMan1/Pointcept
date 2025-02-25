@@ -34,7 +34,7 @@ scheduler = dict(
 # dataset settings
 dataset_type = "Fuselage"
 names=['body', 'body1', 'hole', 'panel', 'rivets']
-data_root = 'data/fuselage/crops_250x250x250_holes'
+data_root = 'data/Fuselage/crops_250x250x250_holes'
 
 
 data = dict(

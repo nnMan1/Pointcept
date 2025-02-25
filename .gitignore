@@ -22,3 +22,5 @@ samples1
 scripts/*.sh
 samples_
 tests
+backbones
+.env

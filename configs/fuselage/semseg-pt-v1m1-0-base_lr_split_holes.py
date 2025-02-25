@@ -35,7 +35,7 @@ scheduler = dict(
 # dataset settings
 dataset_type = "Fuselage"
 names=['body', 'body1', 'hole', 'panel', 'rivets']
-data_root = 'data/fuselage/crops_250x250x250_holes'
+data_root = 'data/Fuselage/crops_250x250x250_holes'
 
 
 data = dict(
@@ -45,6 +45,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         split="train_lr",
+
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -85,6 +86,7 @@ data = dict(
             ),
         ],
         test_mode=False,
+        augment_holes=True,
         classes=names
     ),
     val=dict(
