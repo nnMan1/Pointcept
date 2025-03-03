@@ -5,6 +5,8 @@ batch_size = 8  # bs: total bs in all gpus
 mix_prob = 0.8
 empty_cache = True
 enable_amp = True
+resume=True
+weight = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_holes_aug_v6/model/model_last.pth'
 
 # model settings
 model = dict(

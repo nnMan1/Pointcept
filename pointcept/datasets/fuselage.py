@@ -171,6 +171,9 @@ class Fuselage(Dataset):
 
         interpolating_ids = np.where((dists < hole_diam_radius) & (dists > rivet_diam))[0]
 
+        if len(interpolating_ids) == 0:
+            return data_dict
+
         # ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.9, 1) * ids_remove.sum())
 
         interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id))
