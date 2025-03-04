@@ -19,6 +19,7 @@ from .modelnet import ModelNetDataset
 from .shapenet_part import ShapeNetPartDataset
 from .partnet import PartNet
 from .assembly import Assembly
+from .mechanical_assembly import MechanicalAssembly
 from .abc_dataset import ABCDataset
 from .cetim import Cetim
 from .fuselage import Fuselage
