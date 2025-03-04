@@ -15,6 +15,7 @@ from pointcept.utils.cache import shared_dict
 from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
+from sklearn.neighbors import NearestNeighbors
 
 @DATASETS.register_module("MechanicalAssembly")
 class MechanicalAssembly(Dataset):
@@ -85,19 +86,42 @@ class MechanicalAssembly(Dataset):
         mesh = trimesh.load(f'data/{file}')
         with open(os.path.join('data', dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
+
+        # Transform mesh to point cloud using uniform sampling to 30000 samples
+        import open3d as o3d
+        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
+        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+
+        # Assign labels using KNN
+
+        # Fit KNN on mesh vertices
+        knn = NearestNeighbors(n_neighbors=1)
+        knn.fit(mesh.vertices)
+
+        # Find nearest neighbors for the sampled points
+        distances, indices = knn.kneighbors(point_cloud)
+
+        # Assign labels from the nearest neighbors
+        instance_labels = np.asarray(annotations['instance_id'])[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])[indices.flatten()]
+        normals =  mesh.vertex_normals[indices.flatten()]
         
         return {
-            'coord': mesh.vertices,
-            'face': mesh.faces,
-            'normal': mesh.vertex_normals,
-            'instance': annotations['instance_id'],
-            'segment': annotations['semantic_id'],
+            'coord': point_cloud,
+            # 'face': mesh.faces,
+            # 'normal': mesh.vertex_normals,
+            'normal': normals,
+            'instance': instance_labels,
+            'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx]
         } 
 
     def get_data_name(self, idx):
-        return str(self.data_list[idx].assembly)
+        data_name = self.data_list[idx]
+        data_name = data_name.replace(".ply", "")
+        data_name = data_name.replace("/", "_")
+        return data_name
 
     def prepare_train_data(self, idx):
         # load data
