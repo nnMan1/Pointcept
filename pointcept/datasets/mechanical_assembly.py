@@ -83,8 +83,8 @@ class MechanicalAssembly(Dataset):
 
         dir = os.path.dirname(file)
 
-        mesh = trimesh.load(f'data/{file}')
-        with open(os.path.join('data', dir, 'annotations.json')) as json_file:
+        mesh = trimesh.load(f'{self.data_root}/{file}')
+        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
         # Transform mesh to point cloud using uniform sampling to 30000 samples

@@ -31,12 +31,20 @@ class Fuselage(Dataset):
         cache=False,
         loop=1,
         classes = ['body', 'body1', 'hole', 'panel', 'rivet', 'table'],
-        augment_holes = False
+        augment_holes = False,
+        merged_classes = None
     ):
         super(Fuselage, self).__init__()
 
         self.classes = classes
         self.class_to_id = {cls: i for (i, cls) in enumerate(classes)}
+
+        if merged_classes is not None:
+            for clss in merged_classes:
+                for cls in clss[1:]:
+                    self.class_to_id[cls] = self.class_to_id[clss[0]]   
+
+        self.id_to_label = np.asarray([self.class_to_id[cls] for cls in self.classes])       
 
         self.data_root = data_root
         self.split = split
@@ -198,7 +206,7 @@ class Fuselage(Dataset):
         new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
 
         if np.random.uniform() < 0.7:
-            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(0, 3))
+            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
 
 
 
@@ -319,9 +327,9 @@ class Fuselage(Dataset):
         # segment = data_dict.pop("segment")
         segment = data_dict['segment']
         data_dict = self.transform(data_dict)
-        data_dict_list = []
-        for aug in self.aug_transform:
-            data_dict_list.append(aug(deepcopy(data_dict)))
+        data_dict_list = [data_dict]
+        # for aug in self.aug_transform:
+        #     data_dict_list.append(aug(deepcopy(data_dict)))
 
         input_dict_list = []
         for data in data_dict_list:

@@ -10,13 +10,13 @@ from pointcept.utils.visualization import to_o3d, colors
 
 dataset = build_dataset(dict(
                         type='Fuselage',
-                        split='val',
-                        data_root='data/Fuselage/new_data_prepared',
+                        split='val_lr',
+                        data_root='data/Fuselage/crops_250x250x250_holes',
                         transform=[],
                         test_mode=False,
-                        classes=[ 'sting-stif', 'other', 'main_panel', 'rivet', 'hole', 'ruber-seal', 'rivet_t1'],
-                        merged_classes=[['rivet', 'rivet_t1'], ['sting-stif', 'ruber-seal']]
-                        ))
+                        classes=[
+                           'body', 'body1', 'hole', 'panel', 'rivets'
+                        ]))
 
 dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -29,9 +29,8 @@ dataloader = torch.utils.data.DataLoader(
 results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_holes_aug_v6/result'
 
 for sample in dataset:
-    result = sample['path']
-    result = result.replace('/', '_')+'_pred.npy'
-    result = np.load(f'{results}/{result}')
+    print(sample.keys())
+    result = np.load(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.npy"))
     gt = sample['segment']
 
     # result = gt == result
@@ -39,4 +38,3 @@ for sample in dataset:
     pcd = to_o3d(sample['coord'], verts_colors=colors[result % len(colors)])
 
     o3d.io.write_point_cloud(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.ply"), pcd)
-
