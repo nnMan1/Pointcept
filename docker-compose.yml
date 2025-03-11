@@ -1,0 +1,32 @@
+services:
+  pointcept:
+    image: "registry.gitlab.com/pmf5/pmf_ai/computer_vision/3d/3d_deep_learning_models:pointcept_local" 
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    shm_size: '10gb'
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - TORCH_VERSION=2.0.1
+        - CUDA_VERSION=11.7
+        - CUDNN_VERSION=8
+    environment:
+      DISPLAY: $DISPLAY
+    network_mode: "host"
+    volumes:
+      - .:/home
+      - /tmp/.X11-unix:/tmp\.X11-unix
+      - ${DATA_PATH}:/home/data
+
+    deploy:
+      resources:
+        # limits:
+        #   memory: 10G
+        #   cpus: '0.8'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

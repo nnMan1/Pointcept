@@ -26,7 +26,7 @@ import torch_scatter
 
 
 @DATASETS.register_module()
-class ScanNetDataset(Dataset):
+class ScanNetDataset2(Dataset):
     class2id = np.array(VALID_CLASS_IDS_20)
 
     def __init__(
@@ -44,10 +44,11 @@ class ScanNetDataset(Dataset):
         ignore_semantic = (-1, 0, 1),
         ignore_instance = (-1, )
     ):
-        super(ScanNetDataset, self).__init__()
+        super(ScanNetDataset2, self).__init__()
         self.ignore_semantic = ignore_semantic
         self.ifnore_instance = ignore_instance
         self.data_root = data_root
+        self.sufix = '_inst_nostuff.pth'
         self.split = split
         self.transform = Compose(transform)
         self.cache = cache
@@ -82,21 +83,35 @@ class ScanNetDataset(Dataset):
         )
 
     def get_data_list(self):
-        if isinstance(self.split, str):
-            data_list = glob.glob(os.path.join(self.data_root, self.split, "*.pth"))
-        elif isinstance(self.split, Sequence):
-            data_list = []
-            for split in self.split:
-                data_list += glob.glob(os.path.join(self.data_root, split, "*.pth"))
-        else:
-            raise NotImplementedError
-        
-        # if self.split == 'train':
-        #     data_list = data_list[:5]
-        
-        return data_list
+
+        filenames = glob.glob(os.path.join(self.data_root, self.split, '*' + self.suffix))
+        assert len(filenames) > 0, 'Empty dataset.'
+        filenames = sorted(filenames)
+        # filenames = filenames[:12]
+        return filenames
 
     def get_data(self, idx):
+
+        filename = self.data_list[idx]
+
+        if self.with_label:
+            data = torch.load(filename)
+        else:
+            xyz, rgb, superpoint = torch.load(filename)
+            dummy_sem_label = np.zeros(xyz.shape[0], dtype=np.float32)
+            dummy_inst_label = np.zeros(xyz.shape[0], dtype=np.float32)
+            data = xyz, rgb, superpoint, dummy_sem_label, dummy_inst_label
+        
+        data_dict = dict(
+            coord=data[0],
+            color=data[1],
+            segment=segment,
+            instance=instance,
+            scene_id=scene_id,
+            seg_indices=seg_indices,
+            group_segment=group_segment
+        )
+
         data_path = self.data_list[idx % len(self.data_list)]
         if not self.cache:
             try:

@@ -201,6 +201,106 @@ class SemSegEvaluator(HookBase):
         )
 
 
+
+@HOOKS.register_module()
+class EdgeDetectionEvaluator(HookBase):
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.model.eval()
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict.keys():
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+            pred = output_dict["seg_logits"]
+            loss = output_dict["loss"]
+
+            border_dist = input_dict["border_dist"]
+            if "origin_coord" in input_dict.keys():
+                idx, _ = pointops.knn_query(
+                    1,
+                    input_dict["coord"].float(),
+                    input_dict["offset"].int(),
+                    input_dict["origin_coord"].float(),
+                    input_dict["origin_offset"].int(),
+                )
+                pred = pred[idx.flatten().long()]
+                border_dist = input_dict["origin_border_dist"]
+
+            intersection, union, target = intersection_and_union_gpu(
+                (pred>0.5).int(),
+                (border_dist > 0.5).int(),
+                self.trainer.cfg.data.num_classes,
+                self.trainer.cfg.data.ignore_index,
+            )
+                
+            intersection = ((pred>0.5).int() * (border_dist > 0.5).int()).sum()
+            union =  ((pred>0.5).int() * (border_dist > 0.5).int()).sum() - intersection
+
+            avg_dist = torch.abs(pred - border_dist).mean().cpu().numpy()
+
+            if comm.get_world_size() > 1:
+                dist.all_reduce(intersection), dist.all_reduce(union), dist.all_reduce(
+                    target
+                )
+            intersection, union, target = (
+                intersection.cpu().numpy(),
+                union.cpu().numpy(),
+                target.cpu().numpy(),
+            )
+            # Here there is no need to sync since sync happened in dist.all_reduce
+            self.trainer.storage.put_scalar("val_intersection", intersection)
+            self.trainer.storage.put_scalar("val_union", union)
+            self.trainer.storage.put_scalar("val_target", target)
+            self.trainer.storage.put_scalar("avg_dist", avg_dist)
+            self.trainer.storage.put_scalar("val_loss", loss.item())
+            info = "Test: [{iter}/{max_iter}] ".format(
+                iter=i + 1, max_iter=len(self.trainer.val_loader)
+            )
+            if "origin_coord" in input_dict.keys():
+                info = "Interp. " + info
+            self.trainer.logger.info(
+                info
+                + "Loss {loss:.4f} ".format(
+                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
+                )
+            )
+        loss_avg = self.trainer.storage.history("val_loss").avg
+        intersection = self.trainer.storage.history("val_intersection").total
+        union = self.trainer.storage.history("val_union").total
+        target = self.trainer.storage.history("val_target").total
+        iou_class = intersection / (union + 1e-10)
+        acc_class = intersection / (target + 1e-10)
+        m_iou = np.mean(iou_class)
+        m_acc = np.mean(acc_class)
+        all_acc = sum(intersection) / (sum(target) + 1e-10)
+        self.trainer.logger.info(
+            "Val result: mIoU/mAcc/allAcc/AvgDist {:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                m_iou, m_acc, all_acc, avg_dist
+            )
+        )
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
+            self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+            self.trainer.writer.add_scalar("val/avgDist", avg_dist, current_epoch)
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = avg_dist  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "avgDist"  # save for saver
+
+    def after_train(self):
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format("mIoU", self.trainer.best_metric_value)
+        )
+
+
 @HOOKS.register_module()
 class InsSegEvaluator(HookBase):
     def __init__(self, segment_ignore_index=(-1,), instance_ignore_index=-1):
@@ -274,8 +374,7 @@ class InsSegEvaluator(HookBase):
             pred_inst["confidence"] = pred["pred_scores"][i]
 
             if pred["pred_masks"][i].dtype in (torch.float32, np.float32):
-                pred["pred_masks"][i] = 1 / (1 + np.exp(-pred["pred_masks"][i]))
-                pred["pred_masks"][i] = pred["pred_masks"][i] > 0.5
+                pred["pred_masks"][i] = pred["pred_masks"][i] > 0
  
             pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
             pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
@@ -299,9 +398,11 @@ class InsSegEvaluator(HookBase):
                     pred_inst_["intersection"] = intersection
                     matched_gt.append(gt_inst_)
                     gt_inst["matched_pred"].append(pred_inst_)
+
             pred_inst["matched_gt"] = matched_gt
             pred_instances[segment_name].append(pred_inst)
             instance_id += 1
+            
         return gt_instances, pred_instances
 
     def evaluate_matches(self, scenes):

@@ -68,7 +68,6 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
             batch_start = 0
 
             for i, batch_end in enumerate(offset):
-                pcd = data[batch_start: batch_end]
                 pcd_size = batch_end - batch_start
 
                 if pcd_size < max_size:
@@ -106,64 +105,63 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
         batch_start = 0
         
         for i, batch_end in enumerate(offset):
-            batched_data.append(data[batch_start:batch_end+1][rand_idx[i]])
+            batched_data.append(data[batch_start:batch_end][rand_idx[i]])
             batch_start = batch_end
             
         batched_data = torch.stack(batched_data)
         
         return batched_data, rand_idx, mask_idx
 
-def select_masks(masks, classes, stabilities, ious=None, offset=None):
+def select_masks(out, superpoints):
+        pred_labels = out['output_class'][0]
+        pred_masks = out['output_mask'].T
+        pred_scores = out['output_score'][0]
 
-        pred_masks = []
-        pred_stabilities = []
-        pred_ious_ = []
-        ret_classes = []
+        num_class = pred_labels.shape[1] - 1
+        num_query = pred_labels.shape[0]
+        score_thr = 0
+        n_point_thr = 100
+        
+        scores = F.softmax(pred_labels, dim=-1)[:, :-1]
+        scores *= pred_scores
+        labels = torch.arange(num_class, device=scores.device).unsqueeze(0).repeat(num_query, 1).flatten(0, 1)
+        scores, topk_idx = scores.flatten(0, 1).topk(100, sorted=False)
 
-        if ious == None:
-             ious = stabilities
+        labels = labels[topk_idx]
 
-        pred_ids = []
+        topk_idx = torch.div(topk_idx, num_class, rounding_mode='floor')
+        mask_pred = pred_masks
+        mask_pred = mask_pred[topk_idx]
+        mask_pred_sigmoid = mask_pred.sigmoid()
+        # mask_pred before sigmoid()
+        mask_pred = (mask_pred > 0).float()  # [n_p, M]
+        mask_scores = (mask_pred_sigmoid * mask_pred).sum(1) / (mask_pred.sum(1) + 1e-6)
+        scores = scores * mask_scores
+        # get mask
+        mask_pred = mask_pred[:, superpoints].int()
 
-        batch_start = 0
+        # score_thr
+        score_mask = scores > score_thr
+        scores = scores[score_mask]  # (n_p,)
+        labels = labels[score_mask]  # (n_p,)
+        mask_pred = mask_pred[score_mask]  # (n_p, N)
 
-        for i, batch_end in enumerate(offset):
-            preds = masks[batch_start: batch_end]
-            stability = stabilities[i]
-            cls = classes[i]
-            mask_id = torch.arange(len(stability))[..., None].repeat(1, stability.shape[-1])
-            class_id = torch.arange(stability.shape[-1])[None, ...].repeat(len(stability), 1)
-            iou = ious[i]
+        # npoint thr
+        mask_pointnum = mask_pred.sum(1)
+        npoint_mask = mask_pointnum > n_point_thr
+        scores = scores[npoint_mask]  # (n_p,)
+        labels = labels[npoint_mask]  # (n_p,)
+        mask_pred = mask_pred[npoint_mask]  # (n_p, N)
 
-            stability, ids = stability.flatten().topk(150)
-            mask_id = mask_id.flatten()[ids]
-            class_id = class_id.flatten()[ids]
+        cls_pred = labels.cpu().numpy()
+        score_pred = scores.cpu().numpy()
+        mask_pred = mask_pred.cpu().numpy()
 
-            # ids = torch.arange(len(stability))
-
-            # filter = ((preds > 0).sum(0) > 100).cpu()
-
-            # st_tras = 0.1
-
-            # filter = (stability > st_tras) #& (pred_ious > 0.3)
-            preds = preds[:, mask_id]
-            iou = iou[mask_id]
-            
-            # keep = nms(preds, stability, 1).cpu()
-            # preds = preds[:, keep]
-            # stability = stability[keep]
-            # iou = iou[keep]
-            # ids = ids[keep]
-
-            pred_masks.append(preds)
-            pred_stabilities.append(stability)
-            pred_ious_.append(iou.cpu())
-            pred_ids.append(mask_id)
-            ret_classes.append(class_id)
-
-            batch_start = batch_end
-
-        return pred_masks, pred_stabilities, ret_classes
+        return dict(
+            pred_masks=mask_pred,
+            pred_scores = score_pred,
+            pred_classes = cls_pred
+        )
 
 def compute_stats(masks, data, offset, instance_ignore_index=-1):
         
@@ -191,7 +189,7 @@ def compute_stats(masks, data, offset, instance_ignore_index=-1):
                 return_dict['bious'][i] = torch.zeros(m.shape[1])
 
             return_dict['stability_score'][i] = calculate_stability_score(m, 0.5, 0.3)
-            return_dict['pred_scores'][i] = (masks['output_class'][i].softmax(-1) * ((m * (m>0.5)).sum(0) / ((m>0.5).sum(0) + 1e-15))[:, None])[..., :-1]
+            return_dict['pred_scores'][i] = (masks['output_class'][i].softmax(-1) * masks['output_score'][i])[..., :-1]
             
         return return_dict
    
@@ -220,8 +218,8 @@ def db_scan(data, preds):
                         "pred_logits": list(),
                     }
 
-    clsses = preds['outputs_class'][0]
-    masks = preds['outputs_mask'].T
+    clsses = preds['output_class'][0]
+    masks = preds['output_mask'].T
     coords = data['coord']
 
     for mask, cls in zip(masks, clsses):
@@ -252,7 +250,7 @@ def db_scan(data, preds):
                         cls
                     )
             
-    preds['outputs_class'] = torch.stack(new_preds['pred_logits']).to(preds['outputs_class'].device)[None, :]
-    preds['outputs_mask'] = torch.stack(new_preds['pred_masks']).T.to(preds['outputs_class'].device)
+    preds['output_class'] = torch.stack(new_preds['pred_logits']).to(preds['output_class'].device)[None, :]
+    preds['output_mask'] = torch.stack(new_preds['pred_masks']).T.to(preds['output_class'].device)
 
     return preds

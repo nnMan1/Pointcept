@@ -1,18 +1,18 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 5  # bs: total bs in all gpus
+batch_size = 4 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
-enable_amp = True
+enable_amp = False
 evaluate = True
-resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+resume=False
+weight='backbones/sstnet_pretrain.pth'
 
 class_names = [
-    "wall",
-    "floor",
+    # "wall",
+    # "floor",
     "cabinet",
     "bed",
     "chair",
@@ -32,52 +32,100 @@ class_names = [
     "bathtub",
     "otherfurniture",
 ]
-num_classes = 20
-segment_ignore_index = (-1, 0, 1)
+num_classes = 18
+fts_sizes = 256
+dim_feedforward=1024
+segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="Mask-3D",
-    backbone=dict(
-        type="Res16UNet34C",
-        in_channels = 6,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
+    type="SPFormer",
+    num_query = 400,
+    encoder=dict(
+        backbone=dict(
+            input_channel=6,
+            blocks=5,
+            block_reps=2,
+            media=32,
+            normalize_before=True,
+            return_blocks=True,
+            pool='mean'
+        ),
+        backbone_out_channels=32,
+        out_channels=32,
+     ),
+     decoder=dict(
+        in_channels=32,
+        hlevels=6,
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=1
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
+        ],
     ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
-        normalize=True,
-    ),
-    mask_module_config=dict(
-        num_classes=num_classes, 
-        return_attn_masks=True, 
-        use_seg_masks=True
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128,
-    instance_ignore_index=-1
+    instance_ignore_index=-1,
 )
 
 # scheduler settings
-epoch = 600
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
+epoch = 500
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
-    type="OneCycleLR",
-    max_lr=optimizer["lr"],
-    pct_start=0.01,
-    anneal_strategy="cos",
-    div_factor=10.0,
-    final_div_factor=1000.0,
+    type="PolyLR",
+    total_steps=1500*100,
+    power=0.9,
 )
 
 # dataset settings
@@ -92,12 +140,9 @@ data = dict(
         type=dataset_type,
         split="train",
         data_root=data_root,
-        transform=[
+        transform=[ 
             dict(type="CenterShift", apply_z=True),
-            dict(
-                type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
-            ),
-            # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
+            # dict(type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
@@ -106,10 +151,10 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
-            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
-            dict(type="ChromaticTranslation", p=0.95, ratio=0.1),
-            dict(type="ChromaticJitter", p=0.95, std=0.05),
+            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [40/50, 160/50]]),
+            # dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
+            # dict(type="ChromaticTranslation", p=0.95, ratio=0.1),\
+            # dict(type="HueSaturationTranslation"),
             # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
@@ -120,14 +165,13 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="SphereCrop", sample_rate=1, point_max=250000, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -136,13 +180,10 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "instance_centroid",
-                    "bbox",
-                    "seed_ids",
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=("color", "coord"),
             ),
         ],
         test_mode=False,
@@ -170,15 +211,13 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
-            dict(type="CenterShift", apply_z=False),
+            # dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type="FPSSeed", n_points=100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -190,13 +229,10 @@ data = dict(
                     "origin_coord",
                     "origin_segment",
                     "origin_instance",
-                    "instance_centroid",
-                    "bbox",
-                    "seed_ids",
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=("color", "coord"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
@@ -206,8 +242,8 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
-    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
+    # dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(
         type="InsSegEvaluator",

@@ -1,0 +1,3 @@
+[submodule "common_tools"]
+	path = common_tools
+	url = git@gitlab.com:pmf5/pmf_ai/computer_vision/3d/common_tools.git
