@@ -6,17 +6,15 @@ mix_prob = 0.8
 empty_cache = True
 enable_amp = False
 # resume=True
-# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
+# weight='exp/fuselage/semseg-pt-v1m1-0-base_lr_split/model/model_last.pth'
 
 # model settings
 model = dict(
     type="DefaultSegmentor",
     backbone=dict(
-        type="SpUNet-v1m1",
-        in_channels=3,
-        num_classes=4,
-        channels=(32, 64, 128, 128, 96, 96),
-        layers=(2, 3, 4, 2, 2, 2),
+        type="PointTransformer-Seg26",
+        in_channels=6,
+        num_classes=5,
     ),
     criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
 )
@@ -24,7 +22,7 @@ model = dict(
 # scheduler settings
 epoch = 400
 eval_epoch = 100# sche total eval & checkpoint epoch
-optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+optimizer = dict(type="AdamW", lr=0.005, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -36,16 +34,18 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "Fuselage"
-names=['body', 'body1', 'panel', 'rivets']
-data_root = 'data/fuselage/crops_250x250x250_holes'
+names=['body', 'body1', 'hole', 'panel', 'rivets']
+data_root = 'data/Fuselage/crops_250x250x250_holes'
+
 
 data = dict(
-    num_classes=4,
+    num_classes=5,
     ignore_index=-1,
     names = names,
     train=dict(
         type=dataset_type,
-        split="train",
+        split="train_lr",
+
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -71,7 +71,7 @@ data = dict(
                 grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
-                keys=("coord", "segment"),
+                keys=("coord", "segment", "normal"),
                 return_grid_coord=True,
             ),
             dict(type="SphereCrop", point_max=100000, mode="random"),
@@ -81,16 +81,17 @@ data = dict(
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment"),
-                feat_keys=("grid_coord", ),
+                keys=("coord", "grid_coord", "segment", "normal"),
+                feat_keys=("grid_coord", "normal"),
             ),
         ],
         test_mode=False,
+        augment_holes=True,
         classes=names
     ),
     val=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -99,17 +100,17 @@ data = dict(
                 grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
-                keys=("coord", "segment"),
+                keys=("coord", "segment", "normal"),
                 return_grid_coord=True,
             ),
-            dict(type="SphereCrop", point_max=200000, mode="center"),
+            # dict(type="SphereCrop", point_max=1000000, mode="center"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment"),
-                feat_keys=("grid_coord", ),
+                keys=("coord", "grid_coord", "segment", "normal"),
+                feat_keys=("grid_coord", "normal"),
             ),
         ],
         test_mode=False,
@@ -117,7 +118,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -131,7 +132,7 @@ data = dict(
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
-                keys=("coord", "segment"),
+                keys=("coord", "segment", "normal"),
             ),
             crop=None,
             post_transform=[
@@ -139,8 +140,8 @@ data = dict(
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index"),
-                    feat_keys=("grid_coord",),
+                    keys=("coord", "grid_coord", "index", "normal"),
+                    feat_keys=("grid_coord",  "normal"),
                 ),
             ],
             aug_transform=[

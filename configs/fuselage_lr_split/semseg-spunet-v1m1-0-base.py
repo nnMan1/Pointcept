@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 mix_prob = 0.8
 empty_cache = True
 enable_amp = False
@@ -22,7 +22,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 400
+epoch = 800
 eval_epoch = 100# sche total eval & checkpoint epoch
 optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(
@@ -37,7 +37,7 @@ scheduler = dict(
 # dataset settings
 dataset_type = "Fuselage"
 names=['body', 'body1', 'panel', 'rivets']
-data_root = 'data/fuselage/crops_250x250x250_holes'
+data_root = 'data/fuselage/crops_250x250x250'
 
 data = dict(
     num_classes=4,
@@ -45,7 +45,7 @@ data = dict(
     names = names,
     train=dict(
         type=dataset_type,
-        split="train",
+        split="train_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -90,7 +90,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -117,7 +117,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),

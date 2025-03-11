@@ -2,7 +2,7 @@ xhost local:root
 docker run -d -ti \
 		  -e DISPLAY=$DISPLAY -v --privileged \
 		  -v /tmp/.X11-unix:/tmp\.X11-unix --net=host \
-		  --shm-size 32G \
+		  --shm-size 100G \
           	  -v $(pwd):/home \
           	  	  -v /media/velibor/2842653342650742/scannet/scannet/:/home/data/raw/scannet/ \
 			  -v /home/velibor/Data/scannet:/home/data/scannet \
@@ -14,4 +14,3 @@ docker run -d -ti \
 			  -v /home/velibor/Data/Fuselage/:/home/data/fuselage/ \
 			  -v /home/velibor/Data/Cetim/:/home/data/cetim/raw/ \
 		  --gpus all -it --rm --name "pointcept" pointcept/pointcept:pytorch2.0.1-cuda11.7-cudnn8-devel
-		  

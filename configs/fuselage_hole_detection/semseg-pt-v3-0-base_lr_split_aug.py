@@ -1,30 +1,61 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
+batch_size = 2 # bs: total bs in all gpus
 mix_prob = 0.8
 empty_cache = True
 enable_amp = False
 # resume=True
-# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
+weight='exp/fuselage_hole_detection/semseg-pt-v3-0-base_lr_split/model/model_last.pth'
 
 # model settings
 model = dict(
-    type="DefaultSegmentor",
+    type="DefaultSegmentorV2",
+    num_classes=5,
+    backbone_out_channels=64,
     backbone=dict(
-        type="SpUNet-v1m1",
+        type="PT-v3m1",
         in_channels=3,
-        num_classes=4,
-        channels=(32, 64, 128, 128, 96, 96),
-        layers=(2, 3, 4, 2, 2, 2),
+        order=["z", "z-trans", "hilbert", "hilbert-trans"],
+        stride=(2, 2, 2),
+        enc_depths=(2, 2, 2, 4),
+        enc_channels=(32, 64, 128, 256),
+        enc_num_head=(2, 4, 8, 16),
+        enc_patch_size=(48, 48, 48, 48),
+        dec_depths=(2, 2, 2),
+        dec_channels=(64, 64, 128),
+        dec_num_head=(4, 4, 8),
+        dec_patch_size=(48, 48, 48),
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        drop_path=0.3,
+        shuffle_orders=True,
+        pre_norm=True,
+        enable_rpe=False,
+        enable_flash=True,
+        upcast_attention=False,
+        upcast_softmax=False,
+        cls_mode=False,
+        pdnorm_bn=False,
+        pdnorm_ln=False,
+        pdnorm_decouple=True,
+        pdnorm_adaptive=False,
+        pdnorm_affine=True,
+        pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
     ),
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
+    criteria=[
+        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
+        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
+    ],
 )
 
 # scheduler settings
 epoch = 400
 eval_epoch = 100# sche total eval & checkpoint epoch
-optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -36,16 +67,16 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "Fuselage"
-names=['body', 'body1', 'panel', 'rivets']
-data_root = 'data/fuselage/crops_250x250x250_holes'
+names=['body', 'body1', 'hole', 'panel', 'rivets']
+data_root = 'data/Fuselage/crops_250x250x250_holes'
 
 data = dict(
-    num_classes=4,
+    num_classes=5,
     ignore_index=-1,
     names = names,
     train=dict(
         type=dataset_type,
-        split="train",
+        split="train_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -54,8 +85,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis="z", p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1 / 16, 1/16], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1 / 16, 1/16], axis="y", p=0.5),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
@@ -68,7 +99,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.2,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment"),
@@ -90,13 +121,13 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.2,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment"),
@@ -117,7 +148,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val",
+        split="val_lr",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -127,7 +158,7 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.2,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                

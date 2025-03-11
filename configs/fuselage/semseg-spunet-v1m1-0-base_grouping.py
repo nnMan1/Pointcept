@@ -1,16 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6  # bs: total bs in all gpus
-mix_prob = 0.8
+batch_size = 8  # bs: total bs in all gpus
+mix_prob = 0.0
 empty_cache = True
-enable_amp = False
-# resume=True
-# weight='exp/delete_imed/semseg-spunet-v1m1-0-base_lr_split_grouping3/model/model_last.pth'
+enable_amp = True
 
 # model settings
 model = dict(
-    type="GroupingSegmentorV2",
+    type="GroupingSegmentor",
     backbone=dict(
         type="SpUNet-v1m1",
         in_channels=3,
@@ -46,7 +44,7 @@ data = dict(
     names = names,
     train=dict(
         type=dataset_type,
-        split="train_lr",
+        split="train",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -69,7 +67,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment", "normal", "seg_indices"),
@@ -78,12 +76,12 @@ data = dict(
             dict(type="SphereCrop", point_max=100000, mode="random"),
             dict(type="CenterShift", apply_z=False),
             # dict(type="NormalizeColor"),
-            # dict(type="ShufflePoint"),
+            dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -91,13 +89,13 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val_lr",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="train",
                 keys=("coord", "segment", "normal", "seg_indices"),
@@ -110,7 +108,7 @@ data = dict(
             dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment", "seg_indices"),
-                feat_keys=("grid_coord"),
+                feat_keys=("grid_coord", ),
             ),
         ],
         test_mode=False,
@@ -118,7 +116,7 @@ data = dict(
     ),
     test=dict(
         type=dataset_type,
-        split="val_lr",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -128,11 +126,11 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=0.1,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,                
-                keys=("coord", "segment", "normal"),
+                keys=("coord", "segment", "normal", "seg_indices"),
             ),
             crop=None,
             post_transform=[
@@ -140,8 +138,8 @@ data = dict(
                 dict(type="ToTensor"),
                 dict(
                     type="Collect",
-                    keys=("coord", "grid_coord", "index", "normal", "seg_indices"),
-                    feat_keys=("grid_coord"),
+                keys=("coord", "grid_coord", "segment", "seg_indices"),
+                    feat_keys=("grid_coord",),
                 ),
             ],
             aug_transform=[
