@@ -9,14 +9,12 @@ from pointcept.datasets import build_dataset
 from pointcept.utils.visualization import to_o3d, colors
 
 dataset = build_dataset(dict(
-                        type='Fuselage',
-                        split='val_lr',
-                        data_root='data/fuselage/crops_250x250x250',
+                        type='MechanicalAssembly',
+                        split='test',
+                        data_root='data/',
                         transform=[],
                         test_mode=False,
-                        classes=[
-                           'body', 'body1', 'panel', 'rivets'
-                        ]))
+                        ))
 
 dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -26,11 +24,12 @@ dataloader = torch.utils.data.DataLoader(
             persistent_workers=True,
         )
 
-results = 'exp/fuselage_lr_split/semseg-pt-v3-0-base-ce-loss/result'
+results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_holes_aug_v6/result'
 
 for sample in dataset:
-    print(sample.keys())
-    result = np.load(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.npy"))
+    result = sample['path']
+    result = result.replace('/', '_').replace('.ply', '_pred.npy')
+    result = np.load(f'{results}/{result}')
     gt = sample['segment']
 
     # result = gt == result
