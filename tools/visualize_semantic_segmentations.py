@@ -26,7 +26,7 @@ dataloader = torch.utils.data.DataLoader(
             persistent_workers=True,
         )
 
-results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_holes_aug_v6/result'
+results = 'exp/fuselage_hole_detection/senseg-spunet-sst-resnet/result'
 
 for sample in dataset:
     result = sample['path']

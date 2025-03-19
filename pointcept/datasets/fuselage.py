@@ -199,16 +199,14 @@ class Fuselage(Dataset):
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
-        if np.random.uniform() < 0.7:
-            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
+        # if np.random.uniform() < 0.7:
+        #     data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
 
 
         new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
 
         if np.random.uniform() < 0.7:
             data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
-
-
 
         return data_dict
 
@@ -244,6 +242,7 @@ class Fuselage(Dataset):
 
         data_list = []
         for file in data_list_files:
+            print(self.data_root, file)
             data_list += open(os.path.join(self.data_root, file)).readlines()
         
         data_list = [f.strip() for f in data_list]
@@ -312,8 +311,8 @@ class Fuselage(Dataset):
         if self.augment_holes:
             data_dict = self.remove_rivet(data_dict)
             data_dict = self.remove_rivet(data_dict)
-            data_dict = self.remove_rivet(data_dict)
-            data_dict = self.remove_ranom_hole(data_dict)
+            # data_dict = self.remove_rivet(data_dict)
+            # data_dict = self.remove_ranom_hole(data_dict)
 
 
         data_dict = self.transform(data_dict)
