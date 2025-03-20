@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 32 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-# resume=True
-# weight='exp/abc_dataset_hungarian_matcher/insseg-mask3d-v1m1-0-spunet-base_delete2/model/model_last.pth'
+resume=True
+weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base-dense2/model/model_last.pth'
 
 class_names = [
     "assembly",
@@ -50,7 +50,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 800
+epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
@@ -88,7 +88,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.05,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -100,7 +100,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 100),
+            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -136,7 +136,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.05,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -149,7 +149,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
+            dict(type='FPSSeed', n_points = 150),
             dict(type="ToTensor"),
             dict(
                 type="Collect",

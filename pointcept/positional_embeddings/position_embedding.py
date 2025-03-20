@@ -6,6 +6,7 @@ import math
 import torch
 from torch import nn
 import numpy as np
+from .builder import POSITIONAL_EMBEDDINGS
 
 # from utils.pc_util import shift_scale_points
 
@@ -42,6 +43,7 @@ def shift_scale_points(pred_xyz, src_range, dst_range=None):
     ) + dst_range[0][:, None, :]
     return prop_xyz
 
+@POSITIONAL_EMBEDDINGS.register_module("PositionEmbeddingCoordsSine")
 class PositionEmbeddingCoordsSine(nn.Module):
     def __init__(
         self,
@@ -180,13 +182,3 @@ class PositionEmbeddingCoordsSine(nn.Module):
         if hasattr(self, "gauss_B"):
             st += f", gaussB={self.gauss_B.shape}, gaussBsum={self.gauss_B.sum().item()}"
         return st
-
-if __name__ == '__main__':
-
-    x = torch.rand([4, 2048, 3])
-    pe = PositionEmbeddingCoordsSine(pos_type='fourier',
-                                    d_pos=128,
-                                    gauss_scale=1,
-                                    normalize=True)
-
-    pe(x)

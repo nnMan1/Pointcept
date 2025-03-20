@@ -9,7 +9,8 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.cuda.amp import autocast
 from multiprocessing import Pool
-import time
+import torch_scatter
+import numpy as np
 
 # from detectron2.projects.point_rend.point_features import point_sample
 
@@ -100,19 +101,7 @@ class HungarianMatcher(nn.Module):
 
         self.instance_ignore_index = instance_ignore_index
 
-        assert (
-            cost_class != 0 or cost_mask != 0 or cost_dice != 0
-        ), "all costs cant be 0"
-
-        self.num_points = num_points
-
-        # self.p = Pool(128)
-
-    # @torch.no_grad()
     def my_optimized_forward(self, outputs, targets, offset):
-
-        start_time = time.time()
-        batch_start = 0
 
         indices = []
         matched_outputs = []
@@ -120,98 +109,80 @@ class HungarianMatcher(nn.Module):
         matched_sem_outputs = []
         matched_sem_targets = []
 
-        Cs = []
+        batch_start = 0
         for i, batch_end in enumerate(offset):
 
             with torch.no_grad():
-                out_mask = outputs['outputs_mask'][batch_start:batch_end].T
-                out_seg = outputs['outputs_class'][i].softmax(-1) 
+                out_mask = outputs['output_mask'][batch_start:batch_end].T.float()
+                out_seg = outputs['output_class'][i].softmax(-1) 
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_segm = targets['segment'][batch_start:batch_end]
+
+                instances, idx = np.unique(tgt_mask.cpu(), return_index=True)
+                if instances[0] == -1:
+                    idx = idx[1:]
+
+                instances_seg = tgt_segm[idx]
                 
                 filter = tgt_mask != self.instance_ignore_index
 
                 if filter.sum() == 0:
                     indices.append((None, None))
+                    batch_start = batch_end
                     continue
-                 
-                tgt_mask = F.one_hot(tgt_mask+1).T[1:]
-                instances_seg = (tgt_mask * tgt_segm).max(1)[0]
-                cost_class = 1 - out_seg[:, instances_seg]
+                
+                cost_class = - out_seg[:, instances_seg]
 
+                tgt_mask = F.one_hot(tgt_mask+1)[:, 1:].T
                 tgt_mask = tgt_mask.float()
 
-                # Compute the focal loss between masks
-                cost_mask = batch_sigmoid_ce_loss_jit(
-                    out_mask, tgt_mask
-                )
+                cost_mask = batch_sigmoid_ce_loss_jit(out_mask, tgt_mask)
+                cost_dice = batch_dice_loss_jit(out_mask, tgt_mask)
 
-                # Compute the dice loss betwen masks
-                cost_dice = batch_dice_loss_jit(
-                    out_mask, tgt_mask
-                )
-
-                if torch.isinf(cost_mask).sum() > 0 or torch.isnan(cost_mask).sum() > 0:
-                    pass
-                    cost_mask = batch_sigmoid_ce_loss(
-                        out_mask, tgt_mask
-                    )
-
-                C = (
-                    self.cost_mask * cost_mask
-                    + self.cost_class * cost_class
-                    + self.cost_dice * cost_dice
-                )
-
-
+                C = self.cost_mask * cost_mask + self.cost_class * cost_class + self.cost_dice * cost_dice
                 C = C.cpu().numpy()
+
                 indices.append(linear_sum_assignment(C))
 
             batch_start = batch_end
 
         batch_start = 0
 
-        mapping_start = time.time()
-
         for i, batch_end in enumerate(offset):
         
             pred_ids, tgt_ids,  = indices[i]
-            out_mask = outputs['outputs_mask'][batch_start:batch_end]
-            out_seg = outputs['outputs_class'][i]
+            out_mask = outputs['output_mask'][batch_start:batch_end]
+            out_seg = outputs['output_class'][i]
             tgt_mask = targets['instance'][batch_start:batch_end]
             tgt_segm = targets['segment'][batch_start:batch_end]
 
-            # nonassigned_pred_ids = [i for i in range(out_mask.shape[-1]) if i not in pred_ids]
-            
+            instances, idx = np.unique(tgt_mask.cpu(), return_index=True)
+            if instances[0] == -1:
+                idx = idx[1:]
+
+            instances_seg = tgt_segm[idx]
 
             filter = tgt_mask != self.instance_ignore_index
 
             if filter.sum() == 0:
+                batch_start = batch_end
                 continue
 
             tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
+            tgt_mask = tgt_mask[:, tgt_ids]
 
             out_mask = out_mask[:, pred_ids]
-            
-            tmp = tgt_mask[:, tgt_ids].argmax(0)
-            tmp = tgt_segm[tmp]
 
-            tgt_segm = torch.zeros_like(out_seg[:, 0], dtype=torch.int64)
-            tgt_segm[pred_ids] = tmp
-
-
-            tgt_mask = tgt_mask[:, tgt_ids]#.argmax(-1)
-                        
+            tgt_segm = torch.ones_like(out_seg[:, 0], dtype=torch.int64) * (out_seg.shape[1] - 1)
+            tgt_segm[pred_ids] = instances_seg[tgt_ids]
+                       
             matched_outputs.append(out_mask)
             matched_targets.append(tgt_mask)
             matched_sem_outputs.append(out_seg)
             matched_sem_targets.append(tgt_segm)
 
             batch_start = batch_end
-            
-        # print('Mapping time: ', time.time() - mapping_start)      
-        # print('HM time: ', time.time() - start_time)      
-        # print('Data_len: ', len(Cs))      
+               
         return matched_outputs, matched_targets, matched_sem_outputs, matched_sem_targets, indices
 
     # @torch.no_grad()
@@ -236,7 +207,6 @@ class HungarianMatcher(nn.Module):
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
         return self.my_optimized_forward(outputs, targets, offset)
-        # return self.memory_efficient_forward(outputs, targets, mask_type)
 
     def __repr__(self, _repr_indent=4):
         head = "Matcher " + self.__class__.__name__

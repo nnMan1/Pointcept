@@ -1,0 +1,5 @@
+torch_scatter==2.1.2
+spconv-cu120
+addict==2.4.0
+pymeshlab==2023.12.post2
+ocnn==.2.5
