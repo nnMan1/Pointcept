@@ -222,7 +222,8 @@ class CheckpointLoader(HookBase):
                 f"replace keyword with: {self.replacement}"
             )
             weight = OrderedDict()
-            for key, value in checkpoint["state_dict"].items():
+            state_key = "state_dict" if "state_dict" in checkpoint else "model"
+            for key, value in checkpoint[state_key].items():
                 if not key.startswith("module."):
                     if comm.get_world_size() == 1:
                         key = "module." + key  # xxx.xxx -> module.xxx.xxx

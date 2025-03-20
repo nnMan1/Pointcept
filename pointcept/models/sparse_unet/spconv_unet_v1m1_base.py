@@ -270,7 +270,9 @@ class SpUNetBase(nn.Module):
                 x = x.replace_feature(torch.cat((x.features, skip.features), dim=1))
                 x = self.dec[s](x)
 
-        x = self.final(x)
+        if self.num_classes > 0:
+            x = self.final(x)
+            
         if self.cls_mode:
             x = x.replace_feature(
                 scatter(x.features, x.indices[:, 0].long(), reduce="mean", dim=0)

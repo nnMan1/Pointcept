@@ -40,7 +40,17 @@ class Mask3D(nn.Module):
         self.dropout = 0.0
         self.hlevels = [0,1,2,3]
 
-        self.backbone = build_model(backbone)        
+        self.backbone = build_model(backbone)  
+
+        self.mask_features_head = me.MinkowskiConvolution(
+            in_channels=self.backbone.PLANES[7],
+            out_channels=self.mask_dim,
+            kernel_size=1,
+            stride=1,
+            bias=True,
+            dimension=3
+        )
+
         self.pooling = MinkowskiAvgPooling(kernel_size=2, stride=2, dimension=3)
 
         position_encoding.pop('type')
@@ -65,7 +75,7 @@ class Mask3D(nn.Module):
         for i, hlevel in enumerate(self.hlevels):
             self.query_refinement.append(QueryRefinement(sizes[i], dim_feedforward, mask_dim, sample_size=sample_sizes[i], **query_refinement_config))
         
-        self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
+        # self.iou_head = IoUHead(backbone['out_channels'], dim_feedforward, mask_dim, sample_size=sample_sizes[-1], **query_refinement_config)
         
         self.matcher = HungarianMatcher(cost_class=2,
                                         cost_dice=2,
@@ -100,19 +110,9 @@ class Mask3D(nn.Module):
                         input_range=[scene_min, scene_max],
                     )
 
-                if tmp.sum().isnan():
-                    pass
-
                 pos_encodings_pcd[-1].append(tmp.squeeze(0).permute((1, 0)))
 
         return pos_encodings_pcd
-
-    # def forward(self, data):
-        
-    #     if 'seg_indices' in data.keys():
-    #         return self.forward_with_grouping(data)
-    #     else:
-    #         return self.forward_no_grouping(data)
 
     def forward(self, data):
         
@@ -121,20 +121,27 @@ class Mask3D(nn.Module):
         offset = data['offset']
         seed_ids = data['seed_ids']
         seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
+        group_segment = data['group_segment']
 
-        total_time_start = time.time()
-        
-        mask_features, aux = self.backbone(data)
-        pcd_features = aux[-1]
+        bb = 0
+        for be in offset:
+            tmp = seg_indices[bb:be]
+            _, inverse_indices = torch.unique(tmp, return_inverse=True)
+            seg_indices[bb:be] = inverse_indices   
+            bb = be
+
+
+        pcd_features, aux = self.backbone(data)
+        mask_features = self.mask_features_head(pcd_features)
 
         if self.mask_module.use_seg_masks:
             mask_segments = []
-            batch_start = 0
 
+            batch_start = 0
             for i, batch_end in enumerate(offset):
                 mask_feature = mask_features.decomposed_features[i]
                 mask_segments.append(scatter_mean(mask_feature, seg_indices[batch_start:batch_end], dim=0))
-                batch_start = batch_end        
+                batch_start = batch_end    
         
         with torch.no_grad():
             coordinates = me.SparseTensor(
@@ -153,10 +160,12 @@ class Mask3D(nn.Module):
         pos_encodings_pcd = self.__get_pos_encs(coords)
 
         sampled_coords = []
-        batch_start = 0
-        for i, batch_end in enumerate(offset):
-            points = grid_coordinates[batch_start:batch_end].float()
+        
+        bs = 0
+        for i, be in enumerate(offset):
+            points = grid_coordinates[bs:be].float()
             sampled_coords.append(points[seed_ids[i]])
+            bs = be
 
         mins = torch.stack(
                 [
@@ -185,7 +194,7 @@ class Mask3D(nn.Module):
 
         axiliary_losses = [], [], [], []
 
-        for _ in range(1):
+        for _ in range(3):
             for i in self.hlevels:
 
                 mask_module_data = {
@@ -251,13 +260,12 @@ class Mask3D(nn.Module):
             axiliary_losses[3].append(ious.mean())
                     
         return_dict = {
-            'bce_loss': torch.stack(axiliary_losses[0]).mean(),
-            'focal_loss': torch.stack(axiliary_losses[2]).mean(),
-            'dice_loss': torch.stack(axiliary_losses[1]).mean(),
+            'bce_loss': torch.stack(axiliary_losses[0]).sum() / len(offset),
+            'focal_loss': torch.stack(axiliary_losses[2]).sum() / len(offset),
+            'dice_loss': torch.stack(axiliary_losses[1]).sum() / len(offset),
             'mIoU': torch.stack(axiliary_losses[3]).mean()
         }
         
-
         if not self.training:
             # masks = db_scan(data, masks)
             return_dict.update(compute_stats(masks, data, offset))
@@ -440,7 +448,6 @@ class QueryRefinement(nn.Module):
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
         pos_encoding, _, _ = pad_data(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
 
-
         attn_mask.permute((0, 2, 1))[
                     attn_mask.sum(1) == rand_idx[0].shape[0]
                 ] = False
@@ -462,10 +469,7 @@ class QueryRefinement(nn.Module):
                     pos=pos_encoding.permute((1, 0, 2)),
                     query_pos=query_pos_encoding,
                 )
-        
-        if output.isnan().sum() > 0:
-            pass
-        
+                
         output = self.self_attention(
                     output,
                     tgt_mask=None,

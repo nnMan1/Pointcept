@@ -12,6 +12,31 @@ from .builder import LOSSES
 
 
 @LOSSES.register_module()
+class BCELoss(nn.Module):
+    def __init__(
+        self,
+        weight=None,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(BCELoss, self).__init__()
+        weight = torch.tensor(weight).cuda() if weight is not None else None
+        self.loss_weight = loss_weight
+        self.loss = nn.BCELoss(
+            weight=weight,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
+
+    def forward(self, pred, target):
+        return self.loss(pred, target) * self.loss_weight
+
+
+
+@LOSSES.register_module()
 class CrossEntropyLoss(nn.Module):
     def __init__(
         self,
@@ -187,26 +212,13 @@ class DiceLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, pred, target, **kwargs):
-        # [B, C, d_1, d_2, ..., d_k] -> [C, B, d_1, d_2, ..., d_k]
-        pred = pred.transpose(0, 1)
-        # [C, B, d_1, d_2, ..., d_k] -> [C, N]
-        pred = pred.reshape(pred.size(0), -1)
-        # [C, N] -> [N, C]
-        pred = pred.transpose(0, 1).contiguous()
-        # (B, d_1, d_2, ..., d_k) --> (B * d_1 * d_2 * ... * d_k,)
-        # target = target.view(-1).contiguous()
-        assert pred.size(0) == target.size(
-            0
-        ), "The shape of pred doesn't match the shape of target"
-        # valid_mask = target != self.ignore_index
-        # target = target[valid_mask]
-        # pred = pred[valid_mask]
 
-        pred = F.sigmoid(pred)
-        num_classes = pred.shape[1]
-        # target = F.one_hot(
-        #     torch.clamp(target.long(), 0, num_classes - 1), num_classes=num_classes
-        # )
+        pred = pred.transpose(0, 1)
+        pred = pred.reshape(pred.size(0), -1)
+        pred = pred.transpose(0, 1).contiguous()
+        assert pred.size(0) == target.size(0), "The shape of pred doesn't match the shape of target"
+
+        pred = pred.sigmoid()
         
         numerator = 2 * (pred * target).sum(0) + self.smooth
         denominator = pred.sum(0) + target.sum(0) + self.smooth
