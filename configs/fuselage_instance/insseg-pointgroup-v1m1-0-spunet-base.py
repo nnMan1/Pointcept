@@ -85,7 +85,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -131,7 +131,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

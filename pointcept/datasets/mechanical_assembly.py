@@ -16,6 +16,7 @@ from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
+from segmentator import segment_mesh
 
 @DATASETS.register_module("MechanicalAssembly")
 class MechanicalAssembly(Dataset):
@@ -89,6 +90,11 @@ class MechanicalAssembly(Dataset):
         dir = os.path.dirname(file)
 
         mesh = trimesh.load(f'data/{file}')
+
+        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+        faces = torch.from_numpy(mesh.faces.astype(np.int64))
+        ind = segment_mesh(vertices, faces, 0.001).numpy()
+
         with open(os.path.join('data', dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
@@ -121,7 +127,8 @@ class MechanicalAssembly(Dataset):
             'instance': instance_labels[segment_labels != -1],
             'segment': segment_labels[segment_labels != -1],
             'id': idx,
-            'path': self.data_list[idx]
+            'path': self.data_list[idx],
+            'seg_indices': ind[segment_labels != -1]
         } 
 
     def get_data_name(self, idx):
