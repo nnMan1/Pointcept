@@ -9,13 +9,11 @@ from pointcept.datasets import build_dataset
 from pointcept.utils.visualization import to_o3d, colors
 
 dataset = build_dataset(dict(
-                        type='Fuselage',
-                        split='val',
-                        data_root='data/Fuselage/new_data_prepared',
+                        type='MechanicalAssembly',
+                        split='test',
+                        data_root='data/',
                         transform=[],
                         test_mode=False,
-                        classes=[ 'sting-stif', 'other', 'main_panel', 'rivet', 'hole', 'ruber-seal', 'rivet_t1'],
-                        merged_classes=[['rivet', 'rivet_t1'], ['sting-stif', 'ruber-seal']]
                         ))
 
 dataloader = torch.utils.data.DataLoader(
@@ -30,7 +28,7 @@ results = 'exp/fuselage/semseg-spunet-v1m1-0-base_lr_split_holes_aug_v6/result'
 
 for sample in dataset:
     result = sample['path']
-    result = result.replace('/', '_')+'_pred.npy'
+    result = result.replace('/', '_').replace('.ply', '_pred.npy')
     result = np.load(f'{results}/{result}')
     gt = sample['segment']
 

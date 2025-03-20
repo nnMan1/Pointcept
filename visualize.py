@@ -1,15 +1,29 @@
-import numpy as np
+import os
+import os.path as osp
 import open3d as o3d
-import glob
+import json
+import numpy as np
+import trimesh
 
-files = glob.glob('exp/fuselage_lr_split/semseg-pt-v3-0-base-ce-loss/result/P2*.ply')
-print(files)
-
-pcd = o3d.geometry.PointCloud()
+files = open('data/files.txt').readlines()
 
 for file in files:
-    pcd += o3d.io.read_point_cloud(file)
+    file = file[2:].strip()
+    dir = osp.dirname(file)
 
+    print(file)
 
+    with open(osp.join('data', dir, 'annotations.json')) as json_file:
+        annotations = json.load(json_file)
 
-o3d.visualization.draw_geometries([pcd])
+    if not osp.exists(f'data/{file}'):
+        print(f"File data/{file} does not exist.")
+        continue
+    
+    mesh = trimesh.load(f'data/{file}')
+
+    colors = np.array(np.random.randint(0, 256, (500, 3))[annotations['instance_id']])
+    mesh.visual.vertex_colors = colors
+    
+    mesh.show()
+

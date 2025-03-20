@@ -4,7 +4,7 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
-    shm_size: '10gb'
+    shm_size: '128gb'
     build: 
       context: .
       dockerfile: Dockerfile
@@ -19,7 +19,6 @@ services:
       - .:/home
       - /tmp/.X11-unix:/tmp\.X11-unix
       - ${DATA_PATH}:/home/data
-
     deploy:
       resources:
         # limits:

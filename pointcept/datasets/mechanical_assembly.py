@@ -30,6 +30,7 @@ class MechanicalAssembly(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        classes = []
     ):
         super(MechanicalAssembly, self).__init__()
         self.data_root = data_root
@@ -50,8 +51,12 @@ class MechanicalAssembly(Dataset):
             self.post_transform = Compose(self.test_cfg.post_transform)
             self.aug_transform = [Compose(aug) for aug in self.test_cfg.aug_transform]
 
-        
         self.data_list = self.get_data_list()
+
+        if isinstance(classes, list):
+            self.class_mapping = {c: i for i, c in enumerate(classes)}
+        else:
+            self.class_mapping = classes
 
         self.ignore_index = ignore_index
         logger = get_root_logger()
@@ -102,17 +107,19 @@ class MechanicalAssembly(Dataset):
         distances, indices = knn.kneighbors(point_cloud)
 
         # Assign labels from the nearest neighbors
-        instance_labels = np.asarray(annotations['instance_id'])[indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])[indices.flatten()]
-        normals =  mesh.vertex_normals[indices.flatten()]
+        classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
+        instance_labels = np.asarray(annotations['instance_id'])#[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])#[indices.flatten()]
+        segment_labels = classes[segment_labels]
+        normals =  mesh.vertex_normals#[indices.flatten()]
         
         return {
-            'coord': point_cloud,
-            # 'face': mesh.faces,
-            # 'normal': mesh.vertex_normals,
-            'normal': normals,
-            'instance': instance_labels,
-            'segment': segment_labels,
+            'coord': mesh.vertices[segment_labels != -1],
+            'face': mesh.faces,
+            'normal': mesh.vertex_normals[segment_labels != -1],
+            'normal': normals[segment_labels != -1],
+            'instance': instance_labels[segment_labels != -1],
+            'segment': segment_labels[segment_labels != -1],
             'id': idx,
             'path': self.data_list[idx]
         } 
