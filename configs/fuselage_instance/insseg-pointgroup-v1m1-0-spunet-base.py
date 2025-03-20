@@ -1,12 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 2  # bs: total bs in all gpus
-num_worker = 1
+batch_size = 6  # bs: total bs in all gpus
+num_worker = 5
 mix_prob = 0
-empty_cache = False
+empty_cache = True
 enable_amp = True
 evaluate = True
+# resume=True
+# weight='exp/fuselage_instance/insseg-pointgroup-v1m1-0-spunet-base/model/model_last.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -49,12 +51,12 @@ model = dict(
 
 # scheduler settings
 epoch = 800
-optimizer = dict(type="SGD", lr=0.1, momentum=0.9, weight_decay=0.0001, nesterov=True)
+optimizer = dict(type="SGD", lr=0.01, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(type="PolyLR")
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data"
+data_root = "data/Fuselage/crops"
 
 data = dict(
     num_classes=num_classes,
@@ -77,7 +79,7 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
+            # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.1),
             dict(type="ChromaticJitter", p=0.95, std=0.05),
@@ -85,7 +87,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -117,7 +119,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="train",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -131,7 +133,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,

@@ -1,6 +1,7 @@
+
 services:
   pointcept:
-    image: "registry.gitlab.com/pmf5/pmf_ai/computer_vision/3d/3d_deep_learning_models:pointcept_local" 
+    image: "registry.gitlab.com/pmf5/pmf_ai/computer_vision/3d/3d_deep_learning_models:pointcept" 
     tty: true
     stdin_open: true
     restart: unless-stopped
