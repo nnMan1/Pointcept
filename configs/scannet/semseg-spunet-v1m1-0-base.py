@@ -33,7 +33,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ScanNetDataset"
-data_root = "data/scannet"
+data_root = "data/delete"
 
 data = dict(
     num_classes=20,

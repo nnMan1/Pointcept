@@ -37,3 +37,4 @@ for sample in dataset:
     pcd = to_o3d(sample['coord'], verts_colors=colors[result % len(colors)])
 
     o3d.io.write_point_cloud(os.path.join(results, f"{'_'.join(sample['path'].split('/'))}_pred.ply"), pcd)
+

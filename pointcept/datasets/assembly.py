@@ -1,6 +1,7 @@
 import os
 import glob
 import h5py
+import json
 import numpy as np
 import torch
 from copy import deepcopy
@@ -28,10 +29,12 @@ class Assembly(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        multiview=1
     ):
         super(Assembly, self).__init__()
         self.data_root = data_root
         self.split = split
+        self.multiview = multiview
         self.transform = Compose(transform)
         self.cache = cache
         self.loop = (
@@ -71,15 +74,16 @@ class Assembly(Dataset):
             raise NotImplementedError
         
         data_list = [f.strip() for f in data_list]
-        data_list = [f.split('/')[-1] for f in data_list]
+        data_list = [os.path.splitext(f.split('/')[-1])[0] for f in data_list]
+
         dl = []
-        
-        if 'train' in data_list:
-            pass
 
-        for i in range(6):
-            dl += [f'{self.split}_{f}_{i}.h5' for f in data_list]
+        for f in data_list:
+           dl += glob.glob(f'{self.data_root}/scans5/*/{f}/*.json')
 
+        if self.split == 'train':
+            dl = dl[:10]
+            
         return dl
 
     def get_data(self, idx):
@@ -96,19 +100,68 @@ class Assembly(Dataset):
             'id': idx,
             'path': self.data_list[idx]
         } 
+    
+    def get_data_json(self, idx):
+
+        def select_multiple(path, k):
+            basepath, name = os.path.split(path)
+            id = int(os.path.splitext(name)[0])    
+
+            max_idx = sorted([int(os.path.splitext(p)[0]) for p in os.listdir(basepath) if os.path.splitext(p)[1] == '.json'], reverse=True)[0]
+
+            data = {}
+
+            for offset in range(k):
+                try:
+                    with open(os.path.join(basepath, f'{(id+offset) % (max_idx + 1)}.json'), 'r') as file:
+                        tmp = json.load(file)
+
+                    for key, value in tmp.items():
+                        if key in data.keys():
+                            data[key] = np.concatenate([data[key], np.asarray(value)])
+                        else:
+                            data[key] = np.asarray(value)
+                except:
+                    pass
+
+            return data     
+    
+        idx = idx % len(self.data_list)
+
+        data = self.data_list[idx]
+
+        data=select_multiple(data, self.multiview)
+
+        data['coord'] = data.pop('points')
+        data['instance'] = data.pop('labels')
+        data['segment'] = np.zeros(np.asarray(data['coord']).shape[0], dtype=np.int32)
+        data['id'] = idx
+        data['path'] = self.data_list[idx]
+
+        if 'border_dist' in data:
+            data['border_dist'] = np.asarray(data['border_dist'])
+
+        if 'borders' in data:
+            data['borders'] = np.asarray(data['borders'])
+
+        for k in ['coord', 'borders', 'instance']:
+            if k in data.keys():
+                data[k] = np.asarray(data[k])
+       
+        return data
 
     def get_data_name(self, idx):
         return str(self.data_list[idx].assembly)
 
     def prepare_train_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)
+        data_dict = self.get_data_json(idx)
         data_dict = self.transform(data_dict)
         return data_dict
 
     def prepare_test_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)
+        data_dict = self.get_data_json(idx)
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
         data_dict_list = []

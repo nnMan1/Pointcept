@@ -22,6 +22,8 @@ from .preprocessing.scannet.meta_data.scannet200_constants import (
     VALID_CLASS_IDS_200,
 )
 
+import torch_scatter
+
 
 @DATASETS.register_module()
 class ScanNetDataset(Dataset):
@@ -39,8 +41,12 @@ class ScanNetDataset(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        ignore_semantic = (-1, 0, 1),
+        ignore_instance = (-1, )
     ):
         super(ScanNetDataset, self).__init__()
+        self.ignore_semantic = ignore_semantic
+        self.ifnore_instance = ignore_instance
         self.data_root = data_root
         self.split = split
         self.transform = Compose(transform)
@@ -84,12 +90,20 @@ class ScanNetDataset(Dataset):
                 data_list += glob.glob(os.path.join(self.data_root, split, "*.pth"))
         else:
             raise NotImplementedError
+        
+        # if self.split == 'train':
+        #     data_list = data_list[:5]
+        
         return data_list
 
     def get_data(self, idx):
         data_path = self.data_list[idx % len(self.data_list)]
         if not self.cache:
-            data = torch.load(data_path)
+            try:
+                data = torch.load(data_path)
+            except:
+                print(data_path)
+                raise Exception(data_path)
         else:
             data_name = data_path.replace(os.path.dirname(self.data_root), "").split(
                 "."
@@ -112,11 +126,16 @@ class ScanNetDataset(Dataset):
         else:
             instance = np.ones(coord.shape[0]) * -1
 
-        
         uni = np.unique(seg_indices)
+
+        # #TODO: OVO NIJE DOBRO
+        segment = segment - 2
+        segment[segment < 0] = -1
 
         for i, v in enumerate(uni):
             seg_indices[seg_indices == v] = i
+
+        group_segment = torch_scatter.scatter_mean(torch.tensor(segment), seg_indices).numpy()
 
         data_dict = dict(
             coord=coord,
@@ -126,6 +145,7 @@ class ScanNetDataset(Dataset):
             instance=instance,
             scene_id=scene_id,
             seg_indices=seg_indices,
+            group_segment=group_segment
         )
 
         if self.la:
@@ -200,6 +220,7 @@ class ScanNet200Dataset(ScanNetDataset):
             instance = data["instance_gt"].reshape([-1])
         else:
             instance = np.ones(coord.shape[0]) * -1
+
         data_dict = dict(
             coord=coord,
             normal=normal,

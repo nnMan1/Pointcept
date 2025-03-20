@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = True
 evaluate = True
 resume=True
-weight='exp/delete_imed_segments/insseg-scannet-v1m1-0-spunet-base_delete46/model/model_last.pth'
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -39,7 +39,7 @@ segment_ignore_index = (-1, 0, 1)
 model = dict(
     type="Mask-3D",
     backbone=dict(
-        type="MinkUNet34C",
+        type="Res16UNet34C",
         in_channels = 6,
         out_channels = 128,
         out_fpn=True, #return intermidiate features
@@ -82,7 +82,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ScanNetDataset"
-data_root = "data/delete"
+data_root = "data/scannet_instance_seg"
 
 data = dict(
     num_classes=num_classes,
@@ -139,7 +139,8 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                     "seed_ids",
-                    "seg_indices"
+                    "seg_indices",
+                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
             ),
@@ -177,7 +178,7 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type="FPSSeed", n_points=150),
+            dict(type="FPSSeed", n_points=100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -192,7 +193,8 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                     "seed_ids",
-                    "seg_indices"
+                    "seg_indices",
+                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
