@@ -28,16 +28,38 @@ class SuperpointPooling(nn.Module):
 
     def forward(self, data, keys=['instance', 'segment', 'features']):
 
-        if 'seg_indices' not in data.keys():
-            return data
+         if 'seg_indices' not in data.keys():
+               return data
 
-        data['offset_orig'] = data['offset']
-        data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
+         data['offset_orig'] = data['offset']
+         data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
-        for key in keys:
+         label_keys = []
+         if 'instance' in keys:
+            label_keys.append('instance')
+            keys.remove('instance')
+
+         if 'segment' in keys:
+            label_keys.append('segment')
+            keys.remove('segment')
+
+         
+         for key in label_keys:
+            label = []
+            for cls in np.unique(data['seg_indices']):
+               cluster_mask = data['seg_indices'] == cls
+          
+               unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
+               print(unique_labels, counts)
+               majority_label = unique_labels[torch.argmax(counts)]
+               label.append(majority_label)
+
+            data[key] = np.asarray(label)
+
+         for key in keys:
             data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
         
-        return data
+         return data
 
 class SuperpointUnpooling(nn.Module):
 
