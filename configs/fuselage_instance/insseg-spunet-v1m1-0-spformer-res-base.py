@@ -1,12 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 2  # bs: total bs in all gpus
+batch_size = 4  # bs: total bs in all gpus
 num_worker = 1
 mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
+resume=False
+weight='backbones/sstnet_pretrain.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -24,8 +26,8 @@ classes={"other": 0,
 class_names = ["other", "rivet", "string-stif", "ruber-seal", "main-panel", "hole"]
 
 
-fts_sizes = 256
-dim_feedforward=1024
+fts_sizes = 128
+dim_feedforward=512
 segment_ignore_index = (-1, )
 num_classes = 6
 segment_ignore_index = (-1, )
@@ -61,7 +63,7 @@ model = dict(
         ],
         query_refinement_modules=[
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -69,7 +71,7 @@ model = dict(
                 dropout=0
             ),
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -77,7 +79,7 @@ model = dict(
                 dropout=0
             ),
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -85,7 +87,7 @@ model = dict(
                 dropout=0
             ),
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -93,7 +95,7 @@ model = dict(
                 dropout=0
             ),
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -101,7 +103,7 @@ model = dict(
                 dropout=0
             ),
             dict(
-                in_channels=256,
+                in_channels=fts_sizes,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
@@ -114,18 +116,18 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 500
+epoch = 100
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
     type="PolyLR",
-    total_steps=1500*100,
+    total_steps=382*100,
     power=0.9,
 )
 
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data"
+data_root = "data/Fuselage/crops"
 
 data = dict(
     num_classes=num_classes,
@@ -156,11 +158,11 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=1.5,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance"),
+                keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
             dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="NormalizeColor"),
@@ -179,6 +181,7 @@ data = dict(
                     "instance",
                     "instance_centroid",
                     "bbox",
+                    "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
             ),
@@ -188,7 +191,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="train",
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -202,11 +205,11 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=1.5,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance"),
+                keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
             # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
@@ -229,6 +232,7 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
+                    "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
@@ -241,7 +245,7 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(

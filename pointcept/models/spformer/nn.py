@@ -46,15 +46,20 @@ class SuperpointPooling(nn.Module):
          
          for key in label_keys:
             label = []
-            for cls in np.unique(data['seg_indices']):
+            for cls in data['seg_indices'].unique():
                cluster_mask = data['seg_indices'] == cls
           
                unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
-               print(unique_labels, counts)
                majority_label = unique_labels[torch.argmax(counts)]
                label.append(majority_label)
 
-            data[key] = np.asarray(label)
+            data[key] = torch.stack(label)
+
+         bs = 0
+         for be in data['offset']:
+            _, new_instance_indices = torch.unique(data['instance'][bs:be], return_inverse=True)
+            data['instance'][bs:be] = new_instance_indices
+            bs = be
 
          for key in keys:
             data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
