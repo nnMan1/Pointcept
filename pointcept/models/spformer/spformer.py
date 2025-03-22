@@ -226,7 +226,7 @@ class SPFormer(nn.Module):
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
 
-        self.__query = nn.Embedding(num_query, 256)
+        self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
 
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
@@ -331,7 +331,7 @@ class SPFormer(nn.Module):
 
         data.update(self.encoder(data))
 
-        data = self.superpoint_pooling(data)
+        data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
         queries = self.query_pooling(data)    
 
         pred = self.decoder(data, queries) 
