@@ -93,6 +93,8 @@ class MechanicalAssembly(Dataset):
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
 
         if len(vertices) < 2048:
+            del mesh
+            del vertices
             return self.get_data(idx + 1)
     
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
@@ -101,19 +103,19 @@ class MechanicalAssembly(Dataset):
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
-        # Transform mesh to point cloud using uniform sampling to 30000 samples
-        import open3d as o3d
-        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+        # # Transform mesh to point cloud using uniform sampling to 30000 samples
+        # import open3d as o3d
+        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
+        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
 
-        # Assign labels using KNN
+        # # Assign labels using KNN
 
-        # Fit KNN on mesh vertices
-        knn = NearestNeighbors(n_neighbors=1)
-        knn.fit(mesh.vertices)
+        # # Fit KNN on mesh vertices
+        # knn = NearestNeighbors(n_neighbors=1)
+        # knn.fit(mesh.vertices)
 
-        # Find nearest neighbors for the sampled points
-        distances, indices = knn.kneighbors(point_cloud)
+        # # Find nearest neighbors for the sampled points
+        # distances, indices = knn.kneighbors(point_cloud)
 
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
