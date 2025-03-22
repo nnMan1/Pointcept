@@ -78,7 +78,7 @@ class MechanicalAssembly(Dataset):
         else:
             raise NotImplementedError
         
-        data_list = [f.strip() for f in data_list]        
+        data_list = [f.strip() for f in data_list]   
 
         return data_list
 
@@ -91,6 +91,10 @@ class MechanicalAssembly(Dataset):
 
         mesh = trimesh.load(f'{self.data_root}/{file}')
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+
+        if len(vertices) < 2048:
+            return self.get_data(idx + 1)
+    
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
         ind = segment_mesh(vertices, faces, 0.001).numpy()
 

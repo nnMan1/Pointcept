@@ -1,15 +1,15 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4  # bs: total bs in all gpus
-num_worker = 1
+batch_size = 12  # bs: total bs in all gpus
+num_worker = 20
 mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
-resume=True
+# resume=True
 # weight='backbones/sstnet_pretrain.pth'
-weight='exp/fuselage_instance/insseg-spunet-v1m1-0-spformer-res-base/model/model_last.pth'
+# weight='exp/fuselage_instance/insseg-spunet-v1m1-0-spformer-res-base/model/model_last.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -36,94 +36,28 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="SPFormer",
-    num_query = 400,
-    encoder=dict(
-        backbone=dict(
-            input_channel=6,
-            blocks=5,
-            block_reps=2,
-            media=32,
-            normalize_before=True,
-            return_blocks=True,
-            pool='mean'
-        ),
-        backbone_out_channels=32,
-        out_channels=32,
-     ),
-     decoder=dict(
-        in_channels=32,
-        hlevels=6,
-        mask_modules=[
-            dict(
-                num_classes=num_classes, 
-                return_attn_masks=True, 
-                hidden_dim=fts_sizes,
-                reuse=1
-            )
-        ],
-        query_refinement_modules=[
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=fts_sizes,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            )
-        ],
+    type="DefaultSegmentor",
+    backbone=dict(
+        type="SpUNet-v1m1",
+        in_channels=6,
+        num_classes=6,
+        channels=(32, 64, 128, 128, 96, 96),
+        layers=(2, 3, 4, 2, 2, 2),
     ),
-    instance_ignore_index=-1,
+    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
 )
 
 # scheduler settings
 epoch = 100
 eval_epoch = 20  # sche total eval & checkpoint epoch
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
+optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(
-    type="PolyLR",
-    total_steps=382*100,
-    power=0.9,
+    type="OneCycleLR",
+    max_lr=optimizer["lr"],
+    pct_start=0.05,
+    anneal_strategy="cos",
+    div_factor=10.0,
+    final_div_factor=1000.0,
 )
 
 
@@ -146,8 +80,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
@@ -246,15 +180,15 @@ data = dict(
     test=dict(),  # currently not available
 )
 
-hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
-    # dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
-    dict(type="IterationTimer", warmup_iter=2),
-    dict(type="InformationWriter"),
-    dict(
-        type="InsSegEvaluator",
-        segment_ignore_index=segment_ignore_index,
-        instance_ignore_index=-1,
-    ),
-    dict(type="CheckpointSaver", save_freq=None),
-]
+# hooks = [
+#     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+#     # dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
+#     dict(type="IterationTimer", warmup_iter=2),
+#     dict(type="InformationWriter"),
+#     dict(
+#         type="InsSegEvaluator",
+#         segment_ignore_index=segment_ignore_index,
+#         instance_ignore_index=-1,
+#     ),
+#     dict(type="CheckpointSaver", save_freq=None),
+# ]

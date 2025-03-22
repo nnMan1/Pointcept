@@ -120,7 +120,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 500
+epoch = 10
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
     type="PolyLR",
@@ -159,7 +159,7 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -205,7 +205,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
