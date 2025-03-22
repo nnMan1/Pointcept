@@ -104,36 +104,38 @@ class MechanicalAssembly(Dataset):
             annotations = json.load(json_file)
 
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
-        # import open3d as o3d
-        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+        import open3d as o3d
+        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
+        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
 
-        # # Assign labels using KNN
+        # Assign labels using KNN
+        segment_labels = np.asarray(annotations['semantic_id'])
 
-        # # Fit KNN on mesh vertices
-        # knn = NearestNeighbors(n_neighbors=1)
-        # knn.fit(mesh.vertices)
+        # Fit KNN on mesh vertices
+        knn = NearestNeighbors(n_neighbors=1)
+        knn.fit(mesh.vertices[segment_labels != -1])
 
         # # Find nearest neighbors for the sampled points
-        # distances, indices = knn.kneighbors(point_cloud)
+        distances, indices = knn.kneighbors(point_cloud)
 
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])#[indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])#[indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
+        normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
+        seg_indices = ind[segment_labels != -1][indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
-        normals =  mesh.vertex_normals#[indices.flatten()]
         
         return {
-            'coord': mesh.vertices[segment_labels != -1],
-            'face': mesh.faces,
-            'normal': mesh.vertex_normals[segment_labels != -1],
-            'normal': normals[segment_labels != -1],
-            'instance': instance_labels[segment_labels != -1],
-            'segment': segment_labels[segment_labels != -1],
+            'coord': point_cloud,
+            # 'coord': mesh.vertices,
+            # 'face': mesh.faces,
+            'normal': normals,
+            'instance': instance_labels,
+            'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            'seg_indices': ind[segment_labels != -1]
+            'seg_indices': seg_indices
         } 
 
     def get_data_name(self, idx):
