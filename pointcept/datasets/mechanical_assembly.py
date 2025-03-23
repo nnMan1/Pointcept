@@ -67,6 +67,30 @@ class MechanicalAssembly(Dataset):
             )
         )
 
+        self.prepare_clustering()
+
+
+    def prepare_clustering(self):
+        for file in self.data_list:
+            dir = os.path.dirname(file)
+
+            with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+                annotations = json.load(json_file)
+
+            if 'seg_indices' in annotations.keys():
+                continue
+
+            mesh = trimesh.load(f'{self.data_root}/{file}')
+            vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+            faces = torch.from_numpy(mesh.faces.astype(np.int64))
+            ind = segment_mesh(vertices, faces, 0.00001, 5).numpy()
+            print(os.path.join(self.data_root, dir, 'annotations.json'))
+            
+            annotations['seg_indices'] = ind.tolist()
+
+            with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
+                json.dump(annotations, json_file)
+
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -90,18 +114,14 @@ class MechanicalAssembly(Dataset):
         dir = os.path.dirname(file)
 
         mesh = trimesh.load(f'{self.data_root}/{file}')
-        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
 
-        if len(vertices) < 2048:
+        if len(mesh.vertices) < 2048:
             del mesh
-            del vertices
             return self.get_data(idx + 1)
     
-        faces = torch.from_numpy(mesh.faces.astype(np.int64))
-        ind = segment_mesh(vertices, faces, 0.001).numpy()
-
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-            annotations = json.load(json_file)
+                annotations = json.load(json_file)
+
 
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
@@ -110,6 +130,7 @@ class MechanicalAssembly(Dataset):
 
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
+        mask = segment_labels != -1
 
         # Fit KNN on mesh vertices
         knn = NearestNeighbors(n_neighbors=1)
@@ -122,13 +143,13 @@ class MechanicalAssembly(Dataset):
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
         normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        seg_indices = ind[segment_labels != -1][indices.flatten()]
+        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
         
         return {
             'coord': point_cloud,
-            # 'coord': mesh.vertices,
+            # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
             'normal': normals,
             'instance': instance_labels,
