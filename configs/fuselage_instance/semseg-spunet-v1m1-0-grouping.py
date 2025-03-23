@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4  # bs: total bs in all gpus
-num_worker = 3
+batch_size = 30  # bs: total bs in all gpus
+num_worker = 30
 mix_prob = 0
 empty_cache = True
 enable_amp = True
@@ -52,8 +52,8 @@ model = dict(
 
 
 # scheduler settings
-epoch = 100
-eval_epoch = 20  # sche total eval & checkpoint epoch
+epoch = 500
+eval_epoch = 100  # sche total eval & checkpoint epoch
 optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(
     type="OneCycleLR",
@@ -67,7 +67,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data/fuselage/crops"
+data_root = "data/Fuselage/crops"
 
 data = dict(
     num_classes=num_classes,

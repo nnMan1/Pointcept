@@ -66,8 +66,10 @@ class MechanicalAssembly(Dataset):
                 len(self.data_list), self.loop, split
             )
         )
+        
+        # self.prepare_clustering()
+        self.preloaded_data = [None for _ in self.data_list]
 
-        self.prepare_clustering()
 
 
     def prepare_clustering(self):
@@ -109,6 +111,11 @@ class MechanicalAssembly(Dataset):
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
+
+
+        if self.preloaded_data[idx] != None:
+            return self.preloaded_data[idx]
+        
         file = self.data_list[idx]
 
         dir = os.path.dirname(file)
@@ -146,8 +153,8 @@ class MechanicalAssembly(Dataset):
         seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
-        
-        return {
+
+        self.preloaded_data[idx] = {
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
@@ -158,6 +165,8 @@ class MechanicalAssembly(Dataset):
             'path': self.data_list[idx],
             'seg_indices': seg_indices
         } 
+        
+        return self.preloaded_data[idx]
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]

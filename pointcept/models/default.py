@@ -91,14 +91,15 @@ class GroupingSegmentor(nn.Module):
         seg_logits_gr = self.final(input_dict['features'])
 
         if "segment" in input_dict.keys():
-            loss = self.criteria(seg_logits_gr, input_dict["segment"])
+            input_dict['loss'] = self.criteria(seg_logits_gr, input_dict["segment"])
 
         if self.training:
-            return dict(loss=loss)
+            return dict(loss=input_dict['loss'])
         else:
-            data = self.superpoint_unpooling(data, 'segment')
+            input_dict['seg_logits'] = seg_logits_gr
+            input_dict = self.superpoint_unpooling(input_dict, ['segment', 'seg_logits'])
 
-        return data
+        return input_dict
 
 @MODELS.register_module()
 class GroupingSegmentorV2(nn.Module):
