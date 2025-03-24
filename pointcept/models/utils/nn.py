@@ -62,7 +62,7 @@ class SuperpointPooling(nn.Module):
             bs = be
 
          for key in keys:
-            data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
+            data[key] = self.pool_function(data[key],  data['seg_indices'], dim=0)[0]
         
          return data
 

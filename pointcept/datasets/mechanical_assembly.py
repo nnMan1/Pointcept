@@ -85,7 +85,7 @@ class MechanicalAssembly(Dataset):
             mesh = trimesh.load(f'{self.data_root}/{file}')
             vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
             faces = torch.from_numpy(mesh.faces.astype(np.int64))
-            ind = segment_mesh(vertices, faces, 0.00001, 5).numpy()
+            ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
             print(os.path.join(self.data_root, dir, 'annotations.json'))
             
             annotations['seg_indices'] = ind.tolist()
