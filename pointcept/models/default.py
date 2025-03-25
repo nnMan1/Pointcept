@@ -103,7 +103,10 @@ class GroupingSegmentor(nn.Module):
             return dict(loss=input_dict['loss'])
         else:
             input_dict['seg_logits'] = seg_logits_gr
-            input_dict = self.superpoint_unpooling(input_dict, ['segment', 'seg_logits'])
+            if 'segment' in input_dict.keys():
+                input_dict = self.superpoint_unpooling(input_dict, ['segment', 'seg_logits'])
+            else:
+                input_dict = self.superpoint_unpooling(input_dict, ['seg_logits'])
 
         return input_dict
 

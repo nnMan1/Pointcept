@@ -210,6 +210,12 @@ class CheckpointLoader(HookBase):
         self.strict = strict
 
     def before_train(self):
+
+        if isinstance(self.keywords, str):
+            self.keywords = [self.keywords]
+        if isinstance(self.replacement, str):
+            self.replacement = [self.replacement]
+            
         self.trainer.logger.info("=> Loading checkpoint & weight ...")
         if self.trainer.cfg.weight and os.path.isfile(self.trainer.cfg.weight):
             self.trainer.logger.info(f"Loading weight at: {self.trainer.cfg.weight}")
@@ -228,8 +234,9 @@ class CheckpointLoader(HookBase):
                     if comm.get_world_size() == 1:
                         key = "module." + key  # xxx.xxx -> module.xxx.xxx
                 # Now all keys contain "module." no matter DDP or not.
-                if self.keywords in key:
-                    key = key.replace(self.keywords, self.replacement)
+                for keyword, replacement in zip(self.keywords, self.replacement):
+                    if keyword in key:
+                        key = key.replace(keyword, replacement)
                 if comm.get_world_size() == 1:
                     key = key[7:]  # module.xxx.xxx -> xxx.xxx
                 weight[key] = value

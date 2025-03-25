@@ -4,6 +4,7 @@ import json
 import trimesh
 import numpy as np
 import torch
+from sklearn.cluster import DBSCAN
 from copy import deepcopy
 from torch.utils.data import Dataset
 from collections.abc import Sequence
@@ -17,6 +18,148 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
+
+class HoleAugmentor:
+
+    def __init__(self, class_mapping):
+        self.class_to_id = self.class_mapping
+
+    def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label):
+        ret = {}
+
+        points = data_dict['coord']
+
+        a_ids, b_ids, alphas = [], [], []
+
+        attp = 0
+        
+        while len(a_ids) < k: 
+            a_id, b_id = np.random.choice(interpolating_ids, (2, ))
+            alpha = np.random.uniform(0, 1)
+
+            pt = alpha * points[a_id] + (1 - alpha) * points[b_id]
+            if (np.linalg.norm(pt - center) < radius) | (attp == 50):
+                attp = 0
+                a_ids.append(a_id)
+                b_ids.append(b_id)
+                alphas.append(alpha)
+
+            attp += 1
+
+        a_ids = np.asarray(a_ids, dtype=np.int32)
+        b_ids = np.asarray(b_ids, dtype=np.int32)
+        alphas = np.asarray(alphas)[..., None]
+
+
+        for key in ['coord', 'normal']:
+            ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
+
+        ret['segment'] = np.ones(k, np.int32) * assign_sem_label
+        ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
+
+        return ret
+
+    def remove_radius(self,  data_dict, center, radius, label=-1):
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+        dists =  np.linalg.norm(points - center, axis=-1)
+
+        ids_keep= np.where(dists > radius) if label == -1 else np.where((dists > radius) | (labels != label))
+
+        for key, val in data_dict.items():
+            if isinstance(val, np.ndarray) and len(val) == len(points):
+                data_dict[key]= data_dict[key][ids_keep]
+
+        return data_dict
+    
+    def augment_rivet_hole_shape(self, data_dict, center, radius, direction):
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+        dists =  np.linalg.norm(points - center, axis=-1)
+
+        mask = dists < radius
+        delta = np.exp(-np.random.uniform(0.01, 1)/(1 - (dists[mask] / radius + 1e-15) ** 2))
+
+        direction = direction / np.linalg.norm(direction)
+        direction += + np.random.normal(0, 0.2, 3)
+        direction = direction / np.linalg.norm(direction)
+
+        points[mask] += 3 * delta[..., None] * direction
+
+        data_dict['coord'] = points
+
+        return data_dict
+
+    def remove_rivet(self, data_dict):
+        
+        rivet_id = self.class_to_id['rivets']
+        hole_id = self.class_to_id['hole']
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+    
+        if np.sum(labels == rivet_id) == 0:
+            return data_dict
+        
+        ids = np.where(labels == rivet_id)[0]
+
+        clusters = (
+                        DBSCAN(
+                            eps=0.95,
+                            min_samples=1,
+                            n_jobs=1,
+                        )
+                        .fit(points[ids])
+                        .labels_
+                    )
+        
+        cluster_id = np.random.choice(clusters, 1)[0]
+
+        remove_ids = np.where(clusters == cluster_id)
+        center = points[ids[remove_ids]].mean(axis=0)
+        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.1
+
+        hole_diam_radius = max(rivet_diam + 2, 3)
+
+        dists =  np.linalg.norm(points - center, axis=-1)
+        ids_interesting = np.where(dists < hole_diam_radius)
+        # ids_remove = np.logical_and(dists < hole_diam_radius, labels == rivet_id)
+        ids_remove = dists < rivet_diam
+
+        interpolating_ids = np.where((dists < hole_diam_radius) & (dists > rivet_diam))[0]
+
+        if len(interpolating_ids) == 0:
+            return data_dict
+
+        # ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.9, 1) * ids_remove.sum())
+
+        interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id))
+
+        labels[np.where(dists < rivet_diam)] = hole_id
+
+        data_dict['segment'] = labels
+
+        for key, val in data_dict.items():
+            if isinstance(val, np.ndarray) and len(val) == len(points):
+                data_dict[key][ids_remove] = interpolated[key]
+
+        if len(interpolated['coord']) == 0:
+            return data_dict
+
+        new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
+
+        if np.random.uniform() < 0.7:
+            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
+
+
+        new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
+
+        if np.random.uniform() < 0.7:
+            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
+
+
+
+        return data_dict
+
 
 @DATASETS.register_module("MechanicalAssembly")
 class MechanicalAssembly(Dataset):
@@ -67,7 +210,7 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        # self.prepare_clustering()
+        self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
 
 
@@ -86,7 +229,6 @@ class MechanicalAssembly(Dataset):
             vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
             faces = torch.from_numpy(mesh.faces.astype(np.int64))
             ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-            print(os.path.join(self.data_root, dir, 'annotations.json'))
             
             annotations['seg_indices'] = ind.tolist()
 
@@ -186,7 +328,7 @@ class MechanicalAssembly(Dataset):
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
         data_dict_list = []
-        for aug in self.aug_transform:
+        for aug in self.aug_transform[:1]:
             data_dict_list.append(aug(deepcopy(data_dict)))
 
         input_dict_list = []

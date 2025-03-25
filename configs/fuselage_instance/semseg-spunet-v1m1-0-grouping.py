@@ -7,9 +7,10 @@ mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
-resume=False
+resume=True
 # weight='backbones/sstnet_pretrain.pth'
-weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
+# weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
+weight='exp/fuselage_instance/semseg-spunet-v1m1-0-grouping/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
