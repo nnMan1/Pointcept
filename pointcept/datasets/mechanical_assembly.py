@@ -18,11 +18,12 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
+import copy
 
 class HoleAugmentor:
 
     def __init__(self, class_mapping):
-        self.class_to_id = self.class_mapping
+        self.class_to_id = class_mapping
 
     def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label):
         ret = {}
@@ -55,7 +56,7 @@ class HoleAugmentor:
             ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
 
         ret['segment'] = np.ones(k, np.int32) * assign_sem_label
-        ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
+        # ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
 
         return ret
 
@@ -92,14 +93,14 @@ class HoleAugmentor:
 
     def remove_rivet(self, data_dict):
         
-        rivet_id = self.class_to_id['rivets']
+        rivet_id = self.class_to_id['rivet']
         hole_id = self.class_to_id['hole']
 
-        points, labels  = data_dict['coord'], data_dict['segment']
-    
-        if np.sum(labels == rivet_id) == 0:
+        if np.sum(data_dict['segment'] == rivet_id) == 0:
             return data_dict
-        
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+            
         ids = np.where(labels == rivet_id)[0]
 
         clusters = (
@@ -156,8 +157,6 @@ class HoleAugmentor:
         if np.random.uniform() < 0.7:
             data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
 
-
-
         return data_dict
 
 
@@ -210,9 +209,9 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        self.prepare_clustering()
+        # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
-
+        self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
 
     def prepare_clustering(self):
@@ -256,7 +255,7 @@ class MechanicalAssembly(Dataset):
 
 
         if self.preloaded_data[idx] != None:
-            return self.preloaded_data[idx]
+            return copy.deepcopy(self.preloaded_data[idx])
         
         file = self.data_list[idx]
 
@@ -292,7 +291,7 @@ class MechanicalAssembly(Dataset):
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
         normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
+        # seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
 
@@ -301,14 +300,14 @@ class MechanicalAssembly(Dataset):
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
             'normal': normals,
-            'instance': instance_labels,
+            # 'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            'seg_indices': seg_indices
+            # 'seg_indices': seg_indices
         } 
         
-        return self.preloaded_data[idx]
+        return copy.deepcopy(self.preloaded_data[idx])
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
@@ -319,7 +318,16 @@ class MechanicalAssembly(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+
         data_dict = self.transform(data_dict)
+
         return data_dict
 
     def prepare_test_data(self, idx):

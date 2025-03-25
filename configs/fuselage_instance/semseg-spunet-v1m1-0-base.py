@@ -7,10 +7,10 @@ mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
-resume=True
+# resume=True
 # weight='backbones/sstnet_pretrain.pth'
-# weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
-weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base/model/model_best.pth'
+weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_last.pth'
+# weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -63,7 +63,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data/Fuselage/crops"
+data_root = "data/fuselage/crops"
 
 data = dict(
     num_classes=num_classes,
@@ -93,7 +93,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "seg_indices"),
+                keys=("coord", "normal", "segment"),
             ),
             # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="CenterShift", apply_z=False),
@@ -104,8 +104,6 @@ data = dict(
                     "coord",
                     "grid_coord",
                     "segment",
-                    "instance",
-                    "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
             ),
@@ -124,7 +122,6 @@ data = dict(
                 keys_dict={
                     "coord": "origin_coord",
                     "segment": "origin_segment",
-                    "instance": "origin_instance",
                 },
             ),
             dict(
@@ -133,7 +130,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "seg_indices"),
+                keys=("coord", "normal", "segment"),
             ),
             dict(type="CenterShift", apply_z=False),
             dict(type="ToTensor"),
@@ -143,8 +140,6 @@ data = dict(
                     "coord",
                     "grid_coord",
                     "segment",
-                    "instance",
-                    "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
@@ -156,11 +151,11 @@ data = dict(
     test=dict(),  # currently not available
 )
 
-# hooks = [
-#     dict(type="CheckpointLoader", keywords=["module.backbone.final", "module.backbone.conv_input.0.weight"], replacement=["module.dummy", "module.dummy"]),
-#     dict(type="IterationTimer", warmup_iter=2),
-#     dict(type="InformationWriter"),
-#     dict(type="SemSegEvaluator"),
-#     dict(type="CheckpointSaver", save_freq=None),
-#     dict(type="PreciseEvaluator", test_last=False),
-# ]
+hooks = [
+    dict(type="CheckpointLoader", keywords=["module.backbone.final", "module.backbone.conv_input.0.weight"], replacement=["module.dummy", "module.dummy"]),
+    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="InformationWriter"),
+    dict(type="SemSegEvaluator"),
+    dict(type="CheckpointSaver", save_freq=None),
+    dict(type="PreciseEvaluator", test_last=False),
+]
