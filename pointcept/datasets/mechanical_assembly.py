@@ -4,6 +4,7 @@ import json
 import trimesh
 import numpy as np
 import torch
+from sklearn.cluster import DBSCAN
 from copy import deepcopy
 from torch.utils.data import Dataset
 from collections.abc import Sequence
@@ -93,6 +94,38 @@ class MechanicalAssembly(Dataset):
             with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
                 json.dump(annotations, json_file)
 
+    def get_hole_centers(self, data_dict):
+
+        mask = np.where(data_dict['segment'] == self.class_mapping['hole'])[0]
+        dbscan = DBSCAN(eps=5, min_samples=1)
+        all_points = data_dict['coord']
+        hole_points = all_points[mask]
+
+        if len(hole_points) == 0:
+            return data_dict
+
+        dbscan.fit(hole_points)
+        labels = dbscan.labels_
+
+        centroids = []
+        for label in set(labels):
+            if label == -1:
+                continue
+
+            cluster_points = hole_points[labels == label]
+            print(cluster_points.shape)
+            centroid = np.mean(cluster_points, axis=0)
+            centroids.append(centroid)
+
+    
+        centroids = np.array(centroids)
+        distances = np.linalg.norm(centroids.T[:, None] - all_points[None, :].T, axis=0)
+        close_points_mask = np.any(distances < 7, axis=1)
+        data_dict['segment'][close_points_mask] = self.class_mapping['hole']
+        
+        return data_dict
+
+
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -111,14 +144,21 @@ class MechanicalAssembly(Dataset):
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
-
+        file = self.data_list[idx]
+        dir = os.path.dirname(file)
 
         if self.preloaded_data[idx] != None:
             return self.preloaded_data[idx]
         
-        file = self.data_list[idx]
 
-        dir = os.path.dirname(file)
+        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+            annotations = json.load(json_file)
+
+        hole_index = [i for i, x in enumerate(annotations['classes']) if x == 'hole'][0]
+
+
+        if np.sum(np.asanyarray(annotations['semantic_id']) ==  hole_index) == 0: 
+            return  self.get_data(idx + 1)
 
         mesh = trimesh.load(f'{self.data_root}/{file}')
 
@@ -126,10 +166,6 @@ class MechanicalAssembly(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-                annotations = json.load(json_file)
-
-
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
         o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
@@ -154,7 +190,9 @@ class MechanicalAssembly(Dataset):
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
 
-        self.preloaded_data[idx] = {
+
+
+        self.preloaded_data[idx] = self.get_hole_centers({
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
@@ -164,7 +202,7 @@ class MechanicalAssembly(Dataset):
             'id': idx,
             'path': self.data_list[idx],
             'seg_indices': seg_indices
-        } 
+        })
         
         return self.preloaded_data[idx]
 
