@@ -313,7 +313,10 @@ class Fuselage(Dataset):
             data_dict = self.remove_rivet(data_dict)
             data_dict = self.remove_rivet(data_dict)
             data_dict = self.remove_rivet(data_dict)
-            data_dict = self.remove_ranom_hole(data_dict)
+            data_dict = self.remove_rivet(data_dict)
+            data_dict = self.remove_rivet(data_dict)
+            data_dict = self.remove_rivet(data_dict)
+            # data_dict = self.remove_ranom_hole(data_dict)
 
 
         data_dict = self.transform(data_dict)

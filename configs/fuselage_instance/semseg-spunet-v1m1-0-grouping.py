@@ -7,10 +7,10 @@ mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
-resume=True
+resume=False
 # weight='backbones/sstnet_pretrain.pth'
-# weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
-weight='exp/fuselage_instance/semseg-spunet-v1m1-0-grouping/model/model_best.pth'
+weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
+# weight='exp/fuselage_instance/semseg-spunet-v1m1-0-grouping/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -78,6 +78,7 @@ data = dict(
         type=dataset_type,
         split="train",
         data_root=data_root,
+        augment_holes=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -98,7 +99,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "seg_indices"),
+                keys=("coord", "normal", "segment"),
             ),
             # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(type="CenterShift", apply_z=False),
@@ -108,9 +109,7 @@ data = dict(
                 keys=(
                     "coord",
                     "grid_coord",
-                    "segment",
-                    "instance",
-                    "seg_indices"
+                    "segment"
                 ),
                 feat_keys=("coord", "normal"),
             ),
@@ -129,7 +128,6 @@ data = dict(
                 keys_dict={
                     "coord": "origin_coord",
                     "segment": "origin_segment",
-                    "instance": "origin_instance",
                 },
             ),
             dict(
@@ -138,7 +136,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "seg_indices"),
+                keys=("coord", "normal", "segment"),
             ),
             dict(type="CenterShift", apply_z=False),
             dict(type="ToTensor"),
@@ -148,7 +146,6 @@ data = dict(
                     "coord",
                     "grid_coord",
                     "segment",
-                    "instance",
                     "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
@@ -158,8 +155,142 @@ data = dict(
         test_mode=False,
         classes=classes
     ),
-    test=dict(),  # currently not available
-)
+    test=dict(
+        type='MechanicalAssembly',
+        split='val',
+        data_root='data/Fuselage/crops/artec',
+        transform=[dict(type='CenterShift', apply_z=True)],
+        test_cfg=dict(
+            voxelize=dict(
+                type='GridSample',
+                grid_size=0.3,
+                hash_type='fnv',
+                mode='test',
+                return_grid_coord=True,
+                keys=('coord', 'normal')),
+            crop=None,
+            post_transform=[
+                dict(type='CenterShift', apply_z=False),
+                dict(type='ToTensor'),
+                dict(
+                    type='Collect',
+                    keys=('coord', 'grid_coord',
+                          'index'),
+                    feat_keys=('coord', 'normal'))
+            ],
+            aug_transform=[[{
+                'type': 'RandomRotateTargetAngle',
+                'angle': [0],
+                'axis': 'z',
+                'center': [0, 0, 0],
+                'p': 1
+            }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [0.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [0],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [0.95, 0.95]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [0.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [0.95, 0.95]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [0.95, 0.95]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [0.95, 0.95]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [0],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [1.05, 1.05]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [0.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [1.05, 1.05]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [1.05, 1.05]
+                           }],
+                           [{
+                               'type': 'RandomRotateTargetAngle',
+                               'angle': [1.5],
+                               'axis': 'z',
+                               'center': [0, 0, 0],
+                               'p': 1
+                           }, {
+                               'type': 'RandomScale',
+                               'scale': [1.05, 1.05]
+                           }], [{
+                               'type': 'RandomFlip',
+                               'p': 1
+                           }]]),
+        test_mode=True,
+        classes=classes))
 
 hooks = [
     dict(type="CheckpointLoader", keywords="backbone.conv_input.0.weight", replacement="module.dummy"),

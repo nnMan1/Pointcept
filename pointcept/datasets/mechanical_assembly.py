@@ -18,11 +18,12 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
+import copy
 
 class HoleAugmentor:
 
     def __init__(self, class_mapping):
-        self.class_to_id = self.class_mapping
+        self.class_to_id = class_mapping
 
     def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label):
         ret = {}
@@ -55,7 +56,7 @@ class HoleAugmentor:
             ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
 
         ret['segment'] = np.ones(k, np.int32) * assign_sem_label
-        ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
+        # ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
 
         return ret
 
@@ -92,14 +93,14 @@ class HoleAugmentor:
 
     def remove_rivet(self, data_dict):
         
-        rivet_id = self.class_to_id['rivets']
+        rivet_id = self.class_to_id['rivet']
         hole_id = self.class_to_id['hole']
 
-        points, labels  = data_dict['coord'], data_dict['segment']
-    
-        if np.sum(labels == rivet_id) == 0:
+        if np.sum(data_dict['segment'] == rivet_id) == 0:
             return data_dict
-        
+
+        points, labels  = data_dict['coord'], data_dict['segment']
+            
         ids = np.where(labels == rivet_id)[0]
 
         clusters = (
@@ -118,7 +119,7 @@ class HoleAugmentor:
         center = points[ids[remove_ids]].mean(axis=0)
         rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.1
 
-        hole_diam_radius = max(rivet_diam + 2, 3)
+        hole_diam_radius = max(rivet_diam + 2, 7)
 
         dists =  np.linalg.norm(points - center, axis=-1)
         ids_interesting = np.where(dists < hole_diam_radius)
@@ -147,7 +148,7 @@ class HoleAugmentor:
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
-        if np.random.uniform() < 0.7:
+        if np.random.uniform() < 0.2:
             data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
 
 
@@ -155,8 +156,6 @@ class HoleAugmentor:
 
         if np.random.uniform() < 0.7:
             data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
-
-
 
         return data_dict
 
@@ -174,7 +173,8 @@ class MechanicalAssembly(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
-        classes = []
+        classes = [],
+        augment_holes=False
     ):
         super(MechanicalAssembly, self).__init__()
         self.data_root = data_root
@@ -210,9 +210,13 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        self.prepare_clustering()
+        # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
+        self.augment_holes = augment_holes
+        self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
+        # for i in range(len(self.data_list)):
+        #     self.get_data(i)
 
 
     def prepare_clustering(self):
@@ -235,6 +239,38 @@ class MechanicalAssembly(Dataset):
             with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
                 json.dump(annotations, json_file)
 
+    def get_hole_centers(self, data_dict):
+
+        mask = np.where(data_dict['segment'] == self.class_mapping['hole'])[0]
+        dbscan = DBSCAN(eps=5, min_samples=1)
+        all_points = data_dict['coord']
+        hole_points = all_points[mask]
+
+        if len(hole_points) == 0:
+            return data_dict
+
+        dbscan.fit(hole_points)
+        labels = dbscan.labels_
+
+        centroids = []
+        for label in set(labels):
+            if label == -1:
+                continue
+
+            cluster_points = hole_points[labels == label]
+            print(cluster_points.shape)
+            centroid = np.mean(cluster_points, axis=0)
+            centroids.append(centroid)
+
+    
+        centroids = np.array(centroids)
+        distances = np.linalg.norm(centroids.T[:, None] - all_points[None, :].T, axis=0)
+        close_points_mask = np.any(distances < 7, axis=1)
+        data_dict['segment'][close_points_mask] = self.class_mapping['hole']
+        
+        return data_dict
+
+
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -253,14 +289,22 @@ class MechanicalAssembly(Dataset):
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
-
+        file = self.data_list[idx]
+        dir = os.path.dirname(file)
 
         if self.preloaded_data[idx] != None:
-            return self.preloaded_data[idx]
-        
-        file = self.data_list[idx]
+            return copy.deepcopy(self.preloaded_data[idx])
 
-        dir = os.path.dirname(file)
+        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            try:
+                self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                return copy.deepcopy(self.preloaded_data[idx])
+            except:
+                pass
+        
+
+        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+            annotations = json.load(json_file)
 
         mesh = trimesh.load(f'{self.data_root}/{file}')
 
@@ -268,10 +312,6 @@ class MechanicalAssembly(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-                annotations = json.load(json_file)
-
-
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
         o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
@@ -292,23 +332,26 @@ class MechanicalAssembly(Dataset):
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
         normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
+        # seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
+        
 
-        self.preloaded_data[idx] = {
+        self.preloaded_data[idx] = self.get_hole_centers({
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
             'normal': normals,
-            'instance': instance_labels,
+            # 'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            'seg_indices': seg_indices
-        } 
+            # 'seg_indices': seg_indices
+        })
+
+        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
         
-        return self.preloaded_data[idx]
+        return copy.deepcopy(self.preloaded_data[idx])
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
@@ -319,7 +362,13 @@ class MechanicalAssembly(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+
+        if self.augment_holes:
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+
         data_dict = self.transform(data_dict)
+
         return data_dict
 
     def prepare_test_data(self, idx):

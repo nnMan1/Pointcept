@@ -102,6 +102,21 @@ class ToTensor(object):
 
 
 @TRANSFORMS.register_module()
+class PCAAlign(object):
+    def __call__(self, data_dict):
+        if "coord" in data_dict.keys():
+            coords = data_dict["coord"]
+            centroid = np.mean(coords, axis=0)
+            coords_centered = coords - centroid
+            cov_matrix = np.cov(coords_centered, rowvar=False)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+            sorted_indices = np.argsort(eigenvalues)[::-1]
+            eigenvectors = eigenvectors[:, sorted_indices]
+            aligned_coords = np.dot(coords_centered, eigenvectors)
+            data_dict["coord"] = aligned_coords
+        return data_dict
+
+@TRANSFORMS.register_module()
 class Add(object):
     def __init__(self, keys_dict=None):
         if keys_dict is None:
