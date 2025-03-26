@@ -173,7 +173,8 @@ class MechanicalAssembly(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
-        classes = []
+        classes = [],
+        augment_holes=False
     ):
         super(MechanicalAssembly, self).__init__()
         self.data_root = data_root
@@ -211,6 +212,7 @@ class MechanicalAssembly(Dataset):
         
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
+        self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
 
@@ -349,13 +351,15 @@ class MechanicalAssembly(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-        data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+
+        if self.augment_holes:
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
 
         data_dict = self.transform(data_dict)
 
