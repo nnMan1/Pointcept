@@ -240,6 +240,7 @@ class SpUNetBase(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, input_dict):
+
         grid_coord = input_dict["grid_coord"]
         feat = input_dict["feat"]
         offset = input_dict["offset"]

@@ -1,15 +1,16 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 30  # bs: total bs in all gpus
-num_worker = 30
+batch_size = 8  # bs: total bs in all gpus
+num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = True
 evaluate = True
-# resume=True
+resume=True
 # weight='backbones/sstnet_pretrain.pth'
-# weight='exp/fuselage_instance/insseg-spunet-v1m1-0-spformer-res-base/model/model_last.pth'
+# weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_best.pth'
+weight='exp/fuselage_instance/semseg-spunet-v1m1-0-grouping/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -39,10 +40,10 @@ model = dict(
         type="SpUNet-v1m1",
         in_channels=6,
         num_classes=0,
-        channels=(32, 64, 128, 128, 96, 256),
+        channels=(32, 64, 128, 128, 96, 96),
         layers=(2, 3, 4, 2, 2, 2),
     ),
-    final_in_channels = 256,
+    final_in_channels = 96,
     num_classes=6,
     criteria=[
         dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
@@ -91,26 +92,16 @@ data = dict(
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
-            dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
-            dict(type="ChromaticTranslation", p=0.95, ratio=0.1),
-            dict(type="ChromaticJitter", p=0.95, std=0.05),
-            # dict(type="HueSaturationTranslation", hue_max=0.2, saturation_max=0.2),
-            # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=1.5,
+                grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
-            dict(type="SphereCrop", sample_rate=0.8, mode="random"),
-            dict(type="NormalizeColor"),
-            dict(
-                type="InstanceParser",
-                segment_ignore_index=segment_ignore_index,
-                instance_ignore_index=-1,
-            ),
+            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="CenterShift", apply_z=False),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -119,8 +110,6 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "instance_centroid",
-                    "bbox",
                     "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
@@ -145,20 +134,13 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=1.5,
+                grid_size=0.3,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
-            dict(type="NormalizeColor"),
-            dict(
-                type="InstanceParser",
-                segment_ignore_index=segment_ignore_index,
-                instance_ignore_index=-1,
-            ),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -167,11 +149,6 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "origin_coord",
-                    "origin_segment",
-                    "origin_instance",
-                    "instance_centroid",
-                    "bbox",
                     "seg_indices"
                 ),
                 feat_keys=("coord", "normal"),
@@ -184,15 +161,11 @@ data = dict(
     test=dict(),  # currently not available
 )
 
-# hooks = [
-#     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
-#     # dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
-#     dict(type="IterationTimer", warmup_iter=2),
-#     dict(type="InformationWriter"),
-#     dict(
-#         type="InsSegEvaluator",
-#         segment_ignore_index=segment_ignore_index,
-#         instance_ignore_index=-1,
-#     ),
-#     dict(type="CheckpointSaver", save_freq=None),
-# ]
+hooks = [
+    dict(type="CheckpointLoader", keywords="backbone.conv_input.0.weight", replacement="module.dummy"),
+    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="InformationWriter"),
+    dict(type="SemSegEvaluator"),
+    dict(type="CheckpointSaver", save_freq=None),
+    dict(type="PreciseEvaluator", test_last=False),
+]

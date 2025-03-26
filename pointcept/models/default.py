@@ -70,9 +70,15 @@ class GroupingSegmentor(nn.Module):
         super().__init__()
         self.backbone = build_model(backbone)
         self.criteria = build_criteria(criteria)
-        self.final = nn.Linear(final_in_channels, num_classes)
+        self.final = nn.Sequential(
+            nn.BatchNorm1d(final_in_channels),
+            nn.Linear(final_in_channels, final_in_channels),
+            nn.ReLU(),
+            nn.BatchNorm1d(final_in_channels),
+            nn.Linear(final_in_channels, num_classes),
+        )
 
-        self.superpoint_pooling = SuperpointPooling()
+        self.superpoint_pooling = SuperpointPooling(torch_scatter.scatter_max)
         self.superpoint_unpooling = SuperpointUnpooling()
 
     def forward(self, input_dict):
@@ -97,7 +103,10 @@ class GroupingSegmentor(nn.Module):
             return dict(loss=input_dict['loss'])
         else:
             input_dict['seg_logits'] = seg_logits_gr
-            input_dict = self.superpoint_unpooling(input_dict, ['segment', 'seg_logits'])
+            if 'segment' in input_dict.keys():
+                input_dict = self.superpoint_unpooling(input_dict, ['segment', 'seg_logits'])
+            else:
+                input_dict = self.superpoint_unpooling(input_dict, ['seg_logits'])
 
         return input_dict
 
