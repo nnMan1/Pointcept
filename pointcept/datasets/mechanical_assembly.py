@@ -25,7 +25,7 @@ class HoleAugmentor:
     def __init__(self, class_mapping):
         self.class_to_id = class_mapping
 
-    def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label):
+    def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label, assign_ins_label):
         ret = {}
 
         points = data_dict['coord']
@@ -56,6 +56,7 @@ class HoleAugmentor:
             ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
 
         ret['segment'] = np.ones(k, np.int32) * assign_sem_label
+        ret['instance'] = np.ones(k, np.int32) * assign_ins_label
         # ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
 
         return ret
@@ -117,9 +118,9 @@ class HoleAugmentor:
 
         remove_ids = np.where(clusters == cluster_id)
         center = points[ids[remove_ids]].mean(axis=0)
-        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.1
+        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.3
 
-        hole_diam_radius = max(rivet_diam + 2, 7)
+        hole_diam_radius = max(rivet_diam + 3, 7)
 
         dists =  np.linalg.norm(points - center, axis=-1)
         ids_interesting = np.where(dists < hole_diam_radius)
@@ -133,15 +134,18 @@ class HoleAugmentor:
 
         # ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.9, 1) * ids_remove.sum())
 
-        interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id))
-
-        labels[np.where(dists < rivet_diam)] = hole_id
-
-        data_dict['segment'] = labels
+        interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id, 0))
 
         for key, val in data_dict.items():
             if isinstance(val, np.ndarray) and len(val) == len(points):
                 data_dict[key][ids_remove] = interpolated[key]
+
+        mask = np.where(dists < hole_diam_radius)
+        labels[mask] = hole_id
+        data_dict['instance'][mask] = data_dict['instance'].max() + 1
+
+        data_dict['segment'] = labels
+
 
         if len(interpolated['coord']) == 0:
             return data_dict
@@ -158,7 +162,6 @@ class HoleAugmentor:
             data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
 
         return data_dict
-
 
 @DATASETS.register_module("MechanicalAssembly")
 class MechanicalAssembly(Dataset):
@@ -215,6 +218,9 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
+        # for i in range(len(self.data_list)):
+        #     self.get_data(i)
+
 
     def prepare_clustering(self):
         for file in self.data_list:
@@ -250,6 +256,7 @@ class MechanicalAssembly(Dataset):
         labels = dbscan.labels_
 
         centroids = []
+        cls_instance = []
         for label in set(labels):
             if label == -1:
                 continue
@@ -258,15 +265,17 @@ class MechanicalAssembly(Dataset):
             print(cluster_points.shape)
             centroid = np.mean(cluster_points, axis=0)
             centroids.append(centroid)
+            cls_instance.append(data_dict['instance'][mask][labels == label][0])
 
-    
         centroids = np.array(centroids)
+        cls_instance = np.array(cls_instance)
         distances = np.linalg.norm(centroids.T[:, None] - all_points[None, :].T, axis=0)
         close_points_mask = np.any(distances < 7, axis=1)
+        close_points__nb = np.argmin(distances, axis=1)
         data_dict['segment'][close_points_mask] = self.class_mapping['hole']
+        data_dict['instance'][close_points_mask] = cls_instance[close_points__nb[close_points_mask]]
         
         return data_dict
-
 
     def get_data_list(self):
         
@@ -290,6 +299,10 @@ class MechanicalAssembly(Dataset):
         dir = os.path.dirname(file)
 
         if self.preloaded_data[idx] != None:
+            return copy.deepcopy(self.preloaded_data[idx])
+
+        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
             return copy.deepcopy(self.preloaded_data[idx])
         
 
@@ -325,20 +338,21 @@ class MechanicalAssembly(Dataset):
         # seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
-
-
+        
 
         self.preloaded_data[idx] = self.get_hole_centers({
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
             'normal': normals,
-            # 'instance': instance_labels,
+            'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
             # 'seg_indices': seg_indices
         })
+
+        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
         
         return copy.deepcopy(self.preloaded_data[idx])
 
@@ -350,13 +364,9 @@ class MechanicalAssembly(Dataset):
 
     def prepare_train_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)
+        data_dict = self.get_data(idx)    
 
         if self.augment_holes:
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
