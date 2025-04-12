@@ -24,6 +24,7 @@ from .abc_dataset import ABCDataset
 from .cetim import Cetim
 from .fuselage import Fuselage
 from .mechanical_assembly_synth import MechanicalAssemblySynth
+from .mcb_dataset import MCBDataset 
 
 # dataloader
 from .dataloader import MultiDatasetDataloader
