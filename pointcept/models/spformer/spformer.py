@@ -21,7 +21,7 @@ class Encoder(nn.Module):
         self.out_channels = out_channels
 
         # self.backbone = build_model(backbone) 
-        self.backbone = SSTNetBackbone(**backbone)
+        self.backbone = SpUNet(**backbone)
 
 
     def forward(self, data):
