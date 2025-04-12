@@ -4,10 +4,11 @@ from .utils import *
 
 class SuperpointPooling(nn.Module):
 
-    def __init__(self, pool_function = torch_scatter.scatter_mean):
+    def __init__(self, pool_function = torch_scatter.scatter_mean, instance_ignor_index=-1):
         super().__init__()
 
         self.pool_function = pool_function
+        self.instance_ignor_index = instance_ignor_index
 
     def __prepare_seg_indices(self, seg_indices, offset):
 
@@ -57,8 +58,13 @@ class SuperpointPooling(nn.Module):
 
          bs = 0
          for be in data['offset']:
-            _, new_instance_indices = torch.unique(data['instance'][bs:be], return_inverse=True)
-            data['instance'][bs:be] = new_instance_indices
+            instances = data['instance'][bs:be]
+            non_ignore_mask = instances != self.instance_ignor_index
+            if non_ignore_mask.sum() == 0:
+                continue
+
+            _, new_instance_indices = torch.unique(instances[non_ignore_mask], return_inverse=True)
+            data['instance'][bs:be][non_ignore_mask] = new_instance_indices
             bs = be
 
          for key in keys:
@@ -316,20 +322,20 @@ class CrossAttentionLayer(nn.Module):
                 query,
                 key,
                 value,
-                attn_mask=None,
-                memory_key_padding_mask=None,
-                pos=None,
-                query_pos=None,
+                attn_mask=attn_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                pos=pos,
+                query_pos=query_pos,
             )
         
         return self.forward_post(
                 query,
                 key,
                 value,
-                attn_mask=None,
-                memory_key_padding_mask=None,
-                pos=None,
-                query_pos=None,
+                attn_mask=attn_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                pos=pos,
+                query_pos=query_pos,
             )
 
 class FFNLayer(nn.Module):

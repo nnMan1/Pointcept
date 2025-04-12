@@ -4,6 +4,7 @@ _base_ = ["../_base_/default_runtime.py"]
 batch_size = 4 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
+find_unused_parameters=True
 empty_cache = False
 enable_amp = False
 evaluate = True
