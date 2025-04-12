@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 32 # bs: total bs in all gpus
-num_worker = 32
+batch_size = 8 # bs: total bs in all gpus
+num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -10,47 +10,93 @@ evaluate = True
 resume=True
 weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base-dense2/model/model_last.pth'
 
-class_names = [
-    "assembly",
-]
-num_classes = 1
+num_classes = 3
+fts_sizes = 128
+dim_feedforward=1024
 segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
     type="Mask-3D",
-    backbone=dict(
-        type="MinkUNet34C",
-        in_channels = 3,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
+    num_query = 100,
+    encoder=dict(
+        backbone=dict(
+            type="MinkUNet34C",
+            in_channels = 3,
+            out_channels = 128,
+            out_fpn=True
+        ),
+        backbone_out_channels=128,
+        out_channels=128,
+     ),
+     decoder=dict(
+        in_channels=128,
+        hlevels=6,
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=1
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
+        ],
     ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
-        normalize=True,
-    ),
-    mask_module_config=dict(
-        num_classes=1, 
-        return_attn_masks=True, 
-        use_seg_masks=False
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128,
-    instance_ignore_index=-1
+    instance_ignore_index=-1,
 )
 
+
 # scheduler settings
-epoch = 600
+epoch = 100
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
@@ -62,7 +108,17 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "ABCDataset"
+dataset_type = "MechanicalAssemblySynth"
+data_root = "data/ABCDataset"
+
+classes=dict({
+            'other': 1,
+            'nut': 1,
+            'screw': 2
+        })
+
+class_names = ["other", "nut", "screw"]
+
 
 data = dict(
     num_classes=num_classes,
@@ -71,6 +127,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         split="train",
+        data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -119,9 +176,11 @@ data = dict(
             ),
         ],
         test_mode=False,
+        classes=classes,
     ),
     val=dict(
         type=dataset_type,
+        data_root=data_root,
         split="val",
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -170,6 +229,7 @@ data = dict(
             ),
         ],
         test_mode=False,
+        classes=classes
     ),
     test=dict(),  # currently not available
 )

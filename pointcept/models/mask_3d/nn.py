@@ -177,71 +177,79 @@ class CrossAttentionLayer(nn.Module):
 
     def forward_post(
         self,
-        tgt,
-        memory,
-        memory_mask=None,
+        query,
+        key,
+        value,
+        attn_mask=None,
         memory_key_padding_mask=None,
         pos=None,
         query_pos=None,
     ):
-        tgt2 = self.multihead_attn(
-            query=self.with_pos_embed(tgt, query_pos),
-            key=self.with_pos_embed(memory, pos),
-            value=memory,
-            attn_mask=memory_mask,
+        query_ = self.multihead_attn(
+            query=self.with_pos_embed(query, query_pos),
+            key=self.with_pos_embed(key, pos),
+            value=value,
+            attn_mask=attn_mask,
             key_padding_mask=memory_key_padding_mask,
         )[0]
-        tgt_ = tgt + self.dropout(tgt2)
-        tgt_ = self.norm(tgt_)
 
-        if torch.isnan(tgt_).sum() > 0:
-            pass
-
-        return tgt_
+        query_ = query + self.dropout(query_)
+        query_ = self.norm(query_)
+        return query_
 
     def forward_pre(
         self,
-        tgt,
-        memory,
-        memory_mask=None,
+        query,
+        key,
+        value,
+        attn_mask=None,
         memory_key_padding_mask=None,
         pos=None,
         query_pos=None,
     ):
-        tgt2 = self.norm(tgt)
+        query = self.norm(query)
 
-        tgt2 = self.multihead_attn(
-            query=self.with_pos_embed(tgt2, query_pos),
-            key=self.with_pos_embed(memory, pos),
-            value=memory,
-            attn_mask=memory_mask,
+        query_ = self.multihead_attn(
+            query=self.with_pos_embed(query, query_pos),
+            key=self.with_pos_embed(key, pos),
+            value=value,
+            attn_mask=attn_mask,
             key_padding_mask=memory_key_padding_mask,
         )[0]
-        tgt = tgt + self.dropout(tgt2)
+        query = query + self.dropout(query_)
 
-        return tgt
+        return query
 
     def forward(
         self,
-        tgt,
-        memory,
-        memory_mask=None,
+        query,
+        key,
+        value,
+        attn_mask=None,
         memory_key_padding_mask=None,
         pos=None,
         query_pos=None,
     ):
         if self.normalize_before:
             return self.forward_pre(
-                tgt,
-                memory,
-                memory_mask,
-                memory_key_padding_mask,
-                pos,
-                query_pos,
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                pos=pos,
+                query_pos=query_pos,
             )
+        
         return self.forward_post(
-            tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos
-        )
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                pos=pos,
+                query_pos=query_pos,
+            )
 
 class FFNLayer(nn.Module):
     def __init__(

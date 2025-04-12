@@ -8,7 +8,7 @@ from torch.cuda.amp import autocast
 from torch.nn import functional as F
 
 from pointcept.models.builder import MODELS, build_model
-from .position_embedding import PositionEmbeddingCoordsSine
+from pointcept.positional_embeddings import PositionEmbeddingCoordsSine
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
@@ -121,7 +121,7 @@ class Mask3D(nn.Module):
         offset = data['offset']
         seed_ids = data['seed_ids']
         seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
-        group_segment = data['group_segment']
+        # group_segment = data['group_segment']
 
         bb = 0
         for be in offset:

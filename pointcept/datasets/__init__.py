@@ -23,6 +23,7 @@ from .mechanical_assembly import MechanicalAssembly
 from .abc_dataset import ABCDataset
 from .cetim import Cetim
 from .fuselage import Fuselage
+from .mechanical_assembly_synth import MechanicalAssemblySynth
 
 # dataloader
 from .dataloader import MultiDatasetDataloader

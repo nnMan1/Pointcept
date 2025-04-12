@@ -27,44 +27,48 @@ class SuperpointPooling(nn.Module):
         return seg_indices, torch.tensor(offs)
 
     def forward(self, data, keys=['instance', 'segment', 'features']):
+         
+        data['offset_orig'] = data['offset']
 
-         if 'seg_indices' not in data.keys():
-               return data
+        if 'seg_indices' not in data.keys():
+            data['seg_indices'] = torch.arange(data['coord'].shape[0], device=data['coord'].device)
+        else:
+            data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
-         data['offset_orig'] = data['offset']
-         data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
-
-         label_keys = []
-         if 'instance' in keys:
+        label_keys = []
+        if 'instance' in keys:
             label_keys.append('instance')
             keys.remove('instance')
 
-         if 'segment' in keys:
+        if 'segment' in keys:
             label_keys.append('segment')
             keys.remove('segment')
 
-         
-         for key in label_keys:
+        
+        for key in label_keys:
             label = []
             for cls in data['seg_indices'].unique():
-               cluster_mask = data['seg_indices'] == cls
-          
-               unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
-               majority_label = unique_labels[torch.argmax(counts)]
-               label.append(majority_label)
+                cluster_mask = data['seg_indices'] == cls
+            
+                unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
+                majority_label = unique_labels[torch.argmax(counts)]
+                label.append(majority_label)
 
-            data[key] = torch.stack(label)
+        data[key] = torch.stack(label)
 
-         bs = 0
-         for be in data['offset']:
+        bs = 0
+        for be in data['offset']:
             _, new_instance_indices = torch.unique(data['instance'][bs:be], return_inverse=True)
             data['instance'][bs:be] = new_instance_indices
             bs = be
 
-         for key in keys:
-            data[key] = self.pool_function(data[key],  data['seg_indices'], dim=0)[0]
-        
-         return data
+        for key in keys:
+            data[key] = self.pool_function(data[key],  data['seg_indices'], dim=0)
+
+            if self.pool_function in [torch_scatter.scatter_max,  torch_scatter.scatter_min]:
+                data[key] = data[key][0]
+    
+        return data
 
 class SuperpointUnpooling(nn.Module):
 

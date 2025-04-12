@@ -119,6 +119,9 @@ class HoleAugmentor:
         remove_ids = np.where(clusters == cluster_id)
         center = points[ids[remove_ids]].mean(axis=0)
         rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.3
+        
+        if rivet_diam > 10:
+            return data_dict
 
         hole_diam_radius = max(rivet_diam + 3, 7)
 
@@ -152,14 +155,18 @@ class HoleAugmentor:
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
-        if np.random.uniform() < 0.7:
-            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
-
-
-        new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
-
-        if np.random.uniform() < 0.7:
-            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
+        if np.random.uniform() < 0.2:
+            r = np.random.uniform(1, 2)
+            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
+            new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
+            data_dict = self.remove_radius(data_dict, new_center, 0.9*r)
+        else:
+            if np.random.uniform() < 0.7:
+                data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
+            else:
+                if np.random.uniform() < 0.5:
+                    r = np.random.uniform(0, 0.5)
+                    data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
 
         return data_dict
 
@@ -213,14 +220,13 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        # self.prepare_clustering()
+        self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
-
 
     def prepare_clustering(self):
         for file in self.data_list:
@@ -335,12 +341,12 @@ class MechanicalAssembly(Dataset):
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
         normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        # seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
+        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
         segment_labels = classes[segment_labels]
         
 
-        self.preloaded_data[idx] = self.get_hole_centers({
+        self.preloaded_data[idx] = {
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
@@ -349,8 +355,8 @@ class MechanicalAssembly(Dataset):
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            # 'seg_indices': seg_indices
-        })
+            'seg_indices': seg_indices
+        }
 
         torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
         
@@ -367,6 +373,8 @@ class MechanicalAssembly(Dataset):
         data_dict = self.get_data(idx)    
 
         if self.augment_holes:
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
