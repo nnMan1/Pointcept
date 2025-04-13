@@ -4,12 +4,12 @@ _base_ = ["../_base_/default_runtime.py"]
 batch_size = 4 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
-find_unused_parameters=True
+find_unused_parameters=False
 empty_cache = False
 enable_amp = False
 evaluate = True
 resume=False
-weight='backbones/sstnet_pretrain.pth'
+weight='exp/scannet/insseg-spformer-v1m1-0-spunet-base-v1/model/model_last.pth'
 
 class_names = [
     # "wall",
@@ -121,11 +121,12 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 500
+epoch = 512
+eval_epoch = 32 
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
     type="PolyLR",
-    total_steps=1500*100,
+    total_steps=4800*32,
     power=0.9,
 )
 
@@ -152,7 +153,7 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [40, 160]]),
+            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [40/50, 160/50]]),
             # dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             # dict(type="ChromaticTranslation", p=0.95, ratio=0.1),\
             # dict(type="HueSaturationTranslation"),
@@ -184,7 +185,7 @@ data = dict(
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=("color", "coord"),
             ),
         ],
         test_mode=False,
@@ -233,7 +234,7 @@ data = dict(
                     "seg_indices",
                     "group_segment"
                 ),
-                feat_keys=("color", "normal"),
+                feat_keys=("color", "coord"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
@@ -243,7 +244,8 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
+    # dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
+    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     # dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(

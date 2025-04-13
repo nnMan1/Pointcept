@@ -120,7 +120,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 10
+epoch = 512
+eval_epoch = 32 
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
     type="PolyLR",
