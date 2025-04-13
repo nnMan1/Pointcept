@@ -232,19 +232,6 @@ class SPFormer(nn.Module):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
         self.decoder = Decoder(**decoder)
-        # self.decoder = QueryDecoder(**{
-        #     'num_layer': 6,
-        #     'num_query': 400,
-        #     'd_model': 256,
-        #     'nhead': 8,
-        #     'hidden_dim': 1024,
-        #     'dropout': 0.0,
-        #     'activation_fn': 'gelu',
-        #     'iter_pred': True,
-        #     'attn_mask': True,
-        #     'pe': False
-        # }, in_channel=32, num_class=18)
-
         self.matcher = HungarianMatcher(cost_class=.5,
                                         cost_dice=1,
                                         cost_mask=1,

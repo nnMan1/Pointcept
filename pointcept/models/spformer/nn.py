@@ -29,11 +29,13 @@ class SuperpointPooling(nn.Module):
 
     def forward(self, data, keys=['instance', 'segment', 'features']):
 
-         if 'seg_indices' not in data.keys():
-               return data
-
          data['offset_orig'] = data['offset']
-         data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
+
+         if 'seg_indices' not in data.keys():
+            data['seg_indices'] = torch.arange(data['coord'].shape[0], device=data['coord'].device)
+            return data
+         else:
+            data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
          label_keys = []
          if 'instance' in keys:

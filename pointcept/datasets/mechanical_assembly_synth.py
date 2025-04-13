@@ -34,7 +34,6 @@ class MechanicalAssemblySynth(Dataset):
         cache=False,
         loop=1,
         classes = [],
-        augment_holes=False
     ):
         super(MechanicalAssemblySynth, self).__init__()
         self.data_root = data_root
@@ -70,33 +69,6 @@ class MechanicalAssemblySynth(Dataset):
             )
         )
         
-        # self.prepare_clustering()
-        self.preloaded_data = [None for _ in self.data_list]
-        self.augment_holes = augment_holes
-
-        # for i in range(len(self.data_list)):
-        #     self.get_data(i)
-
-    # def prepare_clustering(self):
-    #     for file in self.data_list:
-    #         dir = os.path.dirname(file)
-
-    #         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-    #             annotations = json.load(json_file)
-
-    #         if 'seg_indices' in annotations.keys():
-    #             continue
-
-    #         mesh = trimesh.load(f'{self.data_root}/{file}')
-    #         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
-    #         faces = torch.from_numpy(mesh.faces.astype(np.int64))
-    #         ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-            
-    #         annotations['seg_indices'] = ind.tolist()
-
-    #         with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
-    #             json.dump(annotations, json_file)
-
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -120,16 +92,13 @@ class MechanicalAssemblySynth(Dataset):
         frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
 
-        if self.preloaded_data[idx] != None:
-            return copy.deepcopy(self.preloaded_data[idx])
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            try:
-                self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-                return copy.deepcopy(self.preloaded_data[idx])
-            except Exception as e:
-                print(f"Error loading {dir}: {e}")
-                os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
+        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+        #     try:
+        #         return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+        #     except Exception as e:
+        #         print(f"Error loading {dir}: {e}")
+        #         os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
         
         vertices = []
         semantic_id = []
@@ -158,29 +127,39 @@ class MechanicalAssemblySynth(Dataset):
 
         # Estimate normals for the point cloud
         mesh = trimesh.Trimesh(vertices=vertices, process=False)
-        normals = mesh.vertex_normals
+        normals = mesh.vertex_normals.copy()
         
 
         if len(mesh.vertices) < 2048:
             del mesh
             return self.get_data(idx + 1)
     
-        self.preloaded_data[idx] = {
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
+            vertices *= 2
+
+        keep_ids = np.arange(len(vertices))
+
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
+            vertices /= 2
+            keep_ids = keep_ids[::2]
+            vertices = vertices[::2]
+
+        data = {
             'coord': vertices,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
-            'normal': normals,
-            'instance': instance_id,
-            'segment': semantic_id,
+            'normal': normals[keep_ids],
+            'instance': instance_id[keep_ids],
+            'segment': semantic_id[keep_ids],
             'id': idx,
             'path': self.data_list[idx],
             # 'seg_indices': None,
             'frame_id': frame_id
         }
 
-        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
+        torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
-        return copy.deepcopy(self.preloaded_data[idx])
+        return data
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
@@ -191,14 +170,6 @@ class MechanicalAssemblySynth(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)    
-
-        if self.augment_holes:
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-
         data_dict = self.transform(data_dict)
 
         return data_dict
