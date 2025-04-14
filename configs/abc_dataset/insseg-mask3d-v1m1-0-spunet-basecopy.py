@@ -43,7 +43,8 @@ model = dict(
     num_decoders=1,
     dim_feedforward=1024,
     hidden_dim=128,
-    mask_dim=128
+    mask_dim=128,
+    instance_ignore_index=-1
 )
 
 # scheduler settings
@@ -58,8 +59,19 @@ scheduler = dict(
     final_div_factor=1000.0,
 )
 
+
 # dataset settings
-dataset_type = "ABCDataset"
+dataset_type = "MechanicalAssemblySynth"
+data_root = "data/abc_dataset"
+
+classes=dict({
+            'other': 0,
+            'nut': 1,
+            'screw': 2
+        })
+
+class_names = ["other", "nut", "screw"]
+
 
 data = dict(
     num_classes=num_classes,
@@ -68,6 +80,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         split="train",
+        data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -77,21 +90,21 @@ data = dict(
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
-            dict(type="NormalizeCoord"),
+            # dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
-            dict(type="RandomJitter", sigma=0.005, clip=0.02),
+            dict(type="RandomJitter", sigma=0.001, clip=0.02),
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.01,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "segment", "instance"),
             ),
-            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="SphereCrop", point_max=100000, mode="random"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
@@ -116,13 +129,15 @@ data = dict(
             ),
         ],
         test_mode=False,
+        classes=classes,
     ),
     val=dict(
         type=dataset_type,
+        data_root=data_root,
         split="val",
         transform=[
             dict(type="CenterShift", apply_z=True),
-            dict(type="NormalizeCoord"),
+            # dict(type="NormalizeCoord"),
             dict(
                 type="Copy",
                 keys_dict={
@@ -133,20 +148,20 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=0.01,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "segment", "instance"),
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
+            # dict(type="SphereCrop", point_max=200000, mode='center'),
             dict(type="CenterShift", apply_z=False),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
+            dict(type='FPSSeed', n_points = 150),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -160,23 +175,24 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "path"
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
         test_mode=False,
+        classes=classes
     ),
     test=dict(),  # currently not available
 )
+
 
 hooks = [
     dict(type="CheckpointLoader", keywords="module.", replacement="module."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(
-        type="MyInsSegEvaluator",
-    ),
+    dict(type="InsSegEvaluator",),
     dict(type="CheckpointSaver", save_freq=None),
 ]

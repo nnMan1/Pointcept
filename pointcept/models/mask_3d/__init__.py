@@ -1,1 +1,1 @@
-from .mask3dv3 import Mask3D
+from .mask3d import Mask3D

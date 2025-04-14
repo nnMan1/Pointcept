@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 2 # bs: total bs in all gpus
+batch_size = 1 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = True
@@ -32,6 +32,13 @@ model = dict(
         backbone_out_channels=32,
         out_channels=32,
      ),
+    #  positional_embedding=dict(
+    #     type='PositionEmbeddingCoordsSine',
+    #     pos_type="fourier",
+    #     d_pos=128,
+    #     gauss_scale=1,
+    #     normalize=True,
+    # ),
      decoder=dict(
         in_channels=32,
         hlevels=6,
