@@ -146,11 +146,9 @@ class SuperpointPooling(nn.Module):
          label_keys = []
          if 'instance' in keys:
             label_keys.append('instance')
-            keys.remove('instance')
 
          if 'segment' in keys:
             label_keys.append('segment')
-            keys.remove('segment')
 
          
          for key in label_keys:
@@ -176,7 +174,8 @@ class SuperpointPooling(nn.Module):
             bs = be
 
          for key in keys:
-            data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
+            if key not in label_keys:
+                data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
         
          return data
 

@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
-resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+# resume=True
+# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -34,39 +34,90 @@ class_names = [
 ]
 num_classes = 20
 segment_ignore_index = (-1, 0, 1)
+fts_sizes = 128
+dim_feedforward=1024
 
 # model settings
 model = dict(
     type="Mask-3D",
-    backbone=dict(
-        type="Res16UNet34C",
-        in_channels = 6,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
-    ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
+    encoder=dict(
+        backbone=dict(
+            type="Res16UNet34C",
+            in_channels = 6,
+            out_channels = 128,
+            out_fpn=True, #return intermidiate features
+        ),
+        out_channels=128,
+     ),
+     decoder=dict(
+        in_channels=128,
+        hlevels=5,
+        positional_embedding=dict(
+            type='PositionEmbeddingCoordsSine',
+            pos_type="fourier",
+            d_pos=128,
+            gauss_scale=1,
         normalize=True,
+        ),
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=3
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=200,
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=800,
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=3200,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=12800,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=51200,
+            ),
+        ],
     ),
-    mask_module_config=dict(
-        num_classes=num_classes, 
-        return_attn_masks=True, 
-        use_seg_masks=True
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128,
-    instance_ignore_index=-1
+    instance_ignore_index=-1,
 )
+
 
 # scheduler settings
 epoch = 600
@@ -140,7 +191,6 @@ data = dict(
                     "bbox",
                     "seed_ids",
                     "seg_indices",
-                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
             ),
@@ -194,7 +244,6 @@ data = dict(
                     "bbox",
                     "seed_ids",
                     "seg_indices",
-                    "group_segment"
                 ),
                 feat_keys=("color", "normal"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

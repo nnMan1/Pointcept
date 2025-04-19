@@ -7,10 +7,10 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume=True
-weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base-dense2/model/model_last.pth'
+resume=False
+# weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
-num_classes = 3
+num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
@@ -18,36 +18,51 @@ segment_ignore_index = (-1, )
 # model settings
 model = dict(
     type="Mask-3D",
-    num_query = 100,
     encoder=dict(
         backbone=dict(
-            type="MinkUNet34C",
+            type="Res16UNet34C",
             in_channels = 3,
             out_channels = 128,
-            out_fpn=True
+            out_fpn=True, #return intermidiate features
         ),
-        backbone_out_channels=128,
         out_channels=128,
      ),
      decoder=dict(
         in_channels=128,
-        hlevels=6,
+        hlevels=5,
+        positional_embedding=dict(
+            type='PositionEmbeddingCoordsSine',
+            pos_type="fourier",
+            d_pos=128,
+            gauss_scale=1,
+        normalize=True,
+        ),
         mask_modules=[
             dict(
                 num_classes=num_classes, 
                 return_attn_masks=True, 
                 hidden_dim=fts_sizes,
-                reuse=1
+                reuse=3
             )
         ],
         query_refinement_modules=[
             dict(
-                in_channels=128,
+                in_channels=256,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0
+                dropout=0,
+                sample_size=200,
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=800,
             ),
             dict(
                 in_channels=128,
@@ -55,40 +70,27 @@ model = dict(
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0
+                dropout=0,
+                sample_size=3200,
             ),
             dict(
-                in_channels=128,
+                in_channels=96,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0
+                dropout=0,
+                sample_size=12800,
             ),
             dict(
-                in_channels=128,
+                in_channels=96,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0
+                dropout=0,
+                sample_size=51200,
             ),
-            dict(
-                in_channels=128,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=128,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            )
         ],
     ),
     instance_ignore_index=-1,
@@ -96,7 +98,7 @@ model = dict(
 
 
 # scheduler settings
-epoch = 100
+epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
@@ -109,12 +111,12 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/ABCDataset"
+data_root = "data/abc_dataset"
 
 classes=dict({
-            'other': 1,
-            'nut': 1,
-            'screw': 2
+            'other': 0,
+            'nut': 0,
+            'screw': 0
         })
 
 class_names = ["other", "nut", "screw"]
