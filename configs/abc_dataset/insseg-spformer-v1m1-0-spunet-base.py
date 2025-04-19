@@ -1,16 +1,18 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 1 # bs: total bs in all gpus
-num_worker = 8
+batch_size = 4 # bs: total bs in all gpus
+num_worker = 30
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
+find_unused_parameters = True
 resume=False
 weight='backbones/sstnet_pretrain.pth'
 
-num_classes = 3
+
+num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
@@ -21,16 +23,14 @@ model = dict(
     num_query = 100,
     encoder=dict(
         backbone=dict(
-            input_channel=3,
-            blocks=3,
-            block_reps=2,
-            media=32,
-            normalize_before=True,
-            return_blocks=True,
-            pool='mean'
+            type="SpUNet-v1m1",
+            in_channels=3,
+            num_classes=0,
+            channels=(32, 64, 128, 128, 96, 96),
+            layers=(2, 3, 4, 2, 2, 2),
         ),
-        backbone_out_channels=32,
-        out_channels=32,
+        backbone_out_channels=96,
+        out_channels=96,
      ),
     #  positional_embedding=dict(
     #     type='PositionEmbeddingCoordsSine',
@@ -40,7 +40,7 @@ model = dict(
     #     normalize=True,
     # ),
      decoder=dict(
-        in_channels=32,
+        in_channels=96,
         hlevels=6,
         mask_modules=[
             dict(
@@ -106,7 +106,7 @@ model = dict(
 
 
 # scheduler settings
-epoch = 100
+epoch = 500
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
@@ -118,7 +118,7 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "MechanicalAssemblySynth"
+dataset_type = "ABCDataset"
 data_root = "data/abc_dataset"
 
 classes=dict({
@@ -127,7 +127,7 @@ classes=dict({
             'screw': 2
         })
 
-class_names = ["other", "nut", "screw"]
+class_names = ["assembly"]
 
 
 data = dict(
@@ -147,7 +147,7 @@ data = dict(
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
-            # dict(type="NormalizeCoord"),
+            dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
@@ -155,19 +155,19 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "segment", "instance"),
             ),
-            dict(type="SphereCrop", point_max=100000, mode="random"),
+            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
+            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -186,15 +186,13 @@ data = dict(
             ),
         ],
         test_mode=False,
-        classes=classes,
     ),
     val=dict(
         type=dataset_type,
-        data_root=data_root,
         split="val",
+        data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            # dict(type="NormalizeCoord"),
             dict(
                 type="Copy",
                 keys_dict={
@@ -203,22 +201,23 @@ data = dict(
                     "instance": "origin_instance",
                 },
             ),
+            dict(type="NormalizeCoord"),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "segment", "instance"),
             ),
-            # dict(type="SphereCrop", point_max=200000, mode='center'),
+            # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 150),
+            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -232,21 +231,19 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids",
-                    "path"
+                    "seed_ids"
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
         test_mode=False,
-        classes=classes
     ),
     test=dict(),  # currently not available
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords=["module.", "encoder.backbone.input_conv.0"], replacement=["module.encoder.backbone.", "dummy"]),
+    dict(type="CheckpointLoader", keywords="module.", replacement="module.encoder.backbone."),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",),

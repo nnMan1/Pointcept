@@ -140,7 +140,7 @@ class MaskModule(nn.Module):
                 attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
                 bs = be
 
-            return_dict['attn_mask'] = torch.cat(attn_masks)
+            return_dict['attn_mask'] = torch.cat(attn_masks).detach()
 
         return return_dict
 
