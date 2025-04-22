@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
+batch_size = 16 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
@@ -167,7 +167,7 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", sample_rate=1, point_max=250000, mode="random"),
+            dict(type="SphereCrop", point_max=250000, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
