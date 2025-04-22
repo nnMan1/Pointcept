@@ -115,6 +115,8 @@ def pad_data(data, offset, size = None, rand_idx = None, mask_idx = None):
 def select_masks(out, superpoints):
         pred_labels = out['output_class'][0]
         pred_masks = out['output_mask'].T
+        mask_pred_sigmoid = pred_masks.sigmoid()
+
 
         num_class = pred_labels.shape[1] - 1
         num_query = pred_labels.shape[0]
@@ -122,15 +124,20 @@ def select_masks(out, superpoints):
         n_point_thr = 100
         
         scores = F.softmax(pred_labels, dim=-1)[:, :-1]
-        scores *=  ((pred_masks * (pred_masks>0.5)).sum(1) / ((pred_masks>0.5).sum(1) + 1e-15))[:, None]
         labels = torch.arange(num_class, device=scores.device).unsqueeze(0).repeat(num_query, 1).flatten(0, 1)
-        scores, topk_idx = scores.flatten(0, 1).topk(100, sorted=False)
+        scores, topk_idx = scores.flatten(0, 1).topk(150, sorted=False)
 
         labels = labels[topk_idx]
 
         topk_idx = torch.div(topk_idx, num_class, rounding_mode='floor')
         mask_pred = pred_masks
         mask_pred = mask_pred[topk_idx]
+        mask_pred_sigmoid = mask_pred.sigmoid()
+        # mask_pred before sigmoid()
+        mask_pred = (mask_pred > 0).float()  # [n_p, M]
+        mask_scores = (mask_pred_sigmoid * mask_pred).sum(1) / (mask_pred.sum(1) + 1e-6)
+        scores = scores * mask_scores
+        # get mask
         mask_pred = mask_pred[:, superpoints].int()
 
         # score_thr

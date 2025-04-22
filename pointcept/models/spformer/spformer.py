@@ -279,6 +279,9 @@ class SPFormer(nn.Module):
                  'mask_dice': [],
                  'matched_iou': [],
                  'score_loss': []}
+            
+            if len(matched_outputs) == 0:
+                pass
 
             for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
