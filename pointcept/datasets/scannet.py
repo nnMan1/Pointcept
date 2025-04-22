@@ -90,10 +90,10 @@ class ScanNetDataset(Dataset):
                 data_list += glob.glob(os.path.join(self.data_root, split, "*.pth"))
         else:
             raise NotImplementedError
-        
-        # if self.split == 'train':
-        #     data_list = data_list[:5]
-        
+
+        if self.split == 'train':
+            return data_list
+            
         return data_list
 
     def get_data(self, idx):

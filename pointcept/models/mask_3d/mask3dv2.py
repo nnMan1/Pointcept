@@ -360,9 +360,6 @@ class Mask3D(nn.Module):
         for p in pred:
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
 
-            if len(matched_outputs) == 0:
-                pass
-
             for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
                 axiliary_losses['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
@@ -391,17 +388,15 @@ class Mask3D(nn.Module):
     def forward(self, data):
         data.update(self.encoder(data))
 
-        import open3d as o3d
-        import numpy as np
-
         data = self.superpoint_pooling(data)
         queries = self.query_pooling(data)
 
         pred = self.decoder(data, queries)  
-         
+
         return_dict = self.__compute_loss(pred, data)
         
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
+            data = self.superpoint_unpooling(data)
 
         return return_dict

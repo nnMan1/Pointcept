@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 5  # bs: total bs in all gpus
+batch_size = 4  # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = True
 evaluate = True
-# resume=True
-# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+resume=True
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 class_names = [
     "wall",
@@ -32,8 +32,8 @@ class_names = [
     "bathtub",
     "otherfurniture",
 ]
-num_classes = 20
-segment_ignore_index = (-1, 0, 1)
+num_classes = 18
+segment_ignore_index = (-1, )
 fts_sizes = 128
 dim_feedforward=1024
 
@@ -118,7 +118,6 @@ model = dict(
     instance_ignore_index=-1,
 )
 
-
 # scheduler settings
 epoch = 600
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.00)
@@ -171,7 +170,7 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="SphereCrop", point_max=250000, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
