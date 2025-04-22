@@ -220,7 +220,7 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        self.prepare_clustering()
+        # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
@@ -231,12 +231,13 @@ class MechanicalAssembly(Dataset):
     def prepare_clustering(self):
         for file in self.data_list:
             dir = os.path.dirname(file)
+            print(os.path.join(self.data_root, dir, 'annotations.json'))
 
             with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
                 annotations = json.load(json_file)
 
-            # if 'seg_indices' in annotations.keys():
-            #     continue
+            if 'seg_indices' in annotations.keys():
+                continue
 
             mesh = trimesh.load(f'{self.data_root}/{file}')
             vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
@@ -320,7 +321,7 @@ class MechanicalAssembly(Dataset):
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
         o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
 
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
