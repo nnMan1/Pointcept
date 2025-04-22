@@ -235,8 +235,8 @@ class MechanicalAssembly(Dataset):
             with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
                 annotations = json.load(json_file)
 
-            if 'seg_indices' in annotations.keys():
-                continue
+            # if 'seg_indices' in annotations.keys():
+            #     continue
 
             mesh = trimesh.load(f'{self.data_root}/{file}')
             vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
@@ -304,13 +304,9 @@ class MechanicalAssembly(Dataset):
         file = self.data_list[idx]
         dir = os.path.dirname(file)
 
-        if self.preloaded_data[idx] != None:
-            return copy.deepcopy(self.preloaded_data[idx])
-
         if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-            return copy.deepcopy(self.preloaded_data[idx])
-        
+            return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                
 
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
@@ -331,8 +327,11 @@ class MechanicalAssembly(Dataset):
         mask = segment_labels != -1
 
         # Fit KNN on mesh vertices
-        knn = NearestNeighbors(n_neighbors=1)
-        knn.fit(mesh.vertices[segment_labels != -1])
+        try:
+            knn = NearestNeighbors(n_neighbors=1)
+            knn.fit(mesh.vertices[segment_labels != -1])
+        except Exception as e:
+            print(e)
 
         # # Find nearest neighbors for the sampled points
         distances, indices = knn.kneighbors(point_cloud)
@@ -346,7 +345,19 @@ class MechanicalAssembly(Dataset):
         segment_labels = classes[segment_labels]
         
 
-        self.preloaded_data[idx] = {
+        # Identify outlier points using DBSCAN
+        dbscan = DBSCAN(eps=10, min_samples=5)
+        dbscan.fit(point_cloud)
+        outlier_mask = dbscan.labels_ == -1
+
+        # Remove outlier points
+        point_cloud = point_cloud[~outlier_mask]
+        normals = normals[~outlier_mask]
+        instance_labels = instance_labels[~outlier_mask]
+        segment_labels = segment_labels[~outlier_mask]
+        seg_indices = seg_indices[~outlier_mask]
+
+        data = {
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
@@ -358,9 +369,9 @@ class MechanicalAssembly(Dataset):
             'seg_indices': seg_indices
         }
 
-        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
+        torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
-        return copy.deepcopy(self.preloaded_data[idx])
+        return data
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
