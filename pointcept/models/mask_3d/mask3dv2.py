@@ -21,7 +21,7 @@ class Encoder(nn.Module):
         self.backbone = build_model(backbone) 
 
         self.mask_features_head = nn.Linear(
-            in_features=self.backbone.PLANES[7],
+            in_features=self.backbone.out_channels,
             out_features=self.out_channels,
             bias=True
         )
@@ -38,7 +38,7 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, in_channels, positional_embedding, mask_modules, query_refinement_modules, hlevels):
+    def __init__(self, in_channels, positional_embedding, mask_modules, query_refinement_modules, hlevels, pooling):
 
         super().__init__()
         
@@ -58,6 +58,7 @@ class Decoder(nn.Module):
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
 
         self.query_refinement = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
+        self.pooling = pooling
 
     def __get_pos_encs(self, coords):
 
@@ -141,7 +142,7 @@ class Decoder(nn.Module):
                     if seg_indices is not None:
                         output_mask = output_mask[seg_indices] # create per point attention mask
 
-                    attention_mask = (torch_scatter.scatter_mean(output_mask, data['aux'][level]['original_ids'], dim=0).sigmoid() < 0.5).bool().detach()
+                    attention_mask = (self.pooling(output_mask, self.hlevels-level-1).sigmoid() < 0.5).bool().detach()
                     pos_embedding = point_embedding[level]
 
                     query_features = self.query_refinement[level](
@@ -318,6 +319,7 @@ class Mask3D(nn.Module):
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
+        decoder['pooling'] = self.encoder.backbone.pool
         self.decoder = Decoder(**decoder)
         self.matcher = HungarianMatcher(cost_class=2,
                                         cost_dice=2,
@@ -333,6 +335,7 @@ class Mask3D(nn.Module):
         self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+
         
     def query_pooling(self, data):
 

@@ -7,8 +7,8 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume=False
-# weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+# resume=True
+weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 num_classes = 1
 fts_sizes = 128
@@ -22,7 +22,7 @@ model = dict(
         backbone=dict(
             type="Res16UNet34C",
             in_channels = 3,
-            out_channels = 128,
+            out_channels = 96,
             out_fpn=True, #return intermidiate features
         ),
         out_channels=128,
@@ -110,17 +110,9 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "MechanicalAssemblySynth"
-data_root = "data/abc_dataset"
-
-classes=dict({
-            'other': 0,
-            'nut': 0,
-            'screw': 0
-        })
-
-class_names = ["other", "nut", "screw"]
-
+dataset_type = "ABCDataset"
+data_root = "data/abc_dataset/old"
+class_names = ['other']
 
 data = dict(
     num_classes=num_classes,
@@ -137,8 +129,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
             dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
@@ -178,7 +170,6 @@ data = dict(
             ),
         ],
         test_mode=False,
-        classes=classes,
     ),
     val=dict(
         type=dataset_type,
@@ -230,14 +221,14 @@ data = dict(
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
-        test_mode=False,
-        classes=classes
+        test_mode=False
     ),
     test=dict(),  # currently not available
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    # dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
+    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.conv0p1s1", "encoder.backbone.final", "decoder.mask_modules.0.class_embed_head", "semantic_ce_loss.weight"], replacement=["module.", "dummy", "dummy", "dummy", "dummy"]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",),
