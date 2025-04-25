@@ -220,7 +220,7 @@ class MechanicalAssembly(Dataset):
             )
         )
         
-        self.prepare_clustering()
+        # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
@@ -231,6 +231,7 @@ class MechanicalAssembly(Dataset):
     def prepare_clustering(self):
         for file in self.data_list:
             dir = os.path.dirname(file)
+            print(os.path.join(self.data_root, dir, 'annotations.json'))
 
             with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
                 annotations = json.load(json_file)
@@ -304,13 +305,9 @@ class MechanicalAssembly(Dataset):
         file = self.data_list[idx]
         dir = os.path.dirname(file)
 
-        if self.preloaded_data[idx] != None:
-            return copy.deepcopy(self.preloaded_data[idx])
-
         if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-            return copy.deepcopy(self.preloaded_data[idx])
-        
+            return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                
 
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
@@ -324,15 +321,18 @@ class MechanicalAssembly(Dataset):
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
         o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
 
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
         mask = segment_labels != -1
 
         # Fit KNN on mesh vertices
-        knn = NearestNeighbors(n_neighbors=1)
-        knn.fit(mesh.vertices[segment_labels != -1])
+        try:
+            knn = NearestNeighbors(n_neighbors=1)
+            knn.fit(mesh.vertices[segment_labels != -1])
+        except Exception as e:
+            print(e)
 
         # # Find nearest neighbors for the sampled points
         distances, indices = knn.kneighbors(point_cloud)
@@ -346,7 +346,19 @@ class MechanicalAssembly(Dataset):
         segment_labels = classes[segment_labels]
         
 
-        self.preloaded_data[idx] = {
+        # Identify outlier points using DBSCAN
+        dbscan = DBSCAN(eps=10, min_samples=5)
+        dbscan.fit(point_cloud)
+        outlier_mask = dbscan.labels_ == -1
+
+        # Remove outlier points
+        point_cloud = point_cloud[~outlier_mask]
+        normals = normals[~outlier_mask]
+        instance_labels = instance_labels[~outlier_mask]
+        segment_labels = segment_labels[~outlier_mask]
+        seg_indices = seg_indices[~outlier_mask]
+
+        data = {
             'coord': point_cloud,
             # 'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
@@ -358,9 +370,9 @@ class MechanicalAssembly(Dataset):
             'seg_indices': seg_indices
         }
 
-        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
+        torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
-        return copy.deepcopy(self.preloaded_data[idx])
+        return data
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
