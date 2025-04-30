@@ -7,8 +7,9 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-# resume=True
-weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+resume=True
+# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+weight = 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 num_classes = 1
 fts_sizes = 128
@@ -227,8 +228,8 @@ data = dict(
 )
 
 hooks = [
-    # dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
-    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.conv0p1s1", "encoder.backbone.final", "decoder.mask_modules.0.class_embed_head", "semantic_ce_loss.weight"], replacement=["module.", "dummy", "dummy", "dummy", "dummy"]),
+    dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
+    # dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.conv0p1s1", "encoder.backbone.final", "decoder.mask_modules.0.class_embed_head", "semantic_ce_loss.weight"], replacement=["module.", "dummy", "dummy", "dummy", "dummy"]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",),

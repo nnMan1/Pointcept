@@ -4,6 +4,10 @@ ARG CUDNN_VERSION=8
 
 FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
 
+ARG TORCH_VERSION
+ARG CUDA_VERSION
+ARG CUDNN_VERSION
+
 # Fix nvidia-key error issue (NO_PUBKEY A4B469963BF863CC)
 RUN rm /etc/apt/sources.list.d/*.list
 
@@ -22,44 +26,40 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 	&& export DEBIAN_FRONTEND=dialog
 
 # Install Pointcept environment
-RUN conda install h5py pyyaml -c anaconda -y
-RUN conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
-RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y 
-RUN conda install libffi==3.3 -y
+# RUN conda install h5py pyyaml -c anaconda -y
+# RUN conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
+# RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y 
+# RUN conda install libffi==3.3 -y
 
-RUN pip3 install --upgrade pip && \
-    pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
+# RUN pip3 install --upgrade pip && \
+#     pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
 
-# # Build MinkowskiEngine
-RUN export CUDA_HOME=/usr/local/cuda-${CUDA_VERSION} pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --install-option="--blas_include_dirs=${CONDA_PREFIX}/include" --install-option="--blas=openblas"
-
+# ENV TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0 8.6"
+# ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 
 # RUN git clone https://github.com/NVIDIA/MinkowskiEngine.git
 # WORKDIR /workspace/MinkowskiEngine
 # RUN python setup.py install --blas_include_dirs=${CONDA_PREFIX}/include --blas=openblas \
 # 	&& cd /workspace \
-# 	&& rm -r MinkowskiEngine
+#  	&& rm -r MinkowskiEngine
 	
-WORKDIR /workspace
+# WORKDIR /workspace
 
-# Build pointops
-RUN git clone https://github.com/Pointcept/Pointcept.git
-RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointops -v
+# # Build pointops
+# RUN git clone https://github.com/Pointcept/Pointcept.git
+# RUN  pip install Pointcept/libs/pointops -v
 
-# Build pointgroup_ops
-RUN TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0+PTX 8.0" pip install Pointcept/libs/pointgroup_ops -v
+# # Build pointgroup_ops
+# RUN pip install Pointcept/libs/pointgroup_ops -v
 
-# Build swin3d
-RUN TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX 8.0" pip install -U git+https://github.com/microsoft/Swin3D.git -v
+# # Build swin3d
+# # RUN pip install -U git+https://github.com/microsoft/Swin3D.git -v
 
-WORKDIR /tmp
-RUN git clone https://github.com/Dao-AILab/flash-attention.git
-WORKDIR /tmp/flash-attention
-RUN python3 setup.py install
+# RUN pip3 install flash-attn --no-build-isolation
 
-WORKDIR /tmp
-COPY requirements.txt .
-RUN pip3 install -r requirements.txt
+# WORKDIR /tmp
+# COPY requirements.txt .
+# RUN pip3 install -r requirements.txt
 
     
 
