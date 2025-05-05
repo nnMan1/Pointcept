@@ -362,7 +362,7 @@ class SPFormer(nn.Module):
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
-
+            
             data = self.superpoint_unpooling(data)
 
         return return_dict

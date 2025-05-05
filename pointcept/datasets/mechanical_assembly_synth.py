@@ -93,34 +93,42 @@ class MechanicalAssemblySynth(Dataset):
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
 
 
-        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-        #     try:
-        #         return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-        #     except Exception as e:
-        #         print(f"Error loading {dir}: {e}")
-        #         os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
+        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            try:
+                data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                return data
+            except Exception as e:
+                print(f"Error loading {dir}: {e}")
+                os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
         
         vertices = []
         semantic_id = []
         instance_id = []
         frame_id = []
+        seg_indices = []
+        seg_indices2 = []
 
         try:
             for i, (annotation, frame) in enumerate(zip(annotations, frames)):
-                pcd = trimesh.load(frame)
-                vertices.append(pcd.vertices.astype(np.float32))
                 labels = json.load(open(annotation))
 
                 semantic_mapping = np.asarray([self.class_mapping[c] for c in labels['classes']])
 
                 instance_id.append(labels['instance_id'])
                 semantic_id.append(semantic_mapping[np.asarray(labels['semantic_id'])])
-                frame_id.append(np.asarray([i] * len(labels['semantic_id'])))            
+                frame_id.append(np.asarray([i] * len(labels['semantic_id'])))     
+                seg_indices.append(np.asarray(labels['seg_indices']))
+                seg_indices2.append(np.asarray(labels['seg_indices2']))     
+
+                pcd = trimesh.load(frame)
+                vertices.append(pcd.vertices.astype(np.float32))  
 
             vertices = np.concatenate(vertices, axis=0)
             instance_id = np.concatenate(instance_id, axis=0)
             semantic_id = np.concatenate(semantic_id, axis=0)
             frame_id = np.concatenate(frame_id, axis=0)
+            seg_indices = np.concatenate(seg_indices, axis=0)
+            seg_indices2 = np.concatenate(seg_indices2, axis=0)
         except Exception as e:
             print(f"Error loading {dir}: {e}")
             return self.get_data(idx + 1)
@@ -144,6 +152,10 @@ class MechanicalAssemblySynth(Dataset):
             keep_ids = keep_ids[::2]
             vertices = vertices[::2]
 
+        while len(keep_ids) > 100000:
+            keep_ids = keep_ids[::2]
+            vertices = vertices[::2]
+
         data = {
             'coord': vertices,
             # 'coord': mesh.vertices[mask],
@@ -153,6 +165,8 @@ class MechanicalAssemblySynth(Dataset):
             'segment': semantic_id[keep_ids],
             'id': idx,
             'path': self.data_list[idx],
+            'seg_indices': seg_indices[keep_ids],
+            'seg_indices2': seg_indices2[keep_ids],
             # 'seg_indices': None,
             'frame_id': frame_id
         }

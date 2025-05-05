@@ -1,15 +1,16 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 4 # bs: total bs in all gpus
 num_worker = 30
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 # find_unused_parameters = False
-resume=True
-weight='exp/abc_dataset/insseg-spformer-v1m1-0-spunet-base/model/model_last.pth'
+resume=False
+# weight='exp/abc_dataset/insseg-spformer-v1m1-0-spunet-base/model/model_last.pth'
+weight='backbones/sstnet_pretrain.pth'
 
 
 num_classes = 1
@@ -120,22 +121,22 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "ABCDataset"
-data_root = "data/abc_dataset"
+dataset_type = "MechanicalAssemblySynth"
+data_root = "data/abc_dataset/scans_smooth"
 
 classes=dict({
             'other': 0,
-            'nut': 1,
-            'screw': 2
+            'nut': 0,
+            'screw': 0
         })
 
-class_names = ["assembly"]
+class_names = ["other"]
 
 
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -147,8 +148,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
             # dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
@@ -157,11 +158,11 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance"),
+                keys=("coord", "segment", "instance", "seg_indices"),
             ),
             dict(type="SphereCrop",  point_max=200000, mode="random"),
             dict(
@@ -182,12 +183,14 @@ data = dict(
                     "bbox",
                     "seed_ids",
                     "id",
-                    "path"
+                    "path",
+                    "seg_indices"
                 ),
                 feat_keys=("grid_coord"),
             ),
         ],
         test_mode=False,
+        classes=classes,
     ),
     val=dict(
         type=dataset_type,
@@ -206,11 +209,11 @@ data = dict(
             # dict(type="NormalizeCoord"),
             dict(
                 type="GridSample",
-                grid_size=0.2,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance"),
+                keys=("coord", "segment", "instance", "seg_indices"),
             ),
             # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
@@ -233,20 +236,23 @@ data = dict(
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "path",
+                    "seg_indices",
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
         test_mode=False,
+        classes=classes,   
     ),
     test=dict(),  # currently not available
 )
 
 hooks = [
-    # dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.input_conv.0"], replacement=["module.encoder.backbone.", "dummy"]),
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.input_conv.0"], replacement=["module.encoder.backbone.", "dummy"]),
+    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",),
