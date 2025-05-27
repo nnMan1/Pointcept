@@ -119,6 +119,9 @@ class HoleAugmentor:
         remove_ids = np.where(clusters == cluster_id)
         center = points[ids[remove_ids]].mean(axis=0)
         rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.3
+        
+        if rivet_diam > 10:
+            return data_dict
 
         hole_diam_radius = max(rivet_diam + 3, 7)
 
@@ -152,14 +155,14 @@ class HoleAugmentor:
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
-        if np.random.uniform() < 0.7:
-            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
+        # if np.random.uniform() < 0.2:
+        #     data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
 
 
         new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
 
         if np.random.uniform() < 0.7:
-            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 3))
+            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
 
         return data_dict
 
@@ -220,7 +223,6 @@ class MechanicalAssembly(Dataset):
 
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
-
 
     def prepare_clustering(self):
         for file in self.data_list:

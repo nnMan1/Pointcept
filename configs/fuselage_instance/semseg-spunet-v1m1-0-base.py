@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8  # bs: total bs in all gpus
-num_worker = 16
+batch_size = 1  # bs: total bs in all gpus
+num_worker = 2
 mix_prob = 0
 empty_cache = True
 enable_amp = True
@@ -63,7 +63,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data/fuselage/crops"
+data_root = "data/crops"
 
 data = dict(
     num_classes=num_classes,

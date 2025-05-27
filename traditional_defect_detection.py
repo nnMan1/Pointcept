@@ -14,6 +14,7 @@ class AnomalyDetectionModel:
         self.points = None
         self.labels = None
         self.instance = None
+        self.__instance_id = 0
 
     def call(self, data_dict):
         
@@ -37,15 +38,21 @@ class AnomalyDetectionModel:
         self.points = np.concatenate(points)
         self.labels = np.concatenate(labels)
 
-    def to_o3d(self):
+    def to_o3d(self, color='semantic'):
+
+        color_to_arr = {
+            'semantic': self.labels,
+            'instance': self.instance
+        }
+
         if self.points is None or self.labels is None:
             raise ValueError("Points and labels must be loaded before converting to Open3D format.")
         
         colors = np.random.uniform(0, 1, (512, 3))
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.points[::10])
-        pcd.colors = o3d.utility.Vector3dVector(colors[self.labels[::10]])
+        pcd.points = o3d.utility.Vector3dVector(self.points)
+        pcd.colors = o3d.utility.Vector3dVector(colors[color_to_arr[color]])
 
 
         return pcd
@@ -123,30 +130,58 @@ class AnomalyDetectionModel:
 
         return best_p0, best_dir, best_inlier_mask
 
-    def cluster_class_to(self):
+    def cluster_label(self, label):
+        mask = np.where(self.labels == label)[0]
 
-        labels = np.unique(self.labels)
+        if label == 3:
+            self.__instance_id += 1
+            self.instance[mask] = self.__instance_id
+            return
 
-        for label in labels:
-            point = self.points[self.labels == label][::20]
+        all_points = self.points[mask]
 
         # Perform DBSCAN clustering
-        dbscan = DBSCAN(eps=3, min_samples=3)
-        labels = dbscan.fit_predict(all_points)
+        dbscan = DBSCAN(eps=5, min_samples=3)
+        instances = dbscan.fit_predict(all_points)
+        instances_ids = np.unique(instances)
 
-        # Print the number of clusters found
-        num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-        print(f"DBSCAN found {num_clusters} clusters")
+        print(f"DBSCAN found {len(instances_ids) - (1 if -1 in instances_ids else 0)} clusters of class {label}")
+
+        for instance_id in instances_ids:
+            if instance_id == -1:
+                continue  # Skip noise points
+
+            self.__instance_id += 1
+            self.instance[mask[instances == instance_id]] = self.__instance_id
+
+    def find_instances(self):
+        self.instance = np.zeros_like(self.labels)
+        self.__instance_id = 0
+
+        for label_id in np.unique(self.labels):
+            if label_id != -1:
+                self.cluster_label(label_id)
+
+
+
+    # def cluster_class_to(self):
+
+    #     self.__instance_id = 0
+
+
+    #     for label in labels:
+            
+
         
 
-        # Separate points into clusters
-        clusters = []
-        for cluster_id in range(num_clusters):
-            cluster_points = all_points[labels == cluster_id]
-            clusters.append(cluster_points)
+    #     # Separate points into clusters
+    #     clusters = []
+    #     for cluster_id in range(num_clusters):
+    #         cluster_points = all_points[labels == cluster_id]
+    #         clusters.append(cluster_points)
 
-        all_points = [np.asarray(cluster).mean(0) for cluster in clusters]
-        return all_points
+    #     all_points = [np.asarray(cluster).mean(0) for cluster in clusters]
+    #     return all_points
 
     def detect_multiple_lines_ransac_3d(self, distance_threshold=0.1, 
                                         max_iterations=1000, 
@@ -225,15 +260,20 @@ class AnomalyDetectionModel:
 
 
 anomaly_detection = AnomalyDetectionModel(None, 4)
-anomaly_detection.load_predicted_part('exp/fuselage/result', 'panel5_1')
+anomaly_detection.load_predicted_part('exp/fuselage/result', 'panel5_2')
 
 o3d.visualization.draw_geometries([anomaly_detection.to_o3d()])
 
+anomaly_detection.find_instances()
 
-centorids, lines_found, leftovers = anomaly_detection.detect_multiple_lines_ransac_3d( distance_threshold=1,  # adjust based on noise
-                                                                             max_iterations=1000,
-                                                                             min_inliers=2,
-                                                                             max_lines=100)
+o3d.visualization.draw_geometries([anomaly_detection.to_o3d('instance')])
+
+
+
+# centorids, lines_found, leftovers = anomaly_detection.detect_multiple_lines_ransac_3d( distance_threshold=1,  # adjust based on noise
+#                                                                              max_iterations=1000,
+#                                                                              min_inliers=2,
+#                                                                              max_lines=100)
 
 for i, line in enumerate(lines_found, start=1):
     p0 = line["p0"]
