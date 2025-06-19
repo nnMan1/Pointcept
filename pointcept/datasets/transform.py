@@ -1189,6 +1189,19 @@ class RBFunction(object):
         data_dict[self.key] = np.exp(- self.gamma * data_dict[self.key] ** 2)
         return data_dict
 
+@TRANSFORMS.register_module()
+class VoxelizeSuperpoints:
+    def __init__(self, voxel_size=5):
+        self.voxel_size = voxel_size
+
+    def __call__(self, data):
+        coord = data['coord']
+        coord = coord // self.voxel_size
+
+        data['seg_indices'] = coord.unique(dim=0, return_inverse=True)[1]
+
+        return data
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []

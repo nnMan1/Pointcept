@@ -346,17 +346,8 @@ class SPFormer(nn.Module):
 
         return data_dict
 
-    def voxelize_superpoints(self, data, voxel_size=5):
-        coord = data['coord']
-        coord = coord // voxel_size
-
-        data['seg_indices'] = coord.unique(dim=0, return_inverse=True)[1]
-
-        return data
-
     def forward(self, data):
 
-        data = self.voxelize_superpoints(data)
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
 
