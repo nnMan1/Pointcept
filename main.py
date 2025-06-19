@@ -1,185 +1,111 @@
+import sys
+sys.path.append('/home')
+
 import os
-import os.path as osp
-import numpy as np
-import trimesh
-import glob
-import json
-from pointcept.datasets import build_dataset
-from pointcept.datasets.transform import GridSample, Compose
-from common_tools import VData
-from pointcept.datasets.mcb_dataset import MCBDataset
-
-from pointcept.models import build_model
 import torch
+import numpy as np
+import open3d as o3d 
+from pointcept.datasets import build_dataset
+from pointcept.utils.visualization import to_o3d, colors
+from sklearn.cluster import DBSCAN
+from torch import nn
+import torch_scatter
 
-class_names = [
-    'Eye screws',
-    'Setscrew',
-    'Tapping screws',
-    'Cap nuts',
-    'Castle nuts',
-    'Flange nut',
-    'Hexagonal nuts',
-    'Locknuts',
-    'Rivet nut',
-    'Slotted nuts',
-    'Square nuts',
-    'T-nut',
-    'Wingnuts',
-    'Screws and bolts with countersunk head',
-    'Screws and bolts with cylindrical head',
-    'Screws and bolts with hexagonal head',
-    'Washer bolt',
-    'other'
-]
 
-class_idx  = {
-    'Eye screws': 0,
-    'Setscrew': 0,
-    'Tapping screws': 0,
-    'Cap nuts': 1,
-    'Castle nuts': 1,
-    'Flange nut': 1,
-    'Hexagonal nuts': 1,
-    'Locknuts': 1,
-    'Rivet nut': 1,
-    'Slotted nuts': 1,
-    'Square nuts': 1,
-    'T-nut': 1,
-    'Wingnuts': 1,
-    'Screws and bolts with countersunk head': 0,
-    'Screws and bolts with cylindrical head': 0,
-    'Screws and bolts with hexagonal head': 0,
-    'Washer bolt' :0,
-    'other': 2
-}
+dataset_type = "MechanicalAssembly"
+data_root = "data/scans"
 
-final_class_name = ['screw', 'nut', 'other']
+classes={"other": 0, 
+         "gear": 0, 
+         "nut": 0, 
+         "screw": 0, 
+         "axe": 0, }
 
-for name in final_class_name:
-    if not osp.exists(name):
-        os.makedirs(name)
+class_names = ["other", "gear", "nut", "screw", "axe"]
 
-model_config = dict(
-     type='DefaultClassifier',
-    num_classes=3,
-    backbone_embed_dim=256,
-    backbone=dict(
-        type='SpUNet-v1m1',
-        in_channels=3,
-        num_classes=0,
-        channels=(32, 64, 128, 256, 256, 128, 96, 96),
-        layers=(2, 3, 4, 6, 2, 2, 2, 2),
-        cls_mode=True),
-    criteria=[
-        dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
-        dict(type='FocalLoss', loss_weight=1.0, ignore_index=-1)
-    ])
-
-model = build_model(model_config)
-
-checkpoint_path = 'exp/cls_part_dataset/cls-spunet-v1m1-0-base-v3/model/model_best.pth'
-checkpoint = torch.load(checkpoint_path)
-model.load_state_dict(checkpoint['state_dict'])
-
-model = model.cuda().float()
-model.eval()
-
-assemblies = glob.glob(osp.join('data/abc_dataset/chunks/*/stl3', '*'))
-
-transform = Compose(
-        [
-           dict(type='NormalizeCoord'),
-            dict(type='CenterShift', apply_z=True),
+dataset = build_dataset(dict(
+        type=dataset_type,
+        split="train",
+        data_root=data_root,
+        ignore_index=-1,
+        classes=classes,
+        transform=[
+            dict(type="CenterShift", apply_z=True),
             dict(
-                type='GridSample',
-                grid_size=0.01,
-                hash_type='fnv',
-                mode='train',
-                keys=('coord', ),
-                return_grid_coord=True),
-            dict(type='ToTensor'),
+                type="Copy",
+                keys_dict={
+                    "coord": "origin_coord",
+                    "segment": "origin_segment",
+                    "instance": "origin_instance",
+                },
+            ),
+            # dict(type="NormalizeCoord"),
             dict(
-                type='Collect',
-                keys=('coord', 'grid_coord'),
-                feat_keys=['coord'])
-        ])
+                type="GridSample",
+                grid_size=1,
+                hash_type="fnv",
+                mode="train",
+                return_grid_coord=True,
+                keys=("coord", "segment", "instance", "seg_indices"),
+            ),
+            # dict(type="SphereCrop", point_max=1000000, mode='center'),
+            dict(type="CenterShift", apply_z=False),
+            dict(
+                type="InstanceParser",
+                segment_ignore_index=(-1, ),
+                instance_ignore_index=-1,
+            ),
+            dict(type='FPSSeed', n_points = 100),
+            dict(type="ToTensor"),
+            # dict(type="VoxelizeSuperpoints", voxel_size=5),
+            dict(type="SuperpointPool", n_points=100),
+            dict(
+                type="Collect",
+                keys=(
+                    "coord",
+                    "grid_coord",
+                    "segment",
+                    "instance",
+                    "origin_coord",
+                    "origin_segment",
+                    "origin_instance",
+                    "instance_centroid",
+                    "bbox",
+                    "seed_ids",
+                    "path",
+                    "seg_indices",
+                    "superpoint_pooling"
+                ),
+                feat_keys=('coord'),
+                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
+            ),
+        ],
+        test_mode=False))
 
-num_classes = 25
-rgb = np.random.randint(0, 256, (num_classes, 3), dtype=np.uint8)
-alpha = np.full((num_classes, 1), 255, dtype=np.uint8)
-colors = np.hstack([rgb, alpha])
+colors = np.random.randint(0, 255, (1500, 3)) / 255
 
-c = 0
+for s in dataset:
 
-for i, assembly in enumerate(assemblies):
-    parts = []
-    labels = {}
-    for part in glob.glob(osp.join(assembly, '*')):
-        try:
-            filename = osp.basename(part)
-            part = trimesh.load_mesh(part)
-            points = part.sample(4096, return_index=False) # weighted by face area by default
+   s['offset'] = [len(s['coord'])]
+   print(s['offset'])
+   print(s['seg_indices'].max())
+   print(s['coord'][s['superpoint_pooling']].shape)
+#    s = SuperpointPooling()(s, ['instance', 'segment'])
+#    s['segment'] = s['segment'][s['seg_indices']]
+    
+   # pcd = o3d.geometry.TriangleMesh()
+   # pcd.vertices = o3d.utility.Vector3dVector(s['coord'])
+   # pcd.triangles = o3d.utility.Vector3iVector(s['face'])
+   # pcd.vertex_normals = o3d.utility.Vector3dVector(s['normal'])
+   # pcd.vertex_colors = o3d.utility.Vector3dVector(colors[s['segment']])
+   pcd = o3d.geometry.PointCloud()
+   pcd.points = o3d.utility.Vector3dVector(s['coord'][s['superpoint_pooling']])
+   pcd.colors = o3d.utility.Vector3dVector(colors[s['seg_indices'][s['superpoint_pooling']] % len(colors)])
 
-            # Align points with principal components
-            # points_mean = points.mean(axis=0)
-            # points_centered = points - points_mean
-            # cov_matrix = np.cov(points_centered, rowvar=False)
-            # eig_values, eig_vectors = np.linalg.eigh(cov_matrix)
-            # points_aligned = np.dot(points_centered, eig_vectors)
-            # points = points_aligned + points_mean
-            
-            data = {'coord': points}
-            data = transform(data)  
-            # print(data['coord'].min(axis=0))
-            # data['coord'] += data['coord'].min(axis=0)[0]
+   vis = o3d.visualization.Visualizer()
+   vis.create_window(window_name=s['path'])
+   vis.add_geometry(pcd)
+   vis.run()
+   vis.destroy_window()
 
-            for k, v in data.items():
-                data[k] = v.cuda()    
-
-            pred_label = model(data)['cls_logits'].argmax().item()
-            # class_name = class_names[pred_label]
-            # pred_label = class_idx[class_name]
-            color = colors[pred_label]
-            labels[filename] = final_class_name[pred_label]
-
-            vertex_color = np.tile(color, (len(part.vertices), 1))
-
-            # part.export(f'{final_class_name[pred_label]}/{c}.stl')
-            # c += 1
-
-            part.visual.vertex_colors = vertex_color
-            
-            
-            # import open3d as o3d
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(data['coord'].cpu().numpy())
-            # o3d.visualization.draw_geometries([pcd])
-            parts.append(part)
-        except:
-            continue
-    #     part.export(f'{c}.ply')
-    #     c += 1
-
-    # exit(0)
-    print(assembly)
-    with open(f'{assembly}/meta.json', 'w') as f:
-        json.dump(labels, f)
-
-    # exit(0)
-
-    # assembly_mesh = trimesh.util.concatenate(parts)
-    # assembly_mesh.export(f'assembly{c}.ply')
-
-    # c += 1
-        
-        
-
-# dataset = MCBDataset(labels=['Chain drives'], include_other_classes=True)
-
-# for b in dataset:
-#     t = VData.from_dict({
-#         'points': b['coord']
-#     })
-
-#     o3d.visualization.draw_geometries([t.to_o3d_pointcloud()])
+   # o3d.visualization.draw_geometries([pc 

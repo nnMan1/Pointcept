@@ -1202,6 +1202,31 @@ class VoxelizeSuperpoints:
 
         return data
 
+@TRANSFORMS.register_module()
+class SuperpointPool:
+    def __init__(self, n_points):
+        self.n_points = n_points
+
+    def __call__(self, data):
+        sorted_labels, sort_idx = data['seg_indices'].sort()
+        sorted_indices = torch.arange(len(data['seg_indices']))[sort_idx]
+        unique_labels, counts = sorted_labels.unique(return_counts=True)
+
+        group_offsets = torch.cat([torch.tensor([0]), counts.cumsum(0)[:-1]])
+
+        selected_indices = []
+        # Iterate only over unique clusters (much smaller)
+        for offset, count in zip(group_offsets, counts):
+            block = sorted_indices[offset:offset + count]
+            # Shuffle within block
+            rand_perm = torch.randperm(count)
+            chosen = block[rand_perm[:min(self.n_points, count)]]
+            selected_indices.append(chosen)
+
+        final_indices = torch.cat(selected_indices)
+        data['superpoint_pooling'] = final_indices
+        return data
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []
