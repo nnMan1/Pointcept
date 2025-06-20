@@ -8,9 +8,9 @@ empty_cache = True
 enable_amp = False
 evaluate = True
 # find_unused_parameters = False
-resume=False
+# resume=False
 # weight='exp/abc_dataset/insseg-spformer-v1m1-0-spunet-base/model/model_last.pth'
-weight='backbones/sstnet_pretrain.pth'
+# weight='backbones/sstnet_pretrain.pth'
 
 
 num_classes = 1
@@ -35,13 +35,13 @@ model = dict(
         backbone_out_channels=32,
         out_channels=32,
      ),
-    #  positional_embedding=dict(
-    #     type='PositionEmbeddingCoordsSine',
-    #     pos_type="fourier",
-    #     d_pos=128,
-    #     gauss_scale=1,
-    #     normalize=True,
-    # ),
+     positional_embedding=dict(
+        type='PositionEmbeddingCoordsSine',
+        pos_type="fourier",
+        d_pos=128,
+        gauss_scale=1,
+        normalize=True,
+    ),
      decoder=dict(
         in_channels=32,
         hlevels=6,
@@ -170,8 +170,9 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
+            dict(type="SuperpointPool", n_points=100),
+            dict(type="SuperpointPool", n_points=5, index_key="instance", pool_key="seed_ids"),
             dict(
                 type="Collect",
                 keys=(
@@ -182,11 +183,12 @@ data = dict(
                     "instance_centroid",
                     "bbox",
                     "seed_ids",
-                    "id",
                     "path",
-                    "seg_indices"
+                    "seg_indices",
+                    "superpoint_pooling"
                 ),
                 feat_keys=("grid_coord"),
+                offset_keys_dict=dict(offset="coord", seed_ids_offset="seed_ids", superpoint_pooling_offset="superpoint_pooling"),
             ),
         ],
         test_mode=False,
@@ -222,8 +224,9 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
+            dict(type="SuperpointPool", n_points=100),
+            dict(type="SuperpointPool", n_points=1, index_key="instance", pool_key="seed_ids"),
             dict(
                 type="Collect",
                 keys=(
@@ -239,9 +242,10 @@ data = dict(
                     "seed_ids",
                     "path",
                     "seg_indices",
+                    "superpoint_pooling"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
+                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", seed_ids_offset="seed_ids", superpoint_pooling_offset="superpoint_pooling"),
             ),
         ],
         test_mode=False,

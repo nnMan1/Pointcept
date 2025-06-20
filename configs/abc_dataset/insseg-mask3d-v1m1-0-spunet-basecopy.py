@@ -1,51 +1,103 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 6 # bs: total bs in all gpus
+batch_size = 2 # bs: total bs in all gpus
 num_worker = 12
 mix_prob = 0
 empty_cache = True
-enable_amp = True
+enable_amp = False
 evaluate = True
 
 class_names = [
     "assembly",
 ]
 num_classes = 1
+fts_sizes = 128
+dim_feedforward=1024
 segment_ignore_index = (-1, )
+
 
 # model settings
 model = dict(
     type="Mask-3D",
-    backbone=dict(
-        type="MinkUNet34C",
-        in_channels = 3,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
-    ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
+    encoder=dict(
+        backbone=dict(
+            type="Res16UNet34C",
+            in_channels = 3,
+            out_channels = 96,
+            out_fpn=True, #return intermidiate features
+        ),
+        out_channels=128,
+     ),
+     decoder=dict(
+        in_channels=128,
+        hlevels=5,
+        positional_embedding=dict(
+            type='PositionEmbeddingCoordsSine',
+            pos_type="fourier",
+            d_pos=128,
+            gauss_scale=1,
         normalize=True,
+        ),
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=3
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=200,
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=800,
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=3200,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=12800,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=51200,
+            ),
+        ],
     ),
-    mask_module_config=dict(
-        num_classes=1, 
-        return_attn_masks=True, 
-        use_seg_masks=False
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128,
-    instance_ignore_index=-1
+    instance_ignore_index=-1,
 )
+
 
 # scheduler settings
 epoch = 800
@@ -62,7 +114,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/abc_dataset"
+data_root = "data/abc_dataset/scans_smooth"
 
 classes=dict({
             'other': 0,

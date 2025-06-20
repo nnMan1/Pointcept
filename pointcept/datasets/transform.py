@@ -1204,12 +1204,14 @@ class VoxelizeSuperpoints:
 
 @TRANSFORMS.register_module()
 class SuperpointPool:
-    def __init__(self, n_points):
+    def __init__(self, n_points, index_key="seg_indices", pool_key="superpoint_pooling"):
         self.n_points = n_points
+        self.index_key = index_key
+        self.pool_key = pool_key
 
     def __call__(self, data):
-        sorted_labels, sort_idx = data['seg_indices'].sort()
-        sorted_indices = torch.arange(len(data['seg_indices']))[sort_idx]
+        sorted_labels, sort_idx = data[self.index_key].sort()
+        sorted_indices = torch.arange(len(data[self.index_key]))[sort_idx]
         unique_labels, counts = sorted_labels.unique(return_counts=True)
 
         group_offsets = torch.cat([torch.tensor([0]), counts.cumsum(0)[:-1]])
@@ -1224,7 +1226,7 @@ class SuperpointPool:
             selected_indices.append(chosen)
 
         final_indices = torch.cat(selected_indices)
-        data['superpoint_pooling'] = final_indices
+        data[self.pool_key] = final_indices
         return data
 
 class Compose(object):

@@ -80,7 +80,7 @@ class MechanicalAssemblySynth(Dataset):
         else:
             raise NotImplementedError
         
-        data_list = [f.strip() for f in data_list]   
+        data_list = [f.strip() for f in data_list][:10]
 
         return data_list
 

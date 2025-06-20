@@ -7,9 +7,9 @@ mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-resume=True
+resume=False
 # weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
-weight = 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+# weight = 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
 num_classes = 1
 fts_sizes = 128
@@ -112,7 +112,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ABCDataset"
-data_root = "data/abc_dataset/old"
+data_root = "data/abc_dataset/scans_smooth"
 class_names = ['other']
 
 data = dict(

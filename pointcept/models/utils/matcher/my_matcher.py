@@ -80,18 +80,17 @@ class MyMatcher(nn.Module):
     ):
         super().__init__()
     
-    def my_optimized_forward(self, ouptups, targets, offset):
-
-        batch_start = 0
+    def my_optimized_forward(self, outputs, targets, offset):
 
         indices = []
         matched_outputs = []
         matched_targets = []
 
-        for i, batch_end in enumerate(offset):
+        bs, sbs = 0, 0
+        for i, (be, sbe) in enumerate(zip(offset, targets['seed_ids_offset'])):
 
             with torch.no_grad():
-                out_mask = ouptups['outputs_mask'][batch_start:batch_end].T
+                out_mask = outputs['outputs_mask'][batch_start:batch_end].T
                 tgt_mask = targets['instance'][batch_start:batch_end]
                 tgt_mask = F.one_hot(tgt_mask).T
                 
@@ -103,7 +102,7 @@ class MyMatcher(nn.Module):
             matched_outputs.append(out_mask)
             matched_targets.append(masks_tgt)
 
-            batch_start = batch_end
+            bs, sbs = be, sbe
             
         return matched_outputs, matched_targets, indices
 

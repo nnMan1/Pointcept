@@ -7,6 +7,7 @@ from torch.cuda.amp import autocast
 from pointcept.models.builder import MODELS, build_model
 from pointcept.positional_embeddings import build_positional_embedding
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
+from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
@@ -112,9 +113,9 @@ class MaskModule(nn.Module):
 
         query_feat, mask_features, offset = data['query_feat'], data['mask_features'], data['offset']
             
-        query_feat = self.decoder_norm(query_feat)
-        output_class = self.class_embed_head(query_feat)
-        outputs_score = self.out_score(query_feat)
+        query_feat = [self.decoder_norm(f) for f in query_feat]
+        output_class = [self.class_embed_head(f) for f in query_feat]
+        outputs_score = [self.out_score(f) for f in query_feat]
 
         output_masks = []
         attn_masks = []
@@ -129,18 +130,19 @@ class MaskModule(nn.Module):
             output_masks.append(mask_features[bs:be] @ query_feat[i].T)
             bs = be
 
-        outputs_mask = torch.cat(output_masks)
-        return_dict['output_mask'] = outputs_mask
+        # outputs_mask = torch.cat(output_masks)
+        return_dict['output_mask'] = output_masks
 
         if self.return_attn_masks:
             
             bs = 0
-            for be in offset:
-                attn_masks.append((outputs_mask[bs:be].sigmoid() < 0.5).bool())
+            for i, be in enumerate(offset):
+                attn_masks.append((output_masks[i].sigmoid() < 0.5).bool())
                 attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
+                attn_masks[-1] = attn_masks[-1].detach()
                 bs = be
 
-            return_dict['attn_mask'] = torch.cat(attn_masks).detach()
+            return_dict['attn_mask'] = attn_masks
 
         return return_dict
 
@@ -180,36 +182,42 @@ class QueryRefinement(nn.Module):
                     
     def forward(self, point_features, attn_mask, offset, queries, pos):
 
-        point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
-        attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
+        # point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
+        # attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
 
-        if pos is not None:
-            pos, _, _ = pad_data(pos, offset, self.sample_size, rand_idx, mask_idx)
+        # if pos is not None:
+        #     pos, _, _ = pad_data(pos, offset, self.sample_size, rand_idx, mask_idx)
                 
-        m = torch.stack(mask_idx)
-        attn_mask = torch.logical_or(attn_mask, m[..., None])
+        # m = torch.stack(mask_idx)
+        # attn_mask = torch.logical_or(attn_mask, m[..., None])
         
-        attn_mask = attn_mask.permute((0, 2, 1))
+        # attn_mask = attn_mask.permute((0, 2, 1))
         
-        output = self.cross_attention(
-                    query = queries,
-                    key = point_features,
-                    value = point_features,
-                    attn_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
-                    pos=pos
-                )
+        outputs = []
+
+        bs = 0
+        for i, be in enumerate(offset):
+            output = self.cross_attention(
+                        query = queries[i].unsqueeze(0),
+                        key = point_features[bs:be].unsqueeze(0),
+                        value = point_features[bs:be].unsqueeze(0),
+                        attn_mask=attn_mask[i].T.unsqueeze(0).repeat_interleave(self.num_heads, dim=0),
+                        pos=pos[bs:be]
+                    )
                 
-        output = self.self_attention(
-                    output,
-                    tgt_mask=None,
-                    tgt_key_padding_mask=None,
-                )
+        # output = self.self_attention(
+        #             output,
+        #             tgt_mask=None,
+        #             tgt_key_padding_mask=None,
+        #         )
                     
-        queries = self.ffn_attention(
-                    output
-                )
+            output = self.ffn_attention(
+                        output
+                    )
+            outputs.append(output[0])
+            bs = be
 
-        return queries
+        return outputs
 
 @MODELS.register_module("SPFormer")
 class SPFormer(nn.Module):
@@ -232,18 +240,18 @@ class SPFormer(nn.Module):
 
         self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
 
-        for i, _ in enumerate(decoder['mask_modules']):
-            decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
-
         self.decoder = Decoder(**decoder)
-        self.matcher = HungarianMatcher(cost_class=.5,
-                                        cost_dice=1,
-                                        cost_mask=1,
-                                        instance_ignore_index=instance_ignore_index)
+        # self.matcher = HungarianMatcher(cost_class=.5,
+        #                                 cost_dice=1,
+        #                                 cost_mask=1,
+        #                                 instance_ignore_index=instance_ignore_index)
+        self.matcher = MyMatcher()
         
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
-        weight[-1] = 0.1
-
+        self.query_initializer = torch.nn.Sequential(
+            nn.Linear(32, 128)
+        )
+        
         self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
@@ -254,8 +262,17 @@ class SPFormer(nn.Module):
             self.positional_embedding = build_positional_embedding(positional_embedding)
     
     def query_pooling(self, data):
-        queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
+        queries = []
         
+        bs, sbs = 0, 0
+        for be, sbe in zip(data['offset'], data['seed_ids_offset']):
+            ids = data['seed_ids'][sbs:sbe]
+
+            queries.append(self.query_initializer(data['features'][bs:be][ids]))
+
+            bs = be
+            sbs = sbe
+
         return queries
 
     def __compute_loss(self, pred, data):
@@ -350,10 +367,9 @@ class SPFormer(nn.Module):
 
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
+        queries = self.query_pooling(data)    
 
         data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
-
-        queries = self.query_pooling(data)    
 
         pred = self.decoder(data, queries) 
         # pred = self.decoder(data['features'], data['offset']) 
