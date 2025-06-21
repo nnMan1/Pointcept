@@ -245,7 +245,7 @@ class SPFormer(nn.Module):
         #                                 cost_dice=1,
         #                                 cost_mask=1,
         #                                 instance_ignore_index=instance_ignore_index)
-        self.matcher = MyMatcher()
+        self.matcher = MyMatcher(instance_ignore_index=instance_ignore_index)
         
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
         self.query_initializer = torch.nn.Sequential(
@@ -369,7 +369,7 @@ class SPFormer(nn.Module):
         data.update(self.__get_pos_encs(data))
         queries = self.query_pooling(data)    
 
-        data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
+        data = self.superpoint_pooling(data, ['instance', 'segment', 'features', 'seed_ids'])
 
         pred = self.decoder(data, queries) 
         # pred = self.decoder(data['features'], data['offset']) 

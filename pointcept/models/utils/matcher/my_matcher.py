@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.cuda.amp import autocast
+import numpy as np
 
 # from detectron2.projects.point_rend.point_features import point_sample
 
@@ -75,36 +76,53 @@ class MyMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
 
-    def __init__(
-        self
-    ):
+    def __init__(self,instance_ignore_index):
         super().__init__()
+        self.instance_ignore_index = instance_ignore_index
     
     def my_optimized_forward(self, outputs, targets, offset):
 
         indices = []
         matched_outputs = []
         matched_targets = []
+        matched_sem_outputs = []
+        matched_sem_targets = []
 
-        bs, sbs = 0, 0
-        for i, (be, sbe) in enumerate(zip(offset, targets['seed_ids_offset'])):
+        batch_start, seed_batch_start = 0, 0
+        for i, (batch_end, seed_batch_end) in enumerate(zip(offset, targets['seed_ids_offset'])):
+            pred_ids, tgt_ids = torch.arange(seed_batch_end - seed_batch_start, device= outputs['output_mask'][i].device), targets['seed_ids'][seed_batch_start:seed_batch_end]
+            tgt_ids = targets['instance'][batch_start:batch_end][tgt_ids]
+            indices.append((pred_ids, tgt_ids))
 
-            with torch.no_grad():
-                out_mask = outputs['outputs_mask'][batch_start:batch_end].T
-                tgt_mask = targets['instance'][batch_start:batch_end]
-                tgt_mask = F.one_hot(tgt_mask).T
-                
-                seed_ids = targets['seed_ids'][i]
-                seed_cls = targets['instance'][batch_start:batch_end][seed_ids]
-                masks_tgt = tgt_mask[targets['instance'][batch_start:batch_end][seed_ids]].float()
-                
-            
+            out_mask = outputs['output_mask'][i]
+            out_seg = outputs['output_class'][i]
+            tgt_mask = targets['instance'][batch_start:batch_end]
+            tgt_segm = targets['segment'][batch_start:batch_end]
+
+            tgt_segm = tgt_segm[tgt_ids]
+
+            filter = tgt_mask != self.instance_ignore_index
+
+            if filter.sum() == 0:
+                batch_start = batch_end
+                continue
+
+
+            tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
+
+            tgt_mask = tgt_mask[:, tgt_ids]
+            out_mask = out_mask[:, pred_ids]
+                       
             matched_outputs.append(out_mask)
-            matched_targets.append(masks_tgt)
+            matched_targets.append(tgt_mask)
+            matched_sem_outputs.append(out_seg)
+            matched_sem_targets.append(tgt_segm)
 
-            bs, sbs = be, sbe
-            
-        return matched_outputs, matched_targets, indices
+            batch_start = batch_end
+            seed_batch_start = seed_batch_end
+               
+        return matched_outputs, matched_targets, matched_sem_outputs, matched_sem_targets, indices
+
 
     # @torch.no_grad()
     def forward(self, outputs, targets, offset):

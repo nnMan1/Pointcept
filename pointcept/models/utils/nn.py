@@ -135,23 +135,36 @@ class SuperpointPooling(nn.Module):
 
     def forward(self, data, keys=['instance', 'segment', 'features']):
 
-         data['offset_orig'] = data['offset']
+        data['offset_orig'] = data['offset']
 
-         if 'seg_indices' not in data.keys():
+        if 'seg_indices' not in data.keys():
             data['seg_indices'] = torch.arange(data['coord'].shape[0], device=data['coord'].device)
             return data
-         else:
+        else:
             data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
-         label_keys = []
-         if 'instance' in keys:
+        label_keys = []
+        if 'instance' in keys:
             label_keys.append('instance')
 
-         if 'segment' in keys:
+        if 'segment' in keys:
             label_keys.append('segment')
 
+        if 'seed_ids' in keys:
+            data['seed_ids_orig'] = data['seed_ids']
+            data['seed_ids'] = []
+
+            bs, sbs, obs = 0, 0, 0
+            for i, (obe, sbe, be) in enumerate(zip(data['offset_orig'], data['seed_ids_offset'], data['offset'])):
+                data['seed_ids'].append(data['seg_indices'][obs:obe][data['seed_ids_orig'][sbs:sbe]])
+                data['seed_ids'][-1] -= bs
+
+                bs, sbs, obs = be, sbe, obe
+
+            data['seed_ids'] = torch.cat(data['seed_ids'])
+            
          
-         for key in label_keys:
+        for key in label_keys:
             label = []
             for cls in data['seg_indices'].unique():
                cluster_mask = data['seg_indices'] == cls
@@ -162,8 +175,8 @@ class SuperpointPooling(nn.Module):
 
             data[key] = torch.stack(label)
 
-         bs = 0
-         for be in data['offset']:
+        bs = 0
+        for be in data['offset']:
             instances = data['instance'][bs:be]
             non_ignore_mask = instances != self.instance_ignor_index
             if non_ignore_mask.sum() == 0:
@@ -173,11 +186,13 @@ class SuperpointPooling(nn.Module):
             data['instance'][bs:be][non_ignore_mask] = new_instance_indices
             bs = be
 
-         for key in keys:
+        label_keys.append('seed_ids')
+
+        for key in keys:
             if key not in label_keys:
                 data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
         
-         return data
+        return data
 
 class SuperpointUnpooling(nn.Module):
 
