@@ -247,7 +247,48 @@ data = dict(
         test_mode=False,
         classes=classes,   
     ),
-    test=dict(),  # currently not available
+    test=dict(  
+            type='MechanicalAssembly',
+            split='train',
+            data_root='data/scans',
+            transform=[
+                dict(type='CenterShift', apply_z=True),
+                dict(
+                    type='Copy',
+                    keys_dict=dict(
+                        coord='origin_coord',
+                        segment='origin_segment',
+                        instance='origin_instance')),
+                dict(
+                    type='GridSample',
+                    grid_size=1,
+                    hash_type='fnv',
+                    mode='train',
+                    return_grid_coord=True,
+                    keys=('coord', 'segment', 'instance', 'seg_indices')),
+                dict(type='CenterShift', apply_z=False),
+                dict(
+                    type='InstanceParser',
+                    segment_ignore_index=(-1, ),
+                    instance_ignore_index=-1),
+                dict(type='FPSSeed', n_points=100),
+                dict(type='ToTensor'),
+                dict(
+                    type='Collect',
+                    keys=('coord', 'grid_coord', 'segment', 'instance',
+                        'origin_coord', 'origin_segment', 'origin_instance',
+                        'instance_centroid', 'bbox', 'seed_ids', 'path',
+                        'seg_indices'),
+                    feat_keys='coord',
+                    offset_keys_dict=dict(
+                        offset='coord', origin_offset='origin_coord'))
+            ],
+            test_mode=False,
+            classes={"other": 0, 
+                        "gear": 1, 
+                        "nut": 2, 
+                        "screw": 3, 
+                        "axe": 4})
 )
 
 hooks = [
@@ -255,6 +296,16 @@ hooks = [
     # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(type="InsSegEvaluator",),
+    dict(type="InsSegEvaluator",
+         segment_ignore_index=segment_ignore_index,
+         instance_ignore_index=-1,),
     dict(type="CheckpointSaver", save_freq=None),
 ]
+
+# Tester
+test = dict(
+    type="InsSegTester",
+    segment_ignore_index=segment_ignore_index,
+    instance_ignore_index=-1,
+    verbose=False,
+)

@@ -211,6 +211,10 @@ class MechanicalAssembly(Dataset):
             self.class_mapping = {c: i for i, c in enumerate(classes)}
         else:
             self.class_mapping = classes
+        
+        categories = list(self.class_mapping.items())
+        categories.reverse()
+        self.categories = {v: k for k,v in categories}
 
         self.ignore_index = ignore_index
         logger = get_root_logger()
@@ -228,6 +232,24 @@ class MechanicalAssembly(Dataset):
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
 
+    def prepare_singe_clustering(self, file, annotations=None):
+
+        dir = os.path.dirname(file)
+
+        if annotations is None:
+            with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+                    annotations = json.load(json_file)
+
+        mesh = trimesh.load(f'{self.data_root}/{file}')
+        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+        faces = torch.from_numpy(mesh.faces.astype(np.int64))
+        ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
+        
+        annotations['seg_indices'] = ind.tolist()
+
+        with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
+            json.dump(annotations, json_file)
+
     def prepare_clustering(self):
         for file in self.data_list:
             dir = os.path.dirname(file)
@@ -239,15 +261,7 @@ class MechanicalAssembly(Dataset):
             if 'seg_indices' in annotations.keys():
                 continue
 
-            mesh = trimesh.load(f'{self.data_root}/{file}')
-            vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
-            faces = torch.from_numpy(mesh.faces.astype(np.int64))
-            ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-            
-            annotations['seg_indices'] = ind.tolist()
-
-            with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
-                json.dump(annotations, json_file)
+            self.prepare_singe_clustering(file, annotations)
 
     def get_hole_centers(self, data_dict):
 
@@ -305,8 +319,10 @@ class MechanicalAssembly(Dataset):
         file = self.data_list[idx]
         dir = os.path.dirname(file)
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+        self.prepare_singe_clustering(file)
+
+        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+        #     return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
                 
 
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
@@ -320,54 +336,55 @@ class MechanicalAssembly(Dataset):
     
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
-        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
+        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
+        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
 
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
         mask = segment_labels != -1
 
         # Fit KNN on mesh vertices
-        try:
-            knn = NearestNeighbors(n_neighbors=1)
-            knn.fit(mesh.vertices[segment_labels != -1])
-        except Exception as e:
-            print(e)
+        # try:
+        #     knn = NearestNeighbors(n_neighbors=1)
+        #     knn.fit(mesh.vertices[segment_labels != -1])
+        # except Exception as e:
+        #     print(e)
 
         # # Find nearest neighbors for the sampled points
-        distances, indices = knn.kneighbors(point_cloud)
+        # distances, indices = knn.kneighbors(point_cloud)
 
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
-        normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1]#[indices.flatten()]
+        normals =  mesh.vertex_normals[segment_labels != -1]#[indices.flatten()]
+        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1]#[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1]#[indices.flatten()]
         segment_labels = classes[segment_labels]
         
 
-        # Identify outlier points using DBSCAN
-        dbscan = DBSCAN(eps=10, min_samples=5)
-        dbscan.fit(point_cloud)
-        outlier_mask = dbscan.labels_ == -1
+        # # Identify outlier points using DBSCAN
+        # dbscan = DBSCAN(eps=10, min_samples=5)
+        # dbscan.fit(point_cloud)
+        # outlier_mask = dbscan.labels_ == -1
 
-        # Remove outlier points
-        point_cloud = point_cloud[~outlier_mask]
-        normals = normals[~outlier_mask]
-        instance_labels = instance_labels[~outlier_mask]
-        segment_labels = segment_labels[~outlier_mask]
-        seg_indices = seg_indices[~outlier_mask]
+        # # Remove outlier points
+        # point_cloud = point_cloud[~outlier_mask]
+        # normals = normals[~outlier_mask]
+        # instance_labels = instance_labels[~outlier_mask]
+        # segment_labels = segment_labels[~outlier_mask]
+        # seg_indices = seg_indices[~outlier_mask]
 
         data = {
-            'coord': point_cloud,
-            # 'coord': mesh.vertices[mask],
+            # 'coord': point_cloud,
+            'coord': mesh.vertices[mask],
             # 'face': mesh.faces,
             'normal': normals,
             'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            'seg_indices': seg_indices
+            'seg_indices': seg_indices,
+            'name': self.get_data_name(idx)
         }
 
         torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
@@ -377,6 +394,8 @@ class MechanicalAssembly(Dataset):
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
         data_name = data_name.replace(".ply", "")
+        data_name = data_name.replace(".obj", "")
+        data_name = data_name.replace(".stl", "")
         data_name = data_name.replace("/", "_")
         return data_name
 
