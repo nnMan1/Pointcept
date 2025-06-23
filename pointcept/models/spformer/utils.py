@@ -11,12 +11,12 @@ def select_masks(out, superpoints):
         pred_masks = out['output_mask'][0].T
         pred_scores = out['output_score'][0]
 
-        num_class = pred_labels.shape[1] - 1
+        num_class = pred_labels.shape[1] 
         num_query = pred_labels.shape[0]
         score_thr = 0
         n_point_thr = 100
         
-        scores = F.softmax(pred_labels, dim=-1)[:, :-1]
+        scores = F.softmax(pred_labels, dim=-1)
         scores *= pred_scores
         labels = torch.arange(num_class, device=scores.device).unsqueeze(0).repeat(num_query, 1).flatten(0, 1)
         scores, topk_idx = scores.flatten(0, 1).topk(len(scores.flatten(0, 1)), sorted=False)
