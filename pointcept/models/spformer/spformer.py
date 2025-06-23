@@ -205,11 +205,11 @@ class QueryRefinement(nn.Module):
                         pos=pos[bs:be]
                     )
                 
-        # output = self.self_attention(
-        #             output,
-        #             tgt_mask=None,
-        #             tgt_key_padding_mask=None,
-        #         )
+            output = self.self_attention(
+                        output,
+                        tgt_mask=None,
+                        tgt_key_padding_mask=None,
+                    )
                     
             output = self.ffn_attention(
                         output
