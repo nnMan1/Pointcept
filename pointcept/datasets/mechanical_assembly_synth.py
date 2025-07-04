@@ -91,16 +91,14 @@ class MechanicalAssemblySynth(Dataset):
 
         frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
-        annotaions = [a for a in annotations if not a.endswith('grp.json')]
+        annotations = [a for a in annotations if not a.endswith('grp.json')]
 
         knn = NearestNeighbors(n_neighbors=1)        
         knn.fit(mesh.vertices) 
 
         groupings = {}
 
-        for i, (annotation, frame) in enumerate(zip(annotations, frames)):
-            annotations = json.load(open(annotation))
-            
+        for i, (annotation, frame) in enumerate(zip(annotations, frames)):           
             point_cloud = trimesh.load(frame).vertices
             distances, indices = knn.kneighbors(point_cloud)
                         
@@ -152,11 +150,8 @@ class MechanicalAssemblySynth(Dataset):
         idx = idx % len(self.data_list)
         dir = self.data_list[idx]
 
-        frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
         annotations = [a for a in annotations if not a.endswith('grp.json')]
-
-        groupings = sorted(glob.glob(os.path.join(self.data_root, dir, '*grp.json')))
 
         if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
             try:
@@ -179,7 +174,9 @@ class MechanicalAssemblySynth(Dataset):
         seg_indices3 = []
 
         try:
-            for i, (annotation, groups, frame) in enumerate(zip(annotations, groupings, frames)):
+            for i, annotation in enumerate(annotations):
+                groups = annotation.replace('.json', '_grp.json')
+                frame = annotation.replace('.json', '.ply')
                 labels = json.load(open(annotation))
                 groupings = json.load(open(groups))
 
@@ -219,14 +216,14 @@ class MechanicalAssemblySynth(Dataset):
 
         keep_ids = np.arange(len(vertices))
 
-        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
-            vertices /= 2
-            keep_ids = keep_ids[::2]
-            vertices = vertices[::2]
+        # while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
+        #     vertices /= 2
+        #     keep_ids = keep_ids[::2]
+        #     vertices = vertices[::2]
 
-        while len(keep_ids) > 400000:
-            keep_ids = keep_ids[::2]
-            vertices = vertices[::2]
+        # while len(keep_ids) > 400000:
+        #     keep_ids = keep_ids[::2]
+        #     vertices = vertices[::2]
 
         try:
             data = {
@@ -250,7 +247,7 @@ class MechanicalAssemblySynth(Dataset):
             print(f"Error processing {dir}: {e}")
             return self.get_data(idx + 1)
 
-        data['seg_indices'] = data[self.get_clustering()]
+        data['seg_indices'] = np.asarray(data[self.get_clustering()])
         data.pop('seg_indices1')
         data.pop('seg_indices2')
         data.pop('seg_indices3')
