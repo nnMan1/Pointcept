@@ -68,6 +68,33 @@ class MechanicalAssemblySynth(Dataset):
                 len(self.data_list), self.loop, split
             )
         )
+
+    def prepare_singe_clustering(self, dir, annotations=None):
+
+        mesh = trimesh.load(f'{self.data_root}/{dir}/visible1.ply')
+        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+        faces = torch.from_numpy(mesh.faces.astype(np.int64))
+        ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
+        # ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
+        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) / 5).numpy()
+
+        frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
+        annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
+
+        knn = NearestNeighbors(n_neighbors=1)        
+        knn.fit(mesh.vertices) 
+
+        for i, (annotation, frame) in enumerate(zip(annotations, frames)):
+            annotations = json.load(open(annotation))
+            
+            point_cloud = trimesh.load(frame).vertices
+            distances, indices = knn.kneighbors(point_cloud)
+                        
+            annotations['seg_indices1'] = ind1[indices.flatten()].tolist()
+            annotations['seg_indices2'] = ind1[indices.flatten()].tolist()
+
+        with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
+            json.dump(annotations, json_file)
         
     def get_data_list(self):
         
@@ -93,13 +120,15 @@ class MechanicalAssemblySynth(Dataset):
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
 
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            try:
-                data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-                return data
-            except Exception as e:
-                print(f"Error loading {dir}: {e}")
-                os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
+        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+        #     try:
+        #         data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+        #         if np.random.rand() < 0.5:
+        #             data['seg_indices'] = data['seg_indices2']
+        #         return data
+        #     except Exception as e:
+        #         print(f"Error loading {dir}: {e}")
+        #         os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
         
         vertices = []
         semantic_id = []
@@ -156,20 +185,25 @@ class MechanicalAssemblySynth(Dataset):
             keep_ids = keep_ids[::2]
             vertices = vertices[::2]
 
-        data = {
-            'coord': vertices,
-            # 'coord': mesh.vertices[mask],
-            # 'face': mesh.faces,
-            'normal': normals[keep_ids],
-            'instance': instance_id[keep_ids],
-            'segment': semantic_id[keep_ids],
-            'id': idx,
-            'path': self.data_list[idx],
-            'seg_indices': seg_indices[keep_ids],
-            'seg_indices2': seg_indices2[keep_ids],
-            # 'seg_indices': None,
-            'frame_id': frame_id
-        }
+        try:
+            data = {
+                'coord': vertices,
+                # 'coord': mesh.vertices[mask],
+                # 'face': mesh.faces,
+                'normal': normals[keep_ids],
+                'instance': instance_id[keep_ids],
+                'segment': semantic_id[keep_ids],
+                'id': idx,
+                'path': self.data_list[idx],
+                'seg_indices': seg_indices[keep_ids],
+                'seg_indices2': seg_indices2[keep_ids],
+                # 'seg_indices': None,
+                'frame_id': frame_id,
+                'name': self.get_data_name(idx),
+            }
+        except Exception as e:
+            print(f"Error processing {dir}: {e}")
+            return self.get_data(idx + 1)
 
         torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
@@ -178,6 +212,8 @@ class MechanicalAssemblySynth(Dataset):
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
         data_name = data_name.replace(".ply", "")
+        data_name = data_name.replace(".obj", "")
+        data_name = data_name.replace(".stl", "")
         data_name = data_name.replace("/", "_")
         return data_name
 
