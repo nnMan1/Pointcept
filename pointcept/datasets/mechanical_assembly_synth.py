@@ -34,6 +34,8 @@ class MechanicalAssemblySynth(Dataset):
         cache=False,
         loop=1,
         classes = [],
+        recompute_clustering=False,
+        use_clustering="random"
     ):
         super(MechanicalAssemblySynth, self).__init__()
         self.data_root = data_root
@@ -69,20 +71,32 @@ class MechanicalAssemblySynth(Dataset):
             )
         )
 
-    def prepare_singe_clustering(self, dir, annotations=None):
+        if recompute_clustering:
+            logger.info("Recomputing clustering for all data...")
+            for dir in self.data_list:
+                print(f"Processing {dir}...")
+                self.prepare_clustering(dir)
+            logger.info("Clustering recomputed.")
+        
+        self.use_clustering = use_clustering
+
+    def prepare_clustering(self, dir, annotations=None):
 
         mesh = trimesh.load(f'{self.data_root}/{dir}/visible1.ply')
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
         ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-        # ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
-        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) / 5).numpy()
+        ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
+        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) // 5).numpy()
 
         frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
+        annotaions = [a for a in annotations if not a.endswith('grp.json')]
 
         knn = NearestNeighbors(n_neighbors=1)        
         knn.fit(mesh.vertices) 
+
+        groupings = {}
 
         for i, (annotation, frame) in enumerate(zip(annotations, frames)):
             annotations = json.load(open(annotation))
@@ -90,12 +104,34 @@ class MechanicalAssemblySynth(Dataset):
             point_cloud = trimesh.load(frame).vertices
             distances, indices = knn.kneighbors(point_cloud)
                         
-            annotations['seg_indices1'] = ind1[indices.flatten()].tolist()
-            annotations['seg_indices2'] = ind1[indices.flatten()].tolist()
+            groupings['seg_indices1'] = ind1[indices.flatten()].tolist()
+            groupings['seg_indices2'] = ind2[indices.flatten()].tolist()
+            groupings['seg_indices3'] = ind3[indices.flatten()].tolist()
 
-        with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
-            json.dump(annotations, json_file)
-        
+            with open(annotation.replace('.json', '_grp.json'), 'w') as json_file:
+                json.dump(groupings, json_file)
+
+        cached_path = os.path.join(self.data_root, dir, 'cached.pth')
+        if os.path.exists(cached_path):
+            os.remove(cached_path)
+
+    def get_clustering(self) -> str:
+        if self.use_clustering == "random":
+            if np.random.rand() < 0.33:
+                return 'seg_indices1'
+            elif np.random.rand() < 0.66:
+                return 'seg_indices2'
+            else:
+                return 'seg_indices3'
+        elif self.use_clustering == "seg_indices1":
+            return 'seg_indices1'
+        elif self.use_clustering == "seg_indices2":
+            return 'seg_indices2'
+        elif self.use_clustering == "seg_indices3":
+            return 'seg_indices3'
+        else:
+            raise NotImplementedError(f"Unknown clustering method: {self.use_clustering}")
+            
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -118,36 +154,43 @@ class MechanicalAssemblySynth(Dataset):
 
         frames = sorted(glob.glob(os.path.join(self.data_root, dir, '*.ply')))
         annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
+        annotations = [a for a in annotations if not a.endswith('grp.json')]
 
+        groupings = sorted(glob.glob(os.path.join(self.data_root, dir, '*grp.json')))
 
-        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-        #     try:
-        #         data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-        #         if np.random.rand() < 0.5:
-        #             data['seg_indices'] = data['seg_indices2']
-        #         return data
-        #     except Exception as e:
-        #         print(f"Error loading {dir}: {e}")
-        #         os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
+        if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            try:
+                data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                data['seg_indices'] = data[self.get_clustering()]
+                data.pop('seg_indices1')
+                data.pop('seg_indices2')
+                data.pop('seg_indices3')
+                return data
+            except Exception as e:
+                print(f"Error loading {dir}: {e}")
+                os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
         
         vertices = []
         semantic_id = []
         instance_id = []
         frame_id = []
-        seg_indices = []
+        seg_indices1 = []
         seg_indices2 = []
+        seg_indices3 = []
 
         try:
-            for i, (annotation, frame) in enumerate(zip(annotations, frames)):
+            for i, (annotation, groups, frame) in enumerate(zip(annotations, groupings, frames)):
                 labels = json.load(open(annotation))
+                groupings = json.load(open(groups))
 
                 semantic_mapping = np.asarray([self.class_mapping[c] for c in labels['classes']])
 
                 instance_id.append(labels['instance_id'])
                 semantic_id.append(semantic_mapping[np.asarray(labels['semantic_id'])])
                 frame_id.append(np.asarray([i] * len(labels['semantic_id'])))     
-                seg_indices.append(np.asarray(labels['seg_indices']))
-                seg_indices2.append(np.asarray(labels['seg_indices2']))     
+                seg_indices1.append(np.asarray(groupings['seg_indices1']))
+                seg_indices2.append(np.asarray(groupings['seg_indices2']))     
+                seg_indices3.append(np.asarray(groupings['seg_indices3']))     
 
                 pcd = trimesh.load(frame)
                 vertices.append(pcd.vertices.astype(np.float32))  
@@ -156,8 +199,9 @@ class MechanicalAssemblySynth(Dataset):
             instance_id = np.concatenate(instance_id, axis=0)
             semantic_id = np.concatenate(semantic_id, axis=0)
             frame_id = np.concatenate(frame_id, axis=0)
-            seg_indices = np.concatenate(seg_indices, axis=0)
+            seg_indices1 = np.concatenate(seg_indices1, axis=0)
             seg_indices2 = np.concatenate(seg_indices2, axis=0)
+            seg_indices3 = np.concatenate(seg_indices3, axis=0)
         except Exception as e:
             print(f"Error loading {dir}: {e}")
             return self.get_data(idx + 1)
@@ -166,7 +210,6 @@ class MechanicalAssemblySynth(Dataset):
         mesh = trimesh.Trimesh(vertices=vertices, process=False)
         normals = mesh.vertex_normals.copy()
         
-
         if len(mesh.vertices) < 2048:
             del mesh
             return self.get_data(idx + 1)
@@ -181,31 +224,36 @@ class MechanicalAssemblySynth(Dataset):
             keep_ids = keep_ids[::2]
             vertices = vertices[::2]
 
-        while len(keep_ids) > 100000:
+        while len(keep_ids) > 400000:
             keep_ids = keep_ids[::2]
             vertices = vertices[::2]
 
         try:
             data = {
                 'coord': vertices,
-                # 'coord': mesh.vertices[mask],
-                # 'face': mesh.faces,
                 'normal': normals[keep_ids],
                 'instance': instance_id[keep_ids],
                 'segment': semantic_id[keep_ids],
                 'id': idx,
                 'path': self.data_list[idx],
-                'seg_indices': seg_indices[keep_ids],
-                'seg_indices2': seg_indices2[keep_ids],
-                # 'seg_indices': None,
                 'frame_id': frame_id,
                 'name': self.get_data_name(idx),
+                'seg_indices1': seg_indices1[keep_ids],
+                'seg_indices2': seg_indices2[keep_ids],
+                'seg_indices3': seg_indices3[keep_ids],
             }
+
+            if self.cache:
+                torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+
         except Exception as e:
             print(f"Error processing {dir}: {e}")
             return self.get_data(idx + 1)
 
-        torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+        data['seg_indices'] = data[self.get_clustering()]
+        data.pop('seg_indices1')
+        data.pop('seg_indices2')
+        data.pop('seg_indices3')
         
         return data
 
