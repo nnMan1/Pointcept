@@ -74,6 +74,9 @@ class MechanicalAssemblySynth(Dataset):
         if recompute_clustering:
             logger.info("Recomputing clustering for all data...")
             for dir in self.data_list:
+                if os.path.exists(f'data/abc_dataset/scans_smooth/{dir}/0_grp.json'):
+                    continue
+
                 print(f"Processing {dir}...")
                 self.prepare_clustering(dir)
             logger.info("Clustering recomputed.")
@@ -98,7 +101,8 @@ class MechanicalAssemblySynth(Dataset):
 
         groupings = {}
 
-        for i, (annotation, frame) in enumerate(zip(annotations, frames)):           
+        for i, (annotation, frame) in enumerate(zip(annotations, frames)):    
+            print(frame)       
             point_cloud = trimesh.load(frame).vertices
             distances, indices = knn.kneighbors(point_cloud)
                         
@@ -108,10 +112,52 @@ class MechanicalAssemblySynth(Dataset):
 
             with open(annotation.replace('.json', '_grp.json'), 'w') as json_file:
                 json.dump(groupings, json_file)
+        
+            with open(annotation) as f:
+                annotations = json.load(f)
+            
+            if 'seg_indices' in annotations:
+                annotations.pop('seg_indices')
+            if 'seg_indices2' in annotations:
+                annotations.pop('seg_indices2')
+            
+            with open(annotation, 'w') as f:
+                json.dump(annotations, f)
 
         cached_path = os.path.join(self.data_root, dir, 'cached.pth')
         if os.path.exists(cached_path):
             os.remove(cached_path)
+
+    def update_semantic_labels(self, raw_data):
+        for file in self.data_list:
+            print(f"Processing {file}...")
+            with open(os.path.join(raw_data, file, 'meta.json'), 'r') as f:
+                meta = json.load(f)
+
+            classes = {}
+            for part, cls  in meta.items():
+                if cls not in classes:
+                    classes[cls] = len(classes)
+
+            annotations = sorted(glob.glob(os.path.join(self.data_root, file, '*.json')))
+            annotations = [a for a in annotations if not a.endswith('grp.json')]
+
+            for annotation in annotations:
+                with open(annotation, 'r') as f:
+                    data = json.load(f)
+
+                data['classes'] = classes
+
+                semantic = np.asarray(data['semantic_id'])
+                instance = np.asarray(data['instance_id'])
+
+                for i, part in enumerate(data['part_files']):
+                    semantic[instance == i] = classes[meta[part]]
+                
+                data['semantic_id'] = semantic.tolist()
+
+                with open(annotation, 'w') as f:
+                    json.dump(data, f)
 
     def get_clustering(self) -> str:
         if self.use_clustering == "random":
