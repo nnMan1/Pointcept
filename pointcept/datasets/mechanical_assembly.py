@@ -18,7 +18,7 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
-import copy
+from PIL import Image
 
 class HoleAugmentor:
 
@@ -184,7 +184,8 @@ class MechanicalAssembly(Dataset):
         cache=False,
         loop=1,
         classes = [],
-        augment_holes=False
+        augment_holes=False,
+        image_transform=None
     ):
         super(MechanicalAssembly, self).__init__()
         self.data_root = data_root
@@ -229,6 +230,8 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
+        self.image_transform = image_transform
+
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
 
@@ -243,12 +246,25 @@ class MechanicalAssembly(Dataset):
         mesh = trimesh.load(f'{self.data_root}/{file}')
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
-        ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
         
-        annotations['seg_indices'] = ind.tolist()
+        ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
+        ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
+        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) // 5).numpy()
+        
+        if 'seg_indices' in annotations:
+            annotations.pop('seg_indices')
 
         with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
             json.dump(annotations, json_file)
+        
+        groupings = {}
+                        
+        groupings['seg_indices1'] = ind1.tolist()
+        groupings['seg_indices2'] = ind2.tolist()
+        groupings['seg_indices3'] = ind3.tolist()
+
+        with open(f'{self.data_root}/{dir}/grp.json', 'w') as json_file:
+                json.dump(groupings, json_file)
 
     def prepare_clustering(self):
         for file in self.data_list:
@@ -257,9 +273,6 @@ class MechanicalAssembly(Dataset):
 
             with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
                 annotations = json.load(json_file)
-
-            if 'seg_indices' in annotations.keys():
-                continue
 
             self.prepare_singe_clustering(file, annotations)
 
@@ -318,15 +331,17 @@ class MechanicalAssembly(Dataset):
         idx = idx % len(self.data_list)
         file = self.data_list[idx]
         dir = os.path.dirname(file)
+        print(f"Loading {file} ({idx}/{len(self.data_list)})")
 
-        self.prepare_singe_clustering(file)
-
-        # if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-        #     return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+        if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
                 
 
         with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
+
+        with open(os.path.join(self.data_root, dir, 'grp.json')) as json_file:
+            groups = json.load(json_file)
 
         mesh = trimesh.load(f'{self.data_root}/{file}')
 
@@ -355,12 +370,34 @@ class MechanicalAssembly(Dataset):
 
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1]#[indices.flatten()]
-        normals =  mesh.vertex_normals[segment_labels != -1]#[indices.flatten()]
-        seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1]#[indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1]#[indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
+        normals =  mesh.vertex_normals#[segment_labels != -1]#[indices.flatten()]
+        # seg_indices = np.asarray(annotations['seg_indices'])#[segment_labels != -1]#[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
         segment_labels = classes[segment_labels]
         
+        image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  '*.png')))[::2]
+        mapping_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  '*mapping.npy')))[::2]
+        
+        images, mappings = [], []
+
+        for image_path, mapping_path in zip(image_paths, mapping_paths):
+            if os.path.exists(image_path):
+                image = Image.open(image_path).convert('RGB')
+                images.append(image)
+            if os.path.exists(mapping_path):
+                mappings.append(np.load(mapping_path))
+
+        # images = np.stack(images)
+        mappings = np.stack(mappings) % len(mesh.faces)
+
+        # Load all images from the directory
+        # image_dir = os.path.join(self.data_root, dir)
+        # image_extensions = ('*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff')
+        # image_files = []
+        # for ext in image_extensions:
+        #     image_files.extend(glob.glob(os.path.join(image_dir, ext)))
+        # images = [open(img_path, 'rb').read() for img_path in image_files]
 
         # # Identify outlier points using DBSCAN
         # dbscan = DBSCAN(eps=10, min_samples=5)
@@ -376,18 +413,24 @@ class MechanicalAssembly(Dataset):
 
         data = {
             # 'coord': point_cloud,
-            'coord': mesh.vertices[mask],
-            # 'face': mesh.faces,
+            'coord': mesh.vertices,
+            'face': mesh.faces,
             'normal': normals,
             'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            'seg_indices': seg_indices,
-            'name': self.get_data_name(idx)
+            # 'seg_indices': seg_indices,
+            'name': self.get_data_name(idx),
+            'mappings': mappings,
+            'images': images,
+            # 'ids': np.arange(len(mesh.vertices), dtype=np.int32),
         }
 
-        torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+        data.update(groups)
+
+        if self.cache:
+            torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
         return data
 
@@ -410,6 +453,14 @@ class MechanicalAssembly(Dataset):
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
 
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = np.stack([
+                    self.image_transform(image).numpy() for image in data_dict['images']
+                ])
+            else:
+                data_dict['images'] = []
+
         data_dict = self.transform(data_dict)
 
         return data_dict
@@ -420,6 +471,15 @@ class MechanicalAssembly(Dataset):
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
         data_dict_list = []
+
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = [
+                    self.image_transform(image) for image in data_dict['images']
+                ]
+            else:
+                data_dict['images'] = []
+
         for aug in self.aug_transform[:1]:
             data_dict_list.append(aug(deepcopy(data_dict)))
 
@@ -438,6 +498,7 @@ class MechanicalAssembly(Dataset):
         data_dict = dict(
             fragment_list=input_dict_list, segment=segment, name=self.get_data_name(idx)
         )
+
         return data_dict
 
     def __getitem__(self, idx):
