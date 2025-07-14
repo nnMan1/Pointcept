@@ -1,6 +1,6 @@
-ARG TORCH_VERSION=2.0.1
-ARG CUDA_VERSION=11.7
-ARG CUDNN_VERSION=8
+ARG TORCH_VERSION
+ARG CUDA_VERSION
+ARG CUDNN_VERSION
 
 FROM pytorch/pytorch:${TORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel
 
@@ -30,7 +30,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 RUN conda install h5py pyyaml -c anaconda -y
 # RUN conda install tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
 RUN conda install pytorch-cluster pytorch-scatter pytorch-sparse -c pyg -y 
-RUN conda install libffi==3.3 -y
+#RUN conda install libffi==3.3 -y
 
 RUN pip3 install --upgrade pip && \
     pip3 install torch-geometric spconv-cu$(echo ${CUDA_VERSION} | tr -d ".0") open3d
@@ -44,19 +44,19 @@ RUN TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9" python setup.py install --blas_include_di
  	&& rm -r MinkowskiEngine
 	
 WORKDIR /workspace
-RUN git clone https://github.com/Karbo123/segmentator.git \
-    && cd segmentator/csrc \
-    && git reset --hard 76efe46d03dd27afa78df972b17d07f2c6cfb696 \
-    && mkdir build \
-    && cd build \
-    && cmake .. \
-        -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'` \
-        -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
-        -DPYTHON_LIBRARY=$(python -c "import distutils.sysconfig as sysconfig; print(sysconfig.get_config_var('LIBDIR'))") \
-        -DCMAKE_INSTALL_PREFIX=`python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())'` \
-    && make \
-    && make install \
-    && cd ../../..
+#RUN git clone https://github.com/Karbo123/segmentator.git \
+#    && cd segmentator/csrc \
+#    && git reset --hard 76efe46d03dd27afa78df972b17d07f2c6cfb696 \
+#    && mkdir build \
+#    && cd build \
+#    && cmake .. \
+#        -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'` \
+#        -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
+#        -DPYTHON_LIBRARY=$(python -c "import distutils.sysconfig as sysconfig; print(sysconfig.get_config_var('LIBDIR'))") \
+#        -DCMAKE_INSTALL_PREFIX=`python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())'` \
+#    && make \
+#    && make install \
+#    && cd ../../..
 
 # Build pointops
 RUN git clone https://github.com/Pointcept/Pointcept.git
