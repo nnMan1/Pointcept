@@ -18,7 +18,12 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
-import copy
+from PIL import Image
+import torchvision.transforms as transforms
+from pytorch3d.renderer import (
+    PerspectiveCameras,
+)
+
 
 @DATASETS.register_module("MechanicalAssemblySynth")
 class MechanicalAssemblySynth(Dataset):
@@ -35,7 +40,8 @@ class MechanicalAssemblySynth(Dataset):
         loop=1,
         classes = [],
         recompute_clustering=False,
-        use_clustering="random"
+        use_clustering="random",
+        image_transform=None
     ):
         super(MechanicalAssemblySynth, self).__init__()
         self.data_root = data_root
@@ -74,7 +80,7 @@ class MechanicalAssemblySynth(Dataset):
         if recompute_clustering:
             logger.info("Recomputing clustering for all data...")
             for dir in self.data_list:
-                if os.path.exists(f'data/abc_dataset/scans_smooth/{dir}/0_grp.json'):
+                if os.path.exists(f'{self.data_root}/{dir}/0_grp.json'):
                     continue
 
                 print(f"Processing {dir}...")
@@ -82,6 +88,14 @@ class MechanicalAssemblySynth(Dataset):
             logger.info("Clustering recomputed.")
         
         self.use_clustering = use_clustering
+
+
+        self.image_transform = transforms.Compose([
+            transforms.Resize((224, 224)),  # or 518 for ViT-Giant
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
 
     def prepare_clustering(self, dir, annotations=None):
 
@@ -191,6 +205,57 @@ class MechanicalAssemblySynth(Dataset):
 
         return data_list
 
+    def pixel_point_matches(
+                self,
+                pts_world: np.ndarray,
+                P: np.ndarray,                 # 3×4 projection matrix
+                img_size: tuple[int, int],     # (H, W)
+ ):
+            """
+            Project a point cloud, keep one front‑most point per pixel,
+            and return pixel <‑‑> point index correspondences.
+
+            Returns
+            -------
+            pix_uv  : (M,2) int   integer (u, v) pixel coords
+            pc_idx  : (M,)  int   indices into `pts_world`
+            """
+            
+            pts_world = pts_world.copy()
+            H, W = img_size
+
+            pts_h = np.c_[pts_world, np.ones(len(pts_world))]     # (N,4)
+            img_h = pts_h @ P  
+            
+            w = img_h[:, 3]
+            x = img_h[:, 0] / w
+            y = img_h[:, 1] / w
+
+            x = (1 - x) * W / 2
+            y = (1 - y) * H / 2
+
+            m = (w > 0) & (x >= 0) & (np.rint(x).astype(int) < W) & (y >= 0) & (np.rint(y).astype(int) < H)
+            if not np.any(m):
+                return (np.empty((0, 2), dtype=int),
+                        np.empty((0,),   dtype=int))
+
+            x, y, w   = x[m], y[m], w[m]
+            pc_idx_in = np.nonzero(m)[0]
+
+            u = np.rint(x).astype(int)          
+            v = np.rint(y).astype(int)          
+            flat = v * W + u                    
+
+            order = np.lexsort((w, flat))       
+            uniq  = np.concatenate([[True], flat[order][1:] != flat[order][:-1]])
+            keep  = order[uniq]              
+
+            pix_uv   = np.column_stack([u[keep], v[keep]])    
+            pix_flat = flat[keep]                               
+            pc_idx   = pc_idx_in[keep]                         
+
+            return pix_uv, pc_idx
+
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
@@ -219,35 +284,41 @@ class MechanicalAssemblySynth(Dataset):
         seg_indices2 = []
         seg_indices3 = []
 
-        try:
-            for i, annotation in enumerate(annotations):
-                groups = annotation.replace('.json', '_grp.json')
-                frame = annotation.replace('.json', '.ply')
-                labels = json.load(open(annotation))
-                groupings = json.load(open(groups))
+        # try:
+        for i, annotation in enumerate(annotations):
+            groups = annotation.replace('.json', '_grp.json')
+            frame = annotation.replace('.json', '.ply')
+            labels = json.load(open(annotation))
+            groupings = json.load(open(groups))
 
-                semantic_mapping = np.asarray([self.class_mapping[c] for c in labels['classes']])
+            instance_id.append(labels['instance_id'])
+            if 'semantic_id' in labels:
+                semantic_id.append(np.asarray(labels['semantic_id']))
+            else:
+                semantic_id.append(np.asarray([0] * len(labels['instance_id'])))
 
-                instance_id.append(labels['instance_id'])
-                semantic_id.append(semantic_mapping[np.asarray(labels['semantic_id'])])
-                frame_id.append(np.asarray([i] * len(labels['semantic_id'])))     
-                seg_indices1.append(np.asarray(groupings['seg_indices1']))
-                seg_indices2.append(np.asarray(groupings['seg_indices2']))     
-                seg_indices3.append(np.asarray(groupings['seg_indices3']))     
+            semantic_mapping = np.asarray([self.class_mapping[c] for c in labels['classes']])
+            if 'seg_indices' in labels:
+                semantic_id[-1] = semantic_mapping[semantic_id[-1]]
 
-                pcd = trimesh.load(frame)
-                vertices.append(pcd.vertices.astype(np.float32))  
+            frame_id.append(np.asarray([i] * len(labels['instance_id'])))     
+            seg_indices1.append(np.asarray(groupings['seg_indices1']))
+            seg_indices2.append(np.asarray(groupings['seg_indices2']))     
+            seg_indices3.append(np.asarray(groupings['seg_indices3']))     
 
-            vertices = np.concatenate(vertices, axis=0)
-            instance_id = np.concatenate(instance_id, axis=0)
-            semantic_id = np.concatenate(semantic_id, axis=0)
-            frame_id = np.concatenate(frame_id, axis=0)
-            seg_indices1 = np.concatenate(seg_indices1, axis=0)
-            seg_indices2 = np.concatenate(seg_indices2, axis=0)
-            seg_indices3 = np.concatenate(seg_indices3, axis=0)
-        except Exception as e:
-            print(f"Error loading {dir}: {e}")
-            return self.get_data(idx + 1)
+            pcd = trimesh.load(frame)
+            vertices.append(pcd.vertices.astype(np.float32))  
+
+        vertices = np.concatenate(vertices, axis=0)
+        instance_id = np.concatenate(instance_id, axis=0)
+        semantic_id = np.concatenate(semantic_id, axis=0)
+        frame_id = np.concatenate(frame_id, axis=0)
+        seg_indices1 = np.concatenate(seg_indices1, axis=0)
+        seg_indices2 = np.concatenate(seg_indices2, axis=0)
+        seg_indices3 = np.concatenate(seg_indices3, axis=0)
+        # except Exception as e:
+        #     print(f"Error loading {dir}: {e}")
+        #     return self.get_data(idx + 1)
 
         # Estimate normals for the point cloud
         mesh = trimesh.Trimesh(vertices=vertices, process=False)
@@ -257,8 +328,8 @@ class MechanicalAssemblySynth(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
-            vertices *= 2
+        # while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
+        #     vertices *= 2
 
         keep_ids = np.arange(len(vertices))
 
@@ -270,6 +341,32 @@ class MechanicalAssemblySynth(Dataset):
         # while len(keep_ids) > 400000:
         #     keep_ids = keep_ids[::2]
         #     vertices = vertices[::2]
+
+        images, mappings_src, mappings_tgt = [], [], []
+
+        if os.path.exists(os.path.join(self.data_root, dir, 'color')): 
+            image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'color/*.png')))[::2]
+            P_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'poses/*P.txt')))[::2]
+
+            for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
+                image = Image.open(image_path).convert('RGB')
+                images.append(image)
+
+                P = np.loadtxt(P_path)
+
+                src, tgt = self.pixel_point_matches(
+                    pts_world=vertices[keep_ids],
+                    P=P,
+                    img_size=(224, 224)
+                )
+
+                src = np.stack([np.ones(len(src)), src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+
+                mappings_src.append(src)
+                mappings_tgt.append(tgt)
+
+            mappings_src = np.concatenate(mappings_src, axis=0)
+            mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
         try:
             data = {
@@ -284,6 +381,9 @@ class MechanicalAssemblySynth(Dataset):
                 'seg_indices1': seg_indices1[keep_ids],
                 'seg_indices2': seg_indices2[keep_ids],
                 'seg_indices3': seg_indices3[keep_ids],
+                'mappings_src': mappings_src,
+                'mappings_tgt': mappings_tgt,
+                'images': images,
             }
 
             if self.cache:
@@ -310,7 +410,16 @@ class MechanicalAssemblySynth(Dataset):
 
     def prepare_train_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)    
+        data_dict = self.get_data(idx)  
+
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = np.stack([
+                    self.image_transform(image).numpy() for image in data_dict['images']
+                ])
+            else:
+                data_dict['images'] = []
+
         data_dict = self.transform(data_dict)
 
         return data_dict
@@ -318,6 +427,15 @@ class MechanicalAssemblySynth(Dataset):
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = np.stack([
+                    self.image_transform(image).numpy() for image in data_dict['images']
+                ])
+            else:
+                data_dict['images'] = []
+
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
         data_dict_list = []

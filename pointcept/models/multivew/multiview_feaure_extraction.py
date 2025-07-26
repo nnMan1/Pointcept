@@ -21,39 +21,39 @@ class MeshFeatureExtractor(nn.Module):
 
     def forward(self, data_dict):
         images = data_dict.get('images', [])
-        mappings = data_dict.get('mappings', [])
-
-        outputs = self.model(images, output_hidden_states=True)
-        patch_tokens = outputs.last_hidden_state[:, 1:, :]  # remove CLS token
             
         mesh_features = torch.zeros((len(data_dict['coord']), 384), dtype=torch.float32, device=self.device)
         mesh_features_cnt = torch.zeros((len(data_dict['coord']), 384), dtype=torch.float32, device=self.device)
 
         bs, ibs, fbs, obs = 0, 0, 0, 0
         i=0
-        for be, ibe, fbe, obe, in zip(data_dict['offset'], data_dict['image_offset'], data_dict['face_offset'], data_dict['origin_offset']):
-            faces = data_dict['face'][fbs:fbe]
 
-            if 'inverse' in data_dict:
-                faces = data_dict['inverse'][obs:obe][faces]
+        for be, ibe, obe, in zip(data_dict['offset'], data_dict['image_offset'], data_dict['mappings_offset']):
+            outputs = self.model(images[ibs: ibe], output_hidden_states=True)
+            patch_tokens = outputs.last_hidden_state[:, 1:, :]  # remove CLS token
 
-            for tokens, mapping in zip(patch_tokens[ibs:ibe], mappings[ibs:ibe]):
-                n_patches = tokens.shape[0]
-                dim = int(n_patches ** 0.5)
-                assert dim * dim == n_patches, "Patch tokens are not square!"
+            features = patch_tokens.to(self.device)
+            
+            mappings_src = data_dict['mappings_src'][obs:obe]
+            mappings_tgt = data_dict['mappings_tgt'][obs:obe]
 
-                tokens_2d = tokens.reshape(dim, dim, -1).permute(2, 0, 1).unsqueeze(0)
-                tokens_2d = F.interpolate(tokens_2d, size=(mapping.shape[0], mapping.shape[1]), mode='bilinear', align_corners=False)
-                tokens_2d = tokens_2d.squeeze(0).permute(1, 2, 0)  # [H, W, C]
+            print(features.shape)
+            # for tokens, mapping in zip(patch_tokens[ibs:ibe], mappings[ibs:ibe]):
+            #     n_patches = tokens.shape[0]
+            #     dim = int(n_patches ** 0.5)
+            #     assert dim * dim == n_patches, "Patch tokens are not square!"
 
-                mask = mapping > 0
-                mesh_features[bs:be][faces[mapping[mask]]] += tokens_2d[mask].unsqueeze(1)
-                mesh_features[bs:be][faces[mapping[mask]]] += 1
+            #     tokens_2d = tokens.reshape(dim, dim, -1).permute(2, 0, 1).unsqueeze(0)
+            #     tokens_2d = F.interpolate(tokens_2d, size=(mapping.shape[0], mapping.shape[1]), mode='bilinear', align_corners=False)
+            #     tokens_2d = tokens_2d.squeeze(0).permute(1, 2, 0)  # [H, W, C]
 
-            bs = be
-            ibs = ibe
-            fbs = fbe
-            obs = obe
+            #     mask = mapping > 0
+            #     mesh_features[bs:be][faces[mapping[mask]]] += tokens_2d[mask].unsqueeze(1)
+            #     mesh_features[bs:be][faces[mapping[mask]]] += 1
+
+            # bs = be
+            # ibs = ibe
+            # obs = obe
 
         mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0]
 

@@ -19,6 +19,7 @@ from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
 from PIL import Image
+import torchvision.transforms as transforms
 
 class HoleAugmentor:
 
@@ -230,7 +231,12 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
-        self.image_transform = image_transform
+        self.image_transform = transforms.Compose([
+            transforms.Resize((508, 508)),  # or 518 for ViT-Giant
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
 
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
@@ -265,6 +271,9 @@ class MechanicalAssembly(Dataset):
 
         with open(f'{self.data_root}/{dir}/grp.json', 'w') as json_file:
                 json.dump(groupings, json_file)
+
+        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+            os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
 
     def prepare_clustering(self):
         for file in self.data_list:
@@ -331,7 +340,6 @@ class MechanicalAssembly(Dataset):
         idx = idx % len(self.data_list)
         file = self.data_list[idx]
         dir = os.path.dirname(file)
-        print(f"Loading {file} ({idx}/{len(self.data_list)})")
 
         if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
             return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
@@ -371,7 +379,7 @@ class MechanicalAssembly(Dataset):
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
-        normals =  mesh.vertex_normals#[segment_labels != -1]#[indices.flatten()]
+        normals =  mesh.vertex_normals.copy()#[segment_labels != -1]#[indices.flatten()]
         # seg_indices = np.asarray(annotations['seg_indices'])#[segment_labels != -1]#[indices.flatten()]
         segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
         segment_labels = classes[segment_labels]
@@ -413,8 +421,8 @@ class MechanicalAssembly(Dataset):
 
         data = {
             # 'coord': point_cloud,
-            'coord': mesh.vertices,
-            'face': mesh.faces,
+            'coord':  deepcopy(mesh.vertices),
+            'face': deepcopy(mesh.faces),
             'normal': normals,
             'instance': instance_labels,
             'segment': segment_labels,
@@ -427,7 +435,13 @@ class MechanicalAssembly(Dataset):
             # 'ids': np.arange(len(mesh.vertices), dtype=np.int32),
         }
 
+        for key in ['coord', 'normal', 'instance', 'segment']:
+            if data[key].shape[0] != len(mesh.vertices):
+                print(f"Warning: {key} shape mismatch in {file}: {data[key].shape[0]} != {len(mesh.vertices)}")
+
         data.update(groups)
+
+        data['seg_indices'] = np.asarray(data['seg_indices1'])
 
         if self.cache:
             torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
@@ -468,9 +482,6 @@ class MechanicalAssembly(Dataset):
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
-        segment = data_dict.pop("segment")
-        data_dict = self.transform(data_dict)
-        data_dict_list = []
 
         if self.image_transform is not None:
             if 'images' in data_dict:
@@ -479,6 +490,10 @@ class MechanicalAssembly(Dataset):
                 ]
             else:
                 data_dict['images'] = []
+
+        data_dict_list = []        
+        segment = data_dict.pop("segment")
+        data_dict = self.transform(data_dict)
 
         for aug in self.aug_transform[:1]:
             data_dict_list.append(aug(deepcopy(data_dict)))

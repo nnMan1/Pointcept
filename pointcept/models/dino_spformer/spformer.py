@@ -22,16 +22,24 @@ class Encoder(nn.Module):
         # self.backbone = build_model(backbone) 
         # self.backbone = SpUNet(**backbone)
         self.backbone = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0")
+        self.mask_features_head = nn.Sequential(
+            nn.Linear(384, out_channels),
+            nn.LayerNorm(out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
 
     def forward(self, data):
 
         offset = data['offset']
 
-        pcd_features = self.backbone(data)
-        # mask_features = self.mask_features_head(pcd_features)
+        with torch.no_grad():
+            pcd_features = self.backbone(data)
+
+        mask_features = self.mask_features_head(pcd_features)
         
         return {
-                'features': pcd_features, 
+                'features': mask_features, 
                 'offset': offset
             }
 

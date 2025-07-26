@@ -65,7 +65,7 @@ RUN TORCH_CUDA_ARCH_LIST="8.0 8.6"  pip install Pointcept/libs/pointops -v
 # Build pointgroup_ops
 RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install Pointcept/libs/pointgroup_ops -v
 
-
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install "git+https://github.com/facebookresearch/pytorch3d.git"
 
 # # Build swin3d
 RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install -U git+https://github.com/microsoft/Swin3D.git -v

@@ -26,3 +26,4 @@ from .instance_segmentation_transformer_base import *
 from .mask_3d import *
 from .spformer import *
 from .edges_detection_mask_3d import *
+from .dino_spformer import *

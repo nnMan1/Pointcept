@@ -847,7 +847,12 @@ class GridSample(object):
                     )
                 data_dict["displacement"] = displacement[idx_unique]
             for key in self.keys:
-                data_dict[key] = data_dict[key][idx_unique]
+                try:
+                    data_dict[key] = data_dict[key][idx_unique]
+                except:
+                    raise KeyError(
+                        f"Key '{key}' not found in data_dict. Available keys: {data_dict.keys()}"
+                    )
             return data_dict
 
         elif self.mode == "test":  # test mode
