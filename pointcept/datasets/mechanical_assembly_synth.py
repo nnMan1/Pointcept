@@ -210,7 +210,7 @@ class MechanicalAssemblySynth(Dataset):
                 pts_world: np.ndarray,
                 P: np.ndarray,                 # 3×4 projection matrix
                 img_size: tuple[int, int],     # (H, W)
- ):
+    ):
             """
             Project a point cloud, keep one front‑most point per pixel,
             and return pixel <‑‑> point index correspondences.
@@ -221,38 +221,50 @@ class MechanicalAssemblySynth(Dataset):
             pc_idx  : (M,)  int   indices into `pts_world`
             """
             
-            pts_world = pts_world.copy()
             H, W = img_size
+            N = len(pts_world)
 
-            pts_h = np.c_[pts_world, np.ones(len(pts_world))]     # (N,4)
-            img_h = pts_h @ P  
-            
-            w = img_h[:, 3]
-            x = img_h[:, 0] / w
-            y = img_h[:, 1] / w
+            # Homogeneous coordinates
+            pts_h = np.c_[pts_world, np.ones(N)]         # (N, 4)
+            img_h = pts_h @ P.T                          # (N, 3)
 
-            x = (1 - x) * W / 2
-            y = (1 - y) * H / 2
+            x_proj = img_h[:, 0]
+            y_proj = img_h[:, 1]
+            z_proj = img_h[:, 2]
 
-            m = (w > 0) & (x >= 0) & (np.rint(x).astype(int) < W) & (y >= 0) & (np.rint(y).astype(int) < H)
-            if not np.any(m):
-                return (np.empty((0, 2), dtype=int),
-                        np.empty((0,),   dtype=int))
+            # Valid depth mask
+            valid = z_proj > 1e-6
+            if not np.any(valid):
+                return np.empty((0, 2), dtype=int), np.empty((0,), dtype=int)
 
-            x, y, w   = x[m], y[m], w[m]
-            pc_idx_in = np.nonzero(m)[0]
+            x = x_proj[valid] / z_proj[valid]
+            y = y_proj[valid] / z_proj[valid]
+            z = z_proj[valid]
+            pts_idx = np.nonzero(valid)[0]
 
-            u = np.rint(x).astype(int)          
-            v = np.rint(y).astype(int)          
-            flat = v * W + u                    
+            # Convert to pixel coordinates
+            u = ((1 - x) * W / 2).round().astype(int)
+            v = ((1 - y) * H / 2).round().astype(int)
 
-            order = np.lexsort((w, flat))       
-            uniq  = np.concatenate([[True], flat[order][1:] != flat[order][:-1]])
-            keep  = order[uniq]              
+            # Keep only points inside image
+            in_bounds = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+            u, v, z, pts_idx = u[in_bounds], v[in_bounds], z[in_bounds], pts_idx[in_bounds]
 
-            pix_uv   = np.column_stack([u[keep], v[keep]])    
-            pix_flat = flat[keep]                               
-            pc_idx   = pc_idx_in[keep]                         
+            # Initialize depth buffer and index buffer
+            depth_buffer = np.full((H, W), np.inf)
+            index_buffer = np.full((H, W), -1, dtype=int)
+
+            for i in range(len(u)):
+                ui, vi = u[i], v[i]
+                if z[i] < depth_buffer[vi, ui]:
+                    depth_buffer[vi, ui] = z[i]
+                    index_buffer[vi, ui] = pts_idx[i]
+
+            # Extract valid pixels and corresponding point indices
+            valid_mask = index_buffer >= 0
+            v_coords, u_coords = np.nonzero(valid_mask)
+            pix_uv = np.stack([u_coords, v_coords], axis=1)
+            pc_idx = index_buffer[v_coords, u_coords]
 
             return pix_uv, pc_idx
 
@@ -328,25 +340,11 @@ class MechanicalAssemblySynth(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        # while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
-        #     vertices *= 2
-
-        keep_ids = np.arange(len(vertices))
-
-        # while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
-        #     vertices /= 2
-        #     keep_ids = keep_ids[::2]
-        #     vertices = vertices[::2]
-
-        # while len(keep_ids) > 400000:
-        #     keep_ids = keep_ids[::2]
-        #     vertices = vertices[::2]
-
         images, mappings_src, mappings_tgt = [], [], []
 
         if os.path.exists(os.path.join(self.data_root, dir, 'color')): 
-            image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'color/*.png')))[::2]
-            P_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'poses/*P.txt')))[::2]
+            image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'color/*.png')))[::1]
+            P_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'poses/*P.txt')))[::1]
 
             for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
                 image = Image.open(image_path).convert('RGB')
@@ -355,18 +353,32 @@ class MechanicalAssemblySynth(Dataset):
                 P = np.loadtxt(P_path)
 
                 src, tgt = self.pixel_point_matches(
-                    pts_world=vertices[keep_ids],
+                    pts_world=vertices,
                     P=P,
                     img_size=(224, 224)
                 )
 
-                src = np.stack([np.ones(len(src)), src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+                src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
 
-                mappings_src.append(src)
-                mappings_tgt.append(tgt)
-
+                mappings_src.append(src.astype(np.int32))
+                mappings_tgt.append(tgt.astype(np.int32))
+            
             mappings_src = np.concatenate(mappings_src, axis=0)
             mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
+            vertices *= 2
+
+        keep_ids = np.arange(len(vertices))
+
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
+            vertices /= 2
+            # keep_ids = keep_ids[::2]
+            # vertices = vertices[::2]
+
+        # while len(keep_ids) > 400000:
+        #     keep_ids = keep_ids[::2]
+        #     vertices = vertices[::2]
 
         try:
             data = {
@@ -397,6 +409,8 @@ class MechanicalAssemblySynth(Dataset):
         data.pop('seg_indices1')
         data.pop('seg_indices2')
         data.pop('seg_indices3')
+
+    
         
         return data
 

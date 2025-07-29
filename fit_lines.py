@@ -20,6 +20,7 @@ dataset = build_dataset(dict(
                         type = "MechanicalAssemblySynth",
                         data_root = "data/segment-assembly-synthetic/data",
                         recompute_clustering=False,
+                        cache=True,
                         classes=dict({
                                     'other': 0,
                                     'screw': 1,
@@ -121,7 +122,7 @@ for s in dataloader:
         # pcd.vertex_normals = o3d.utility.Vector3dVector(s['normal'])
         # pcd.vertex_colors = o3d.utility.Vector3dVector(colors[s['segment']])
 
-        colors = tokens_pca[:, -3:]
+        colors = tokens_pca[:, 3:6]
         colors -= colors.min(axis=0)
         colors /= colors.max(axis=0)
 
