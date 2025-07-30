@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
+batch_size = 2 # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
@@ -138,10 +138,10 @@ data = dict(
     num_classes=num_classes,
     ignore_index=-1,
     names=['class_names'],
-    cache=True,
     train=dict(
         type=dataset_type,
         split="train",
+        cache=True,
         data_root=data_root,
         recompute_clustering=recompute_clustering,
         transform=[

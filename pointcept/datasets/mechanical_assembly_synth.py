@@ -339,6 +339,12 @@ class MechanicalAssemblySynth(Dataset):
         if len(mesh.vertices) < 2048:
             del mesh
             return self.get_data(idx + 1)
+        
+        keep_ids = np.arange(len(vertices))
+
+        while len(keep_ids) > 400000:
+            keep_ids = keep_ids[::2]
+            vertices = vertices[::2]
     
         images, mappings_src, mappings_tgt = [], [], []
 
@@ -369,16 +375,10 @@ class MechanicalAssemblySynth(Dataset):
         while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
             vertices *= 2
 
-        keep_ids = np.arange(len(vertices))
-
         while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
             vertices /= 2
             # keep_ids = keep_ids[::2]
             # vertices = vertices[::2]
-
-        # while len(keep_ids) > 400000:
-        #     keep_ids = keep_ids[::2]
-        #     vertices = vertices[::2]
 
         try:
             data = {
