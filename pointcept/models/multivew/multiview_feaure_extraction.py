@@ -1,3 +1,4 @@
+from math import perm
 import os
 import torch
 import glob
@@ -12,9 +13,10 @@ import torch.nn.functional as F
 
 
 class MeshFeatureExtractor(nn.Module):
-    def __init__(self, model_name="facebook/dinov2-small", device="cuda"):
+    def __init__(self, model_name="facebook/dinov2-small", device="cuda", merge_strategy='mean'):
         super().__init__()
         self.device = device
+        self.merge_strategy = merge_strategy
 
         # Load pretrained DINOv2 model
         self.model = Dinov2Model.from_pretrained(model_name).to(self.device).eval()
@@ -38,18 +40,9 @@ class MeshFeatureExtractor(nn.Module):
             assert dim * dim == n_patches, "Patch tokens are not square!"
 
             img_size = torch.tensor(images[ibs].shape[-2:], dtype=torch.int32)
-            div_factor = img_size // dim
+            div_factor = 244 // dim
 
-            patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], dim, dim, -1) # [B, C, H, W]
-            # Save feature map of the first image as an image
-            # if i == 0:
-            #     # Take the first image's patch tokens and average over channels
-            #     feature_map = patch_tokens[0].detach().cpu().numpy()  # shape: (dim, dim, feature_dim)
-            #     feature_map_mean = feature_map.mean(axis=-1)  # shape: (dim, dim)
-            #     feature_map_norm = (feature_map_mean - feature_map_mean.min()) / (feature_map_mean.ptp() + 1e-8)
-            #     feature_img = (feature_map_norm * 255).astype(np.uint8)
-            #     feature_img_pil = Image.fromarray(feature_img)
-            #     feature_img_pil.save("first_image_features.png")
+            patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], dim, dim, -1) 
 
             features = patch_tokens.to(self.device)
             
@@ -64,9 +57,15 @@ class MeshFeatureExtractor(nn.Module):
             mappings_src = mappings_src[idx]
             mappings_tgt = mappings_tgt[idx]
 
+            if self.merge_strategy == 'random_sample':
+                random_positions = self.one_random_position_per_value(mappings_tgt)
+
+                mappings_src = mappings_src[random_positions]
+                mappings_tgt = mappings_tgt[random_positions]
+
             a, b, c = mappings_src.T
-            b //= div_factor[0]
-            c //= div_factor[1]
+            b //= div_factor
+            c //= div_factor
 
             mesh_features[bs:be][mappings_tgt] += features[a, b, c]
             mesh_features_cnt[bs:be][mappings_tgt] += 1
@@ -76,9 +75,24 @@ class MeshFeatureExtractor(nn.Module):
             mbs = mbe
             obs = obe
 
-        mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
+        # mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
 
         return mesh_features
+
+    def one_random_position_per_value(self, indices: torch.Tensor) -> torch.Tensor:
+        """
+        indices : 1-D int/long tensor containing values (may repeat)
+        returns : 1-D tensor of positions (in the input) —
+                exactly one *random* position for every unique value.
+        """
+        perm = torch.randperm(indices.numel(), device=indices.device)
+        shuffled_vals = indices[perm]
+
+        _, first_in_shuffle = np.unique(shuffled_vals.cpu(), return_index=True)
+
+        random_positions = perm[first_in_shuffle]
+
+        return random_positions
 
     def apply_pca_and_export(self, output_path='renders/example_colorized.ply', n_components=3):
         # Convert to CPU for PCA

@@ -231,7 +231,7 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
-        self.image_size = (224, 224)  # or (518, 518) for ViT-Giant
+        self.image_size = (448, 448)  # or (518, 518) for ViT-Giant
 
         assert self.image_size[0] % 14 == 0 and self.image_size[1] % 14 == 0, \
             "Image size must be divisible by 14 for ViT models."
@@ -489,7 +489,7 @@ class MechanicalAssembly(Dataset):
                 pts_world=mesh.vertices,
                 normals=normals,
                 P=P,
-                img_size=self.image_size
+                img_size=(224, 224)
             )
 
             src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
