@@ -17,72 +17,71 @@ from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExt
 
 
 dataset = build_dataset(dict(
-                        type = "MechanicalAssemblySynth",
-                        data_root = "data/segment-assembly-synthetic/data",
-                        recompute_clustering=False,
-                        cache=True,
-                        classes=dict({
-                                    'other': 0,
-                                    'screw': 1,
-                                    'nut': 2,
-                                }),                   
-                                split='val',
-                              transform=[
-                                dict(type="CenterShift", apply_z=True),
-                                dict(
-                                    type="Copy",
-                                    keys_dict={
-                                        "coord": "origin_coord",
-                                        "segment": "origin_segment",
-                                        "instance": "origin_instance",
-                                    },
-                                ),
-                                dict(
-                                    type="GridSample",
-                                    grid_size=5,
-                                    hash_type="fnv",
-                                    mode="train",
-                                    return_inverse=True,
-                                    return_grid_coord=True,
-                                    keys=("coord", "normal", "segment", "instance", 'seg_indices'),
-                                ),
-                                # # dict(type="SphereCrop", point_max=1000000, mode='center'),
-                                # dict(type="CenterShift", apply_z=False),
-                                # dict(type="NormalizeColor"),
-                                # dict(
-                                #     type="InstanceParser",
-                                #     segment_ignore_index=(-1, ),
-                                #     instance_ignore_index=-1,
-                                # ),
-                                dict(type="ToTensor"),
-                                dict(
-                                    type="Collect",
-                                    keys=(
-                                        "coord",
-                                        "grid_coord",
-                                        "segment",
-                                        "instance",
-                                        "images",
-                                        "mappings_src",
-                                        "mappings_tgt",
-                                        # "instance_centroid",
-                                        # "bbox",
-                                        "seg_indices",
-                                        "path",
-                                        "name",
-                                        "inverse"
-                                    ),
-                                    feat_keys=("coord", "normal"),
-                                    offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
-                                ),
-                            ],test_mode=False,
-                              image_transform=transforms.Compose([
-                                        transforms.Resize((508, 508)),  # or 518 for ViT-Giant
-                                        transforms.ToTensor(),
-                                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                             std=[0.229, 0.224, 0.225]),
-                                    ])
-                        ))
+                        type='MechanicalAssembly',
+                        split='val',
+                        data_root='data/cetim_assembly/data',
+                        classes={"other": 0, 
+                                 "gear": -1, 
+                                 "nut": -1, 
+                                 "screw": -1, 
+                                 "axe": -1, 
+                                 "rivet": 1, 
+                                 "sting-stif": 2, 
+                                 "ruber-seal": 3, 
+                                 "main_panel": 4,
+                                 "hole": 5,
+                                 "rivet_t1": 1,
+                                 "rrivet_t2": 1},                   
+                        transform=[
+                        dict(type="CenterShift", apply_z=True),
+                        dict(
+                            type="Copy",
+                            keys_dict={
+                                "coord": "origin_coord",
+                                "segment": "origin_segment",
+                                "instance": "origin_instance",
+                            },
+                        ),
+                        dict(
+                            type="GridSample",
+                            grid_size=5,
+                            hash_type="fnv",
+                            mode="train",
+                            return_inverse=True,
+                            return_grid_coord=True,
+                            keys=("coord", "normal", "segment", "instance", 'seg_indices'),
+                        ),
+                        # # dict(type="SphereCrop", point_max=1000000, mode='center'),
+                        # dict(type="CenterShift", apply_z=False),
+                        # dict(type="NormalizeColor"),
+                        # dict(
+                        #     type="InstanceParser",
+                        #     segment_ignore_index=(-1, ),
+                        #     instance_ignore_index=-1,
+                        # ),
+                        dict(type="ToTensor"),
+                        dict(
+                            type="Collect",
+                            keys=(
+                                "coord",
+                                "origin_coord",
+                                "grid_coord",
+                                "segment",
+                                "instance",
+                                "images",
+                                "mappings_src",
+                                "mappings_tgt",
+                                # "instance_centroid",
+                                # "bbox",
+                                "seg_indices",
+                                "path",
+                                "name",
+                                "inverse"
+                            ),
+                            feat_keys=("coord", "normal"),
+                            offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                        ),
+                    ],test_mode=False))
 
 # dataset.update_semantic_labels('obj_assemblies')
 # exit(0)
@@ -100,50 +99,72 @@ feature_extractor = MeshFeatureExtractor(model_name="facebook/dinov2-small", dev
 
 for s in dataloader:
 
-    for key in s.keys():
-        if isinstance(s[key], torch.Tensor):
-            s[key] = s[key].cuda(non_blocking=True)
+    # inverse = s['inverse'][:s['origin_offset'][0]]
+    # mapping_src = s['mappings_src'][:s['mappings_offset'][0]]
+    # mapping_tgt = s['mappings_tgt'][:s['mappings_offset'][0]]
+
+    # mask = mapping_src[:, 0] == 1
+
+    # mapping_src = mapping_src[mask]
+    # mapping_tgt = mapping_tgt[mask]
+
+    # mapping_tgt = inverse[mapping_tgt]
+
+    # points = s['coord'][:s['offset'][0]]
+    # colors = np.zeros_like(points)
+    # colors[mapping_tgt, 0] = 1 - colors[mapping_tgt, 0]
+
+    # pcd = o3d.geometry.PointCloud()
+    # pcd.points = o3d.utility.Vector3dVector(points.cpu().numpy())
+    # pcd.colors = o3d.utility.Vector3dVector(colors)
+    # o3d.io.write_point_cloud(f'{s["name"][0]}.ply', pcd)
     
-    with torch.no_grad():
-        features = feature_extractor(s)
+    # exit(0)
 
-    bs = 0
-    for i, be in enumerate(s['offset']):
+    # for key in s.keys():
+    #     if isinstance(s[key], torch.Tensor):
+    #         s[key] = s[key].cuda(non_blocking=True)
+    
+    # with torch.no_grad():
+    #     features = feature_extractor(s)
 
-        pca = PCA(n_components=9)
-        tokens_pca = pca.fit_transform(features[bs:be].cpu())
+    # bs = 0
+    # for i, be in enumerate(s['offset']):
 
-        #    s = SuperpointPooling()(s, ['instance', 'segment'])
-        #    s['segment'] = s['segment'][s['seg_indices']]
+    #     pca = PCA(n_components=9)
+    #     tokens_pca = pca.fit_transform(features[bs:be].cpu())
 
-        # pcd = o3d.geometry.TriangleMesh()
-        # pcd.vertices = o3d.utility.Vector3dVector(s['coord'])
-        # pcd.triangles = o3d.utility.Vector3iVector(s['face'])
-        # pcd.vertex_normals = o3d.utility.Vector3dVector(s['normal'])
-        # pcd.vertex_colors = o3d.utility.Vector3dVector(colors[s['segment']])
+    #     #    s = SuperpointPooling()(s, ['instance', 'segment'])
+    #     #    s['segment'] = s['segment'][s['seg_indices']]
 
-        colors = tokens_pca[:, 3:6]
-        colors -= colors.min(axis=0)
-        colors /= colors.max(axis=0)
+    #     # pcd = o3d.geometry.TriangleMesh()
+    #     # pcd.vertices = o3d.utility.Vector3dVector(s['coord'])
+    #     # pcd.triangles = o3d.utility.Vector3iVector(s['face'])
+    #     # pcd.vertex_normals = o3d.utility.Vector3dVector(s['normal'])
+    #     # pcd.vertex_colors = o3d.utility.Vector3dVector(colors[s['segment']])
+
+    #     colors = tokens_pca[:, 3:6]
+    #     colors -= colors.min(axis=0)
+    #     colors /= colors.max(axis=0)
 
     
 
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(s['coord'][bs:be].cpu().numpy())
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+    #     pcd = o3d.geometry.PointCloud()
+    #     pcd.points = o3d.utility.Vector3dVector(s['coord'][bs:be].cpu().numpy())
+    #     pcd.colors = o3d.utility.Vector3dVector(colors)
 
-        #    vis = o3d.visualization.Visualizer()
-        #    vis.create_window(window_name=s['path'])
-        #    vis.add_geometry(pcd)
-        #    vis.run()
-        #    vis.destroy_window()
+    #     #    vis = o3d.visualization.Visualizer()
+    #     #    vis.create_window(window_name=s['path'])
+    #     #    vis.add_geometry(pcd)
+    #     #    vis.run()
+    #     #    vis.destroy_window()
 
 
-        # pcd.colors = o3d.utility.Vector3dVector(colors[s['instance'] % len(colors)])
-        # print(s['coord'].shape, s['instance'].shape, s['segment'].shape, s['name'])
-        print(f'{s["name"][i]}.ply')
-        o3d.io.write_point_cloud(f'{s["name"][i]}.ply', pcd)
-        bs = be
+    #     # pcd.colors = o3d.utility.Vector3dVector(colors[s['instance'] % len(colors)])
+    #     # print(s['coord'].shape, s['instance'].shape, s['segment'].shape, s['name'])
+    #     print(f'{s["name"][i]}.ply')
+    #     o3d.io.write_point_cloud(f'{s["name"][i]}.ply', pcd)
+    #     bs = be
     exit(0)
 
     #    vis = o3d.visualization.Visualizer()

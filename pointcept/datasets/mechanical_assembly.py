@@ -231,8 +231,13 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
+        self.image_size = (224, 224)  # or (518, 518) for ViT-Giant
+
+        assert self.image_size[0] % 14 == 0 and self.image_size[1] % 14 == 0, \
+            "Image size must be divisible by 14 for ViT models."
+
         self.image_transform = transforms.Compose([
-            transforms.Resize((508, 508)),  # or 518 for ViT-Giant
+            transforms.Resize(self.image_size),  # or 518 for ViT-Giant
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
@@ -241,15 +246,19 @@ class MechanicalAssembly(Dataset):
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
 
+    def get_mesh_name(self, dir):
+        mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
+                     glob.glob(os.path.join(dir, "*.obj")) + \
+                     glob.glob(os.path.join(dir, "*.stl"))
+        if len(mesh_files) == 0:
+            raise FileNotFoundError(f"No mesh file found in {dir}")
+        return os.path.basename(mesh_files[0])
+
     def prepare_singe_clustering(self, file, annotations=None):
 
         dir = os.path.dirname(file)
 
-        if annotations is None:
-            with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-                    annotations = json.load(json_file)
-
-        mesh = trimesh.load(f'{self.data_root}/{file}')
+        mesh = trimesh.load(file)
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
         
@@ -260,7 +269,7 @@ class MechanicalAssembly(Dataset):
         if 'seg_indices' in annotations:
             annotations.pop('seg_indices')
 
-        with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
+        with open(os.path.join(dir, 'annotations.json'), 'w') as json_file:
             json.dump(annotations, json_file)
         
         groupings = {}
@@ -269,18 +278,25 @@ class MechanicalAssembly(Dataset):
         groupings['seg_indices2'] = ind2.tolist()
         groupings['seg_indices3'] = ind3.tolist()
 
-        with open(f'{self.data_root}/{dir}/grp.json', 'w') as json_file:
+        with open(f'{dir}/grp.json', 'w') as json_file:
                 json.dump(groupings, json_file)
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
+        if os.path.exists(os.path.join(dir, 'cached.pth')):
+            os.remove(os.path.join(dir, 'cached.pth'))
 
     def prepare_clustering(self):
-        for file in self.data_list:
-            dir = os.path.dirname(file)
-            print(os.path.join(self.data_root, dir, 'annotations.json'))
+        for dir in self.data_list:
 
-            with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+            print(dir)
+
+            if os.path.exists(os.path.join(dir, 'grp.json')):
+                print(f"Clustering already prepared for {dir}")
+                continue
+
+            print(os.path.join(dir, 'annotations.json'))
+            file = os.path.join(dir, self.get_mesh_name(dir))
+
+            with open(os.path.join(dir, 'annotations.json')) as json_file:
                 annotations = json.load(json_file)
 
             self.prepare_singe_clustering(file, annotations)
@@ -330,28 +346,102 @@ class MechanicalAssembly(Dataset):
                 data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
         else:
             raise NotImplementedError
-        
-        data_list = [f.strip() for f in data_list]   
+
+        data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
         return data_list
+    
+    def pixel_point_matches(
+                self,
+                pts_world: np.ndarray,
+                normals: np.ndarray,
+                P: np.ndarray,                 # 3×4 projection matrix
+                img_size: tuple[int, int],     # (H, W)
+    ):
+        """
+        Project a point cloud, keep one front‑most point per pixel,
+        and return pixel <‑‑> point index correspondences.
+
+        Returns
+        -------
+        pix_uv  : (M,2) int   integer (u, v) pixel coords
+        pc_idx  : (M,)  int   indices into `pts_world`
+        """
+        
+        H, W = img_size
+        N = len(pts_world)
+
+        # Homogeneous coordinates
+        pts_h = np.c_[pts_world, np.ones(N)]         # (N, 4)
+        img_h = pts_h @ P                            # (N, 3)
+
+        x_proj = img_h[:, 0]
+        y_proj = img_h[:, 1]
+        z_proj = img_h[:, 2]
+
+        # Valid depth mask
+        valid = z_proj > 1e-6
+        if not np.any(valid):
+            return np.empty((0, 2), dtype=int), np.empty((0,), dtype=int)
+
+        x = x_proj[valid] / z_proj[valid]
+        y = y_proj[valid] / z_proj[valid]
+        z = z_proj[valid]
+        pts_idx = np.nonzero(valid)[0]
+
+        # Convert to pixel coordinates
+        u = ((1 - x) * W / 2).round().astype(int)
+        v = ((1 - y) * H / 2).round().astype(int)
+
+        # Keep only points inside image
+        in_bounds = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+        u, v, z, pts_idx = u[in_bounds], v[in_bounds], z[in_bounds], pts_idx[in_bounds]
+
+        # if normals is not None and len(normals) == len(pts_world):
+        #     cam_dirs = -pts_world[pts_idx]
+        #     cam_dirs = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-8)
+        #     nrm = normals[pts_idx]
+        #     nrm = nrm / (np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-8)
+        #     dot = np.sum(nrm * cam_dirs, axis=1)
+        #     front_mask = dot > 0
+        #     u, v, z, pts_idx = u[front_mask], v[front_mask], z[front_mask], pts_idx[front_mask]
+
+        # Initialize depth buffer and index buffer
+        depth_buffer = np.full((H, W), np.inf)
+        index_buffer = np.full((H, W), -1, dtype=int)
+
+        for i in range(len(u)):
+            ui, vi = u[i], v[i]
+            if z[i] < depth_buffer[vi, ui]:
+                depth_buffer[vi, ui] = z[i]
+                index_buffer[vi, ui] = pts_idx[i]
+
+        # Extract valid pixels and corresponding point indices
+        valid_mask = index_buffer >= 0
+        v_coords, u_coords = np.nonzero(valid_mask)
+        pix_uv = np.stack([u_coords, v_coords], axis=1)
+        pc_idx = index_buffer[v_coords, u_coords]
+
+        return pix_uv, pc_idx
 
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
-        file = self.data_list[idx]
-        dir = os.path.dirname(file)
+        dir = self.data_list[idx]
+        file = os.path.join(dir, self.get_mesh_name(dir))
 
-        if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            return torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+        if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
+            return torch.load(os.path.join(dir, 'cached.pth'))
                 
 
-        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+        with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
-        with open(os.path.join(self.data_root, dir, 'grp.json')) as json_file:
+        with open(os.path.join(dir, 'grp.json')) as json_file:
             groups = json.load(json_file)
 
-        mesh = trimesh.load(f'{self.data_root}/{file}')
+
+        mesh = trimesh.load(file)
 
         if len(mesh.vertices) < 2048:
             del mesh
@@ -384,20 +474,31 @@ class MechanicalAssembly(Dataset):
         segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
         segment_labels = classes[segment_labels]
         
-        image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  '*.png')))[::2]
-        mapping_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  '*mapping.npy')))[::2]
-        
-        images, mappings = [], []
+        image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
+        P_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*.txt')))
 
-        for image_path, mapping_path in zip(image_paths, mapping_paths):
-            if os.path.exists(image_path):
-                image = Image.open(image_path).convert('RGB')
-                images.append(image)
-            if os.path.exists(mapping_path):
-                mappings.append(np.load(mapping_path))
+        images, mappings_src, mappings_tgt = [], [], []
 
-        # images = np.stack(images)
-        mappings = np.stack(mappings) % len(mesh.faces)
+        for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
+            image = Image.open(image_path).convert('RGB')
+            images.append(image)
+
+            P = np.loadtxt(P_path)
+
+            src, tgt = self.pixel_point_matches(
+                pts_world=mesh.vertices,
+                normals=normals,
+                P=P,
+                img_size=self.image_size
+            )
+
+            src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+
+            mappings_src.append(src.astype(np.int32))
+            mappings_tgt.append(tgt.astype(np.int32))
+            
+        mappings_src = np.concatenate(mappings_src, axis=0)
+        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
         # Load all images from the directory
         # image_dir = os.path.join(self.data_root, dir)
@@ -430,7 +531,8 @@ class MechanicalAssembly(Dataset):
             'path': self.data_list[idx],
             # 'seg_indices': seg_indices,
             'name': self.get_data_name(idx),
-            'mappings': mappings,
+            'mappings_src': mappings_src,
+            'mappings_tgt': mappings_tgt,
             'images': images,
             # 'ids': np.arange(len(mesh.vertices), dtype=np.int32),
         }

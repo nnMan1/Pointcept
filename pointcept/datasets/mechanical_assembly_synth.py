@@ -224,9 +224,8 @@ class MechanicalAssemblySynth(Dataset):
             H, W = img_size
             N = len(pts_world)
 
-            # Homogeneous coordinates
-            pts_h = np.c_[pts_world, np.ones(N)]         # (N, 4)
-            img_h = pts_h @ P.T                          # (N, 3)
+            pts_h = np.c_[pts_world, np.ones(N)]      
+            img_h = pts_h @ P                            
 
             x_proj = img_h[:, 0]
             y_proj = img_h[:, 1]

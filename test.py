@@ -74,8 +74,8 @@ class SuperpointPooling(nn.Module):
 
 dataset = build_dataset(dict(
                         type='MechanicalAssembly',
-                        split='train',
-                        data_root='data',
+                        split='val',
+                        data_root='data/cetim_assembly/data',
                               transform=[
                                 dict(type="CenterShift", apply_z=True),
                                 dict(
@@ -135,6 +135,8 @@ dataset = build_dataset(dict(
                                  "rivet_t1": 1,
                                  "rrivet_t2": 1}))
 
+dataset.prepare_clustering()
+
 colors = np.random.randint(0, 255, (1500, 3)) / 255
 
 for s in dataset:
@@ -152,10 +154,12 @@ for s in dataset:
    pcd.points = o3d.utility.Vector3dVector(s['coord'])
    pcd.colors = o3d.utility.Vector3dVector(colors[s['segment']])
 
-   vis = o3d.visualization.Visualizer()
-   vis.create_window(window_name=s['path'])
-   vis.add_geometry(pcd)
-   vis.run()
-   vis.destroy_window()
+   o3d.io.write_point_cloud('test.ply', pcd)
+   exit(0)
+#    vis = o3d.visualization.Visualizer()
+#    vis.create_window(window_name=s['path'])
+#    vis.add_geometry(pcd)
+#    vis.run()
+#    vis.destroy_window()
 
    # o3d.visualization.draw_geometries([pc 
