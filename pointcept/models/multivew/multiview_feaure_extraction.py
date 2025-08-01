@@ -40,7 +40,7 @@ class MeshFeatureExtractor(nn.Module):
             assert dim * dim == n_patches, "Patch tokens are not square!"
 
             img_size = torch.tensor(images[ibs].shape[-2:], dtype=torch.int32)
-            div_factor = 244 // dim
+            div_factor = 512 // dim
 
             patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], dim, dim, -1) 
 
@@ -75,7 +75,7 @@ class MeshFeatureExtractor(nn.Module):
             mbs = mbe
             obs = obe
 
-        # mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
+        mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
 
         return mesh_features
 

@@ -21,160 +21,28 @@ from segmentator import segment_mesh
 from PIL import Image
 import torchvision.transforms as transforms
 
-import pytorch3d
+from pytorch3d.structures import Pointclouds, Meshes
+from pytorch3d.renderer import (
+    look_at_view_transform,
+    look_at_rotation,
+    FoVPerspectiveCameras, 
+    PerspectiveCameras,
+    PointLights, 
+    DirectionalLights, 
+    Materials, 
+    RasterizationSettings, 
+    MeshRendererWithFragments, 
+    MeshRasterizer, 
+    SoftSilhouetteShader, 
+    SoftPhongShader,
+    MeshRenderer,
+    BlendParams,
+    TexturesUV,
+    TexturesVertex
+)
 
-class HoleAugmentor:
-
-    def __init__(self, class_mapping):
-        self.class_to_id = class_mapping
-
-    def plane_interpolate(self, data_dict, interpolating_ids, k, center, radius, assign_sem_label, assign_ins_label):
-        ret = {}
-
-        points = data_dict['coord']
-
-        a_ids, b_ids, alphas = [], [], []
-
-        attp = 0
-        
-        while len(a_ids) < k: 
-            a_id, b_id = np.random.choice(interpolating_ids, (2, ))
-            alpha = np.random.uniform(0, 1)
-
-            pt = alpha * points[a_id] + (1 - alpha) * points[b_id]
-            if (np.linalg.norm(pt - center) < radius) | (attp == 50):
-                attp = 0
-                a_ids.append(a_id)
-                b_ids.append(b_id)
-                alphas.append(alpha)
-
-            attp += 1
-
-        a_ids = np.asarray(a_ids, dtype=np.int32)
-        b_ids = np.asarray(b_ids, dtype=np.int32)
-        alphas = np.asarray(alphas)[..., None]
-
-
-        for key in ['coord', 'normal']:
-            ret[key] = alphas * data_dict[key][a_ids] + (1 - alphas) * data_dict[key][b_ids]
-
-        ret['segment'] = np.ones(k, np.int32) * assign_sem_label
-        ret['instance'] = np.ones(k, np.int32) * assign_ins_label
-        # ret['seg_indices'] = np.where(alphas[:, 0] < 0.5, data_dict['seg_indices'][a_ids],  data_dict['seg_indices'][b_ids])
-
-        return ret
-
-    def remove_radius(self,  data_dict, center, radius, label=-1):
-
-        points, labels  = data_dict['coord'], data_dict['segment']
-        dists =  np.linalg.norm(points - center, axis=-1)
-
-        ids_keep= np.where(dists > radius) if label == -1 else np.where((dists > radius) | (labels != label))
-
-        for key, val in data_dict.items():
-            if isinstance(val, np.ndarray) and len(val) == len(points):
-                data_dict[key]= data_dict[key][ids_keep]
-
-        return data_dict
-    
-    def augment_rivet_hole_shape(self, data_dict, center, radius, direction):
-
-        points, labels  = data_dict['coord'], data_dict['segment']
-        dists =  np.linalg.norm(points - center, axis=-1)
-
-        mask = dists < radius
-        delta = np.exp(-np.random.uniform(0.01, 1)/(1 - (dists[mask] / radius + 1e-15) ** 2))
-
-        direction = direction / np.linalg.norm(direction)
-        direction += + np.random.normal(0, 0.2, 3)
-        direction = direction / np.linalg.norm(direction)
-
-        points[mask] += 3 * delta[..., None] * direction
-
-        data_dict['coord'] = points
-
-        return data_dict
-
-    def remove_rivet(self, data_dict):
-        
-        rivet_id = self.class_to_id['rivet']
-        hole_id = self.class_to_id['hole']
-
-        if np.sum(data_dict['segment'] == rivet_id) == 0:
-            return data_dict
-
-        points, labels  = data_dict['coord'], data_dict['segment']
-            
-        ids = np.where(labels == rivet_id)[0]
-
-        clusters = (
-                        DBSCAN(
-                            eps=0.95,
-                            min_samples=1,
-                            n_jobs=1,
-                        )
-                        .fit(points[ids])
-                        .labels_
-                    )
-        
-        cluster_id = np.random.choice(clusters, 1)[0]
-
-        remove_ids = np.where(clusters == cluster_id)
-        center = points[ids[remove_ids]].mean(axis=0)
-        rivet_diam = np.linalg.norm(points[ids[remove_ids]] - center, axis=-1).max() * 1.3
-        
-        if rivet_diam > 10:
-            return data_dict
-
-        hole_diam_radius = max(rivet_diam + 3, 7)
-
-        dists =  np.linalg.norm(points - center, axis=-1)
-        ids_interesting = np.where(dists < hole_diam_radius)
-        # ids_remove = np.logical_and(dists < hole_diam_radius, labels == rivet_id)
-        ids_remove = dists < rivet_diam
-
-        interpolating_ids = np.where((dists < hole_diam_radius) & (dists > rivet_diam))[0]
-
-        if len(interpolating_ids) == 0:
-            return data_dict
-
-        # ids_remove = np.logical_and(ids_remove, np.cumsum(ids_remove) < np.random.uniform(0.9, 1) * ids_remove.sum())
-
-        interpolated = (self.plane_interpolate(data_dict, interpolating_ids, ids_remove.sum(), center, rivet_diam, hole_id, 0))
-
-        for key, val in data_dict.items():
-            if isinstance(val, np.ndarray) and len(val) == len(points):
-                data_dict[key][ids_remove] = interpolated[key]
-
-        mask = np.where(dists < hole_diam_radius)
-        labels[mask] = hole_id
-        data_dict['instance'][mask] = data_dict['instance'].max() + 1
-
-        data_dict['segment'] = labels
-
-
-        if len(interpolated['coord']) == 0:
-            return data_dict
-
-        new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
-
-        if np.random.uniform() < 0.2:
-            r = np.random.uniform(1, 2)
-            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
-            new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
-            data_dict = self.remove_radius(data_dict, new_center, 0.9*r)
-        else:
-            if np.random.uniform() < 0.7:
-                data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
-            else:
-                if np.random.uniform() < 0.5:
-                    r = np.random.uniform(0, 0.5)
-                    data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
-
-        return data_dict
-
-@DATASETS.register_module("MechanicalAssembly")
-class MechanicalAssembly(Dataset):
+@DATASETS.register_module("MechanicalAssemblyV2")
+class MechanicalAssemblyV2(Dataset):
 
     def __init__(
         self,
@@ -187,10 +55,9 @@ class MechanicalAssembly(Dataset):
         cache=False,
         loop=1,
         classes = [],
-        augment_holes=False,
         image_transform=None
     ):
-        super(MechanicalAssembly, self).__init__()
+        super(MechanicalAssemblyV2, self).__init__()
         self.data_root = data_root
         self.split = split
         self.transform = Compose(transform)
@@ -230,8 +97,6 @@ class MechanicalAssembly(Dataset):
         
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
-        self.augment_holes = augment_holes
-        self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
         self.image_size = (448, 448)  # or (518, 518) for ViT-Giant
 
@@ -249,6 +114,10 @@ class MechanicalAssembly(Dataset):
         #     self.get_data(i)
 
     def get_mesh_name(self, dir):
+
+        if os.path.exists(os.path.join(dir, "_simplified.stl")):
+            return "_simplified.stl"
+
         mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
                      glob.glob(os.path.join(dir, "*.obj")) + \
                      glob.glob(os.path.join(dir, "*.stl"))
@@ -303,41 +172,7 @@ class MechanicalAssembly(Dataset):
 
             self.prepare_singe_clustering(file, annotations)
 
-    def get_hole_centers(self, data_dict):
-
-        mask = np.where(data_dict['segment'] == self.class_mapping['hole'])[0]
-        dbscan = DBSCAN(eps=5, min_samples=1)
-        all_points = data_dict['coord']
-        hole_points = all_points[mask]
-
-        if len(hole_points) == 0:
-            return data_dict
-
-        dbscan.fit(hole_points)
-        labels = dbscan.labels_
-
-        centroids = []
-        cls_instance = []
-        for label in set(labels):
-            if label == -1:
-                continue
-
-            cluster_points = hole_points[labels == label]
-            print(cluster_points.shape)
-            centroid = np.mean(cluster_points, axis=0)
-            centroids.append(centroid)
-            cls_instance.append(data_dict['instance'][mask][labels == label][0])
-
-        centroids = np.array(centroids)
-        cls_instance = np.array(cls_instance)
-        distances = np.linalg.norm(centroids.T[:, None] - all_points[None, :].T, axis=0)
-        close_points_mask = np.any(distances < 7, axis=1)
-        close_points__nb = np.argmin(distances, axis=1)
-        data_dict['segment'][close_points_mask] = self.class_mapping['hole']
-        data_dict['instance'][close_points_mask] = cls_instance[close_points__nb[close_points_mask]]
-        
-        return data_dict
-
+  
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -352,79 +187,51 @@ class MechanicalAssembly(Dataset):
         data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
         return data_list
-    
+        
     def pixel_point_matches(
                 self,
                 pts_world: np.ndarray,
+                faces: np.ndarray,  
                 normals: np.ndarray,
-                P: np.ndarray,                 # 3×4 projection matrix
+                K: np.ndarray,                 # 3×4 projection matrix
+                R: np.ndarray,                 # 3×3 rotation matrix
+                T: np.ndarray,                 # 3D translation vector
                 img_size: tuple[int, int],     # (H, W)
     ):
-        """
-        Project a point cloud, keep one front‑most point per pixel,
-        and return pixel <‑‑> point index correspondences.
-
-        Returns
-        -------
-        pix_uv  : (M,2) int   integer (u, v) pixel coords
-        pc_idx  : (M,)  int   indices into `pts_world`
-        """
         
-        H, W = img_size
-        N = len(pts_world)
+        mesh = Meshes(
+            verts=[torch.from_numpy(pts_world.astype(np.float32))],
+            faces=[torch.from_numpy(faces.astype(np.int64))],
+        )
 
-        # Homogeneous coordinates
-        pts_h = np.c_[pts_world, np.ones(N)]         # (N, 4)
-        img_h = pts_h @ P                            # (N, 3)
+        cameras = FoVPerspectiveCameras(
+            K=torch.from_numpy(K.astype(np.float32)).unsqueeze(0),
+            R=torch.from_numpy(R.astype(np.float32)).unsqueeze(0),
+            T=torch.from_numpy(T.astype(np.float32)).unsqueeze(0),
+        )
 
-        x_proj = img_h[:, 0]
-        y_proj = img_h[:, 1]
-        z_proj = img_h[:, 2]
+        raster_settings = RasterizationSettings(
+            image_size=img_size,
+            blur_radius=0.0,
+            faces_per_pixel=1,
+        )
 
-        # Valid depth mask
-        valid = z_proj > 1e-6
-        if not np.any(valid):
-            return np.empty((0, 2), dtype=int), np.empty((0,), dtype=int)
+        rasterizer = MeshRasterizer(
+            cameras=cameras,
+            raster_settings=raster_settings,
+        )
 
-        x = x_proj[valid] / z_proj[valid]
-        y = y_proj[valid] / z_proj[valid]
-        z = z_proj[valid]
-        pts_idx = np.nonzero(valid)[0]
+        fragments = rasterizer(mesh)
+        mapping = fragments.pix_to_face[0, :, :, 0].numpy()  # (H, W)
 
-        # Convert to pixel coordinates
-        u = ((1 - x) * W / 2).round().astype(int)
-        v = ((1 - y) * H / 2).round().astype(int)
+        src = np.stack(np.where(mapping != -1)).T
+        tgt = mapping[src[:, 0], src[:, 1]]
 
-        # Keep only points inside image
-        in_bounds = (u >= 0) & (u < W) & (v >= 0) & (v < H)
-        u, v, z, pts_idx = u[in_bounds], v[in_bounds], z[in_bounds], pts_idx[in_bounds]
+        tgt = faces[tgt].copy().reshape(-1)
+        src = np.tile(src, (1, 3)).reshape(-1, 2)
 
-        # if normals is not None and len(normals) == len(pts_world):
-        #     cam_dirs = -pts_world[pts_idx]
-        #     cam_dirs = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-8)
-        #     nrm = normals[pts_idx]
-        #     nrm = nrm / (np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-8)
-        #     dot = np.sum(nrm * cam_dirs, axis=1)
-        #     front_mask = dot > 0
-        #     u, v, z, pts_idx = u[front_mask], v[front_mask], z[front_mask], pts_idx[front_mask]
+        return src, tgt
 
-        # Initialize depth buffer and index buffer
-        depth_buffer = np.full((H, W), np.inf)
-        index_buffer = np.full((H, W), -1, dtype=int)
-
-        for i in range(len(u)):
-            ui, vi = u[i], v[i]
-            if z[i] < depth_buffer[vi, ui]:
-                depth_buffer[vi, ui] = z[i]
-                index_buffer[vi, ui] = pts_idx[i]
-
-        # Extract valid pixels and corresponding point indices
-        valid_mask = index_buffer >= 0
-        v_coords, u_coords = np.nonzero(valid_mask)
-        pix_uv = np.stack([u_coords, v_coords], axis=1)
-        pc_idx = index_buffer[v_coords, u_coords]
-
-        return pix_uv, pc_idx
 
     def get_data(self, idx):
 
@@ -441,7 +248,6 @@ class MechanicalAssembly(Dataset):
 
         with open(os.path.join(dir, 'grp.json')) as json_file:
             groups = json.load(json_file)
-
 
         mesh = trimesh.load(file)
 
@@ -477,28 +283,46 @@ class MechanicalAssembly(Dataset):
         segment_labels = classes[segment_labels]
         
         image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
-        P_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*.txt')))
-
+        K_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*K.txt')))
+        R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
+        T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
+        mpappings_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*mappings.npy')))
+    
         images, mappings_src, mappings_tgt = [], [], []
 
-        for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
+        for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
             image = Image.open(image_path).convert('RGB')
             images.append(image)
 
-            P = np.loadtxt(P_path)
+            K = np.loadtxt(K)
+            R = np.loadtxt(R)
+            T = np.loadtxt(T)
+
+            # K, R, t = self.decompose_camera_matrix(P)
+            # print(f"Image {i}: K={K}, R={R}, t={t}")
 
             src, tgt = self.pixel_point_matches(
                 pts_world=mesh.vertices,
+                faces=mesh.faces,
                 normals=normals,
-                P=P,
-                img_size=(224, 224)
+                K=K,
+                R=R,
+                T=T,
+                img_size=(448, 448)
             )
 
             src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
-
+            
             mappings_src.append(src.astype(np.int32))
             mappings_tgt.append(tgt.astype(np.int32))
-            
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(mesh.vertices)
+            colors = np.zeros((len(mesh.vertices), 3), dtype=np.float32)
+            colors[tgt, 0] = 1 - colors[tgt, 0]
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+            o3d.io.write_point_cloud(f'image_{i}.ply', pcd)
+
         mappings_src = np.concatenate(mappings_src, axis=0)
         mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
@@ -563,13 +387,6 @@ class MechanicalAssembly(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)    
-
-        if self.augment_holes:
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
 
         if self.image_transform is not None:
             if 'images' in data_dict:
