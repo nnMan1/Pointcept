@@ -157,7 +157,7 @@ class MechanicalAssemblySynth(Dataset):
             with open(annotation, 'w') as f:
                 json.dump(annotations, f)
 
-        cached_path = os.path.join(self.data_root, dir, 'cached.pth')
+        cached_path = os.path.join(dir, 'cached.pth')
         if os.path.exists(cached_path):
             os.remove(cached_path)
 
@@ -402,7 +402,7 @@ class MechanicalAssemblySynth(Dataset):
             }
 
             if self.cache:
-                torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+                torch.save(data, os.path.join(dir, 'cached.pth'))
 
         except Exception as e:
             print(f"Error processing {dir}: {e}")
