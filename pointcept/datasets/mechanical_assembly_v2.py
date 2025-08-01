@@ -172,7 +172,6 @@ class MechanicalAssemblyV2(Dataset):
 
             self.prepare_singe_clustering(file, annotations)
 
-  
     def get_data_list(self):
         
         if isinstance(self.split, str):
@@ -192,7 +191,6 @@ class MechanicalAssemblyV2(Dataset):
                 self,
                 pts_world: np.ndarray,
                 faces: np.ndarray,  
-                normals: np.ndarray,
                 K: np.ndarray,                 # 3×4 projection matrix
                 R: np.ndarray,                 # 3×3 rotation matrix
                 T: np.ndarray,                 # 3D translation vector
@@ -200,20 +198,27 @@ class MechanicalAssemblyV2(Dataset):
     ):
         
         mesh = Meshes(
-            verts=[torch.from_numpy(pts_world.astype(np.float32))],
-            faces=[torch.from_numpy(faces.astype(np.int64))],
+            verts=[torch.from_numpy(pts_world.astype(np.float32)).cuda()],
+            faces=[torch.from_numpy(faces.astype(np.int64)).cuda()],
         )
 
+        half_fov = np.arctan(1.0 / K[1, 1])
+        fov = 2.0 * half_fov
+        fov = fov * 180.0 / np.pi 
+
         cameras = FoVPerspectiveCameras(
-            K=torch.from_numpy(K.astype(np.float32)).unsqueeze(0),
-            R=torch.from_numpy(R.astype(np.float32)).unsqueeze(0),
-            T=torch.from_numpy(T.astype(np.float32)).unsqueeze(0),
+            R=torch.from_numpy(R.astype(np.float32)).unsqueeze(0).cuda(),
+            T=torch.from_numpy(T.astype(np.float32)).unsqueeze(0).cuda(),
+            device='cuda:0',
+            fov=fov,
+            zfar=5000000
         )
 
         raster_settings = RasterizationSettings(
             image_size=img_size,
             blur_radius=0.0,
             faces_per_pixel=1,
+            cull_backfaces=True
         )
 
         rasterizer = MeshRasterizer(
@@ -222,7 +227,7 @@ class MechanicalAssemblyV2(Dataset):
         )
 
         fragments = rasterizer(mesh)
-        mapping = fragments.pix_to_face[0, :, :, 0].numpy()  # (H, W)
+        mapping = fragments.pix_to_face[0, :, :, 0].cpu().numpy()  # (H, W)
 
         src = np.stack(np.where(mapping != -1)).T
         tgt = mapping[src[:, 0], src[:, 1]]
@@ -286,7 +291,6 @@ class MechanicalAssemblyV2(Dataset):
         K_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*K.txt')))
         R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
         T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
-        mpappings_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*mappings.npy')))
     
         images, mappings_src, mappings_tgt = [], [], []
 
@@ -304,11 +308,10 @@ class MechanicalAssemblyV2(Dataset):
             src, tgt = self.pixel_point_matches(
                 pts_world=mesh.vertices,
                 faces=mesh.faces,
-                normals=normals,
                 K=K,
                 R=R,
                 T=T,
-                img_size=(448, 448)
+                img_size=(512, 512)
             )
 
             src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)

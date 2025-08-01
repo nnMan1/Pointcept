@@ -20,8 +20,27 @@ from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
 from PIL import Image
 import torchvision.transforms as transforms
+
+from pytorch3d.structures import Pointclouds, Meshes
 from pytorch3d.renderer import (
+    look_at_view_transform,
+    look_at_rotation,
+    FoVPerspectiveCameras, 
     PerspectiveCameras,
+    PointLights, 
+    DirectionalLights, 
+    Materials, 
+    RasterizationSettings, 
+    MeshRendererWithFragments, 
+    MeshRasterizer, 
+    SoftSilhouetteShader, 
+    SoftPhongShader,
+    MeshRenderer,
+    BlendParams,
+    TexturesUV,
+    TexturesVertex,
+    PointsRasterizationSettings,
+    PointsRasterizer
 )
 
 
@@ -201,83 +220,64 @@ class MechanicalAssemblySynth(Dataset):
         else:
             raise NotImplementedError
         
-        data_list = [f.strip() for f in data_list]   
+        data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
         return data_list
 
     def pixel_point_matches(
                 self,
                 pts_world: np.ndarray,
-                P: np.ndarray,                 # 3×4 projection matrix
+                normals: np.ndarray,  
+                K: np.ndarray,                 # 3×4 projection matrix
+                R: np.ndarray,                 # 3×3 rotation matrix
+                T: np.ndarray,                 # 3D translation vector
                 img_size: tuple[int, int],     # (H, W)
     ):
-            """
-            Project a point cloud, keep one front‑most point per pixel,
-            and return pixel <‑‑> point index correspondences.
+        
+        pcd = Pointclouds(
+            points=[torch.from_numpy(pts_world.astype(np.float32)).cuda()],
+            normals=[torch.zeros_like(torch.from_numpy(normals.astype(np.float32))).cuda()],
+        )
 
-            Returns
-            -------
-            pix_uv  : (M,2) int   integer (u, v) pixel coords
-            pc_idx  : (M,)  int   indices into `pts_world`
-            """
-            
-            H, W = img_size
-            N = len(pts_world)
+        half_fov = np.arctan(1.0 / K[1, 1])
+        fov = 2.0 * half_fov
+        fov = fov * 180.0 / np.pi 
 
-            pts_h = np.c_[pts_world, np.ones(N)]      
-            img_h = pts_h @ P                            
+        cameras = FoVPerspectiveCameras(
+            R=torch.from_numpy(R.astype(np.float32)).unsqueeze(0).cuda(),
+            T=torch.from_numpy(T.astype(np.float32)).unsqueeze(0).cuda(),
+            device='cuda:0',
+            fov=fov,
+            zfar=5000000
+        )
 
-            x_proj = img_h[:, 0]
-            y_proj = img_h[:, 1]
-            z_proj = img_h[:, 2]
+        raster_settings = PointsRasterizationSettings(
+            image_size=img_size,
+            radius=0.01,
+            points_per_pixel=1
+        )
 
-            # Valid depth mask
-            valid = z_proj > 1e-6
-            if not np.any(valid):
-                return np.empty((0, 2), dtype=int), np.empty((0,), dtype=int)
+        rasterizer = PointsRasterizer(cameras=cameras, raster_settings=raster_settings)
 
-            x = x_proj[valid] / z_proj[valid]
-            y = y_proj[valid] / z_proj[valid]
-            z = z_proj[valid]
-            pts_idx = np.nonzero(valid)[0]
+        fragments = rasterizer(pcd)
+        mapping = fragments.idx[0, :, :, 0].cpu().numpy()  # (H, W)
 
-            # Convert to pixel coordinates
-            u = ((1 - x) * W / 2).round().astype(int)
-            v = ((1 - y) * H / 2).round().astype(int)
+        src = np.stack(np.where(mapping != -1)).T
+        tgt = mapping[src[:, 0], src[:, 1]]
 
-            # Keep only points inside image
-            in_bounds = (u >= 0) & (u < W) & (v >= 0) & (v < H)
-            u, v, z, pts_idx = u[in_bounds], v[in_bounds], z[in_bounds], pts_idx[in_bounds]
-
-            # Initialize depth buffer and index buffer
-            depth_buffer = np.full((H, W), np.inf)
-            index_buffer = np.full((H, W), -1, dtype=int)
-
-            for i in range(len(u)):
-                ui, vi = u[i], v[i]
-                if z[i] < depth_buffer[vi, ui]:
-                    depth_buffer[vi, ui] = z[i]
-                    index_buffer[vi, ui] = pts_idx[i]
-
-            # Extract valid pixels and corresponding point indices
-            valid_mask = index_buffer >= 0
-            v_coords, u_coords = np.nonzero(valid_mask)
-            pix_uv = np.stack([u_coords, v_coords], axis=1)
-            pc_idx = index_buffer[v_coords, u_coords]
-
-            return pix_uv, pc_idx
+        return src, tgt
 
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
         dir = self.data_list[idx]
 
-        annotations = sorted(glob.glob(os.path.join(self.data_root, dir, '*.json')))
+        annotations = sorted(glob.glob(os.path.join(dir, '*.json')))
         annotations = [a for a in annotations if not a.endswith('grp.json')]
 
-        if self.cache and os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
+        if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
             try:
-                data=torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
+                data=torch.load(os.path.join(dir, 'cached.pth'))
                 data['seg_indices'] = data[self.get_clustering()]
                 data.pop('seg_indices1')
                 data.pop('seg_indices2')
@@ -285,8 +285,8 @@ class MechanicalAssemblySynth(Dataset):
                 return data
             except Exception as e:
                 print(f"Error loading {dir}: {e}")
-                os.remove(os.path.join(self.data_root, dir, 'cached.pth'))
-        
+                os.remove(os.path.join(dir, 'cached.pth'))
+
         vertices = []
         semantic_id = []
         instance_id = []
@@ -327,11 +327,7 @@ class MechanicalAssemblySynth(Dataset):
         seg_indices1 = np.concatenate(seg_indices1, axis=0)
         seg_indices2 = np.concatenate(seg_indices2, axis=0)
         seg_indices3 = np.concatenate(seg_indices3, axis=0)
-        # except Exception as e:
-        #     print(f"Error loading {dir}: {e}")
-        #     return self.get_data(idx + 1)
-
-        # Estimate normals for the point cloud
+        
         mesh = trimesh.Trimesh(vertices=vertices, process=False)
         normals = mesh.vertex_normals.copy()
         
@@ -344,32 +340,40 @@ class MechanicalAssemblySynth(Dataset):
         while len(keep_ids) > 400000:
             keep_ids = keep_ids[::2]
             vertices = vertices[::2]
-    
+
+        image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
+        K_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*K.txt')))
+        R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
+        T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
+
         images, mappings_src, mappings_tgt = [], [], []
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'color')): 
-            image_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'color/*.png')))[::1]
-            P_paths = sorted(glob.glob(os.path.join(self.data_root, dir,  'poses/*P.txt')))[::1]
-
-            for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
-                image = Image.open(image_path).convert('RGB')
-                images.append(image)
-
-                P = np.loadtxt(P_path)
-
-                src, tgt = self.pixel_point_matches(
-                    pts_world=vertices,
-                    P=P,
-                    img_size=(224, 224)
-                )
-
-                src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
-
-                mappings_src.append(src.astype(np.int32))
-                mappings_tgt.append(tgt.astype(np.int32))
+        
             
-            mappings_src = np.concatenate(mappings_src, axis=0)
-            mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+        for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
+            image = Image.open(image_path).convert('RGB')
+            images.append(image)
+
+            K = np.loadtxt(K)
+            R = np.loadtxt(R)
+            T = np.loadtxt(T)
+
+            src, tgt = self.pixel_point_matches(
+                pts_world=vertices,
+                normals=normals[keep_ids],
+                K = K,
+                R=R,
+                T=T, 
+                img_size=(512, 512)
+            )
+
+            src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+
+            mappings_src.append(src.astype(np.int32))
+            mappings_tgt.append(tgt.astype(np.int32))
+            
+        mappings_src = np.concatenate(mappings_src, axis=0)
+        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
         while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
             vertices *= 2
