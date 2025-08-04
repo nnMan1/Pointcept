@@ -10,7 +10,7 @@ from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
-from .backbone import SpUNet
+from .backbone import PointTransformerV3AddFeatures
 from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
 
 class Encoder(nn.Module):
@@ -20,22 +20,23 @@ class Encoder(nn.Module):
         self.out_channels = out_channels
 
         # self.backbone = build_model(backbone) 
-        # self.backbone = SpUNet(**backbone)
-        self.backbone = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0")
+        self.backbone = PointTransformerV3AddFeatures(**backbone)
+        self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0")
         self.mask_features_head = nn.Sequential(
-            nn.Linear(384, out_channels),
+            nn.Linear(64, out_channels),
             nn.LayerNorm(out_channels),
             nn.ReLU(),
             nn.Linear(out_channels, out_channels)
         )
 
-    def forward(self, data):
+    def forward(self, data_dict):
 
-        offset = data['offset']
+        offset = data_dict['offset']
 
         with torch.no_grad():
-            pcd_features = self.backbone(data)
+            data_dict['add_features'] = self.dino(data_dict)
 
+        pcd_features = self.backbone(data_dict).feat
         mask_features = self.mask_features_head(pcd_features)
         
         return {
