@@ -115,9 +115,6 @@ class MechanicalAssemblyV2(Dataset):
 
     def get_mesh_name(self, dir):
 
-        if os.path.exists(os.path.join(dir, "_simplified.stl")):
-            return "_simplified.stl"
-
         mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
                      glob.glob(os.path.join(dir, "*.obj")) + \
                      glob.glob(os.path.join(dir, "*.stl"))
@@ -237,7 +234,6 @@ class MechanicalAssemblyV2(Dataset):
 
         return src, tgt
 
-
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
@@ -247,9 +243,11 @@ class MechanicalAssemblyV2(Dataset):
         if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
             return torch.load(os.path.join(dir, 'cached.pth'))
                 
-
         with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
+
+        if 'semantic_id' not in annotations:
+            annotations['semantic_id'] = np.zeros_like(annotations['instance_id'])
 
         with open(os.path.join(dir, 'grp.json')) as json_file:
             groups = json.load(json_file)
@@ -319,12 +317,12 @@ class MechanicalAssemblyV2(Dataset):
             mappings_src.append(src.astype(np.int32))
             mappings_tgt.append(tgt.astype(np.int32))
 
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(mesh.vertices)
-            colors = np.zeros((len(mesh.vertices), 3), dtype=np.float32)
-            colors[tgt, 0] = 1 - colors[tgt, 0]
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-            o3d.io.write_point_cloud(f'image_{i}.ply', pcd)
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(mesh.vertices)
+            # colors = np.zeros((len(mesh.vertices), 3), dtype=np.float32)
+            # colors[tgt, 0] = 1 - colors[tgt, 0]
+            # pcd.colors = o3d.utility.Vector3dVector(colors)
+            # o3d.io.write_point_cloud(f'image_{i}.ply', pcd)
 
         mappings_src = np.concatenate(mappings_src, axis=0)
         mappings_tgt = np.concatenate(mappings_tgt, axis=0)
@@ -375,7 +373,7 @@ class MechanicalAssemblyV2(Dataset):
         data['seg_indices'] = np.asarray(data['seg_indices1'])
 
         if self.cache:
-            torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+            torch.save(data, os.path.join(dir, 'cached.pth'))
         
         return data
 

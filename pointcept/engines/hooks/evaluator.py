@@ -393,7 +393,9 @@ class InsSegEvaluator(HookBase):
                 )
                 if intersection > 0:
                     gt_inst_ = gt_inst.copy()
+                    gt_inst_.pop('mask', None)  
                     pred_inst_ = pred_inst.copy()
+                    pred_inst_.pop('mask', None)
                     gt_inst_["intersection"] = intersection
                     pred_inst_["intersection"] = intersection
                     matched_gt.append(gt_inst_)

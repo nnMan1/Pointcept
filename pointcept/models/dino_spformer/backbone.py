@@ -22,21 +22,21 @@ class PointTransformerV3AddFeatures(PointTransformerV3):
 
         point = self.embedding(point)
 
-        add_features = [data_dict.get('add_features', None)]
+        # add_features = [data_dict.get('add_features', None)]
         
         for k, layer in self.enc._modules.items():
             point = layer(point)
-            if point.pooling_inverse != {}:
-                add_features.append(torch_scatter.scatter_mean(add_features[-1],  point.pooling_inverse, dim=0))
-            else:
-                add_features.append(add_features[-1])
+            # if point.pooling_inverse != {}:
+            #     add_features.append(torch_scatter.scatter_mean(add_features[-1],  point.pooling_inverse, dim=0))
+            # else:
+            #     add_features.append(add_features[-1])
 
-        add_features.pop(-1)
-        add_features.reverse()
+        # add_features.pop(-1)
+        # add_features.reverse()
 
         for k, layer in self.dec._modules.items():
             point = layer(point)
-            point.feat = point.feat + add_features[0][:, :point.feat.shape[1]]
-            add_features.pop(0)
+            # point.feat = point.feat + add_features[0][:, :point.feat.shape[1]]
+            # add_features.pop(0)
 
         return point

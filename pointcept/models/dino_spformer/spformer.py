@@ -21,7 +21,7 @@ class Encoder(nn.Module):
 
         # self.backbone = build_model(backbone) 
         self.backbone = PointTransformerV3AddFeatures(**backbone)
-        self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0")
+        self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0", merge_strategy="random_sample")
         self.mask_features_head = nn.Sequential(
             nn.Linear(64, out_channels),
             nn.LayerNorm(out_channels),
@@ -33,8 +33,8 @@ class Encoder(nn.Module):
 
         offset = data_dict['offset']
 
-        with torch.no_grad():
-            data_dict['add_features'] = self.dino(data_dict)
+        # with torch.no_grad():
+        #     data_dict['add_features'] = self.dino(data_dict)
 
         pcd_features = self.backbone(data_dict).feat
         mask_features = self.mask_features_head(pcd_features)

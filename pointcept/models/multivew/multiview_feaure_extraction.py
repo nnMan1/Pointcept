@@ -52,10 +52,10 @@ class MeshFeatureExtractor(nn.Module):
             mappings_tgt = inverse[mappings_tgt] # Apply inverse mapping from points to voxels          
 
             mappings = torch.stack([mappings_src[:, 0], mappings_tgt])
-            _, idx = np.unique(mappings.cpu(), axis=1, return_index=True)
+            # _, idx = np.unique(mappings.cpu(), axis=1, return_index=True)
             
-            mappings_src = mappings_src[idx]
-            mappings_tgt = mappings_tgt[idx]
+            # mappings_src = mappings_src[idx]
+            # mappings_tgt = mappings_tgt[idx]
 
             if self.merge_strategy == 'random_sample':
                 random_positions = self.one_random_position_per_value(mappings_tgt)
