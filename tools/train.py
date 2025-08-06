@@ -30,13 +30,13 @@ class Args:
         self.machine_rank = 0 
         self.dist_url = 'auto'
 
-        self.options={'save_path': 'exp/abc_dataset/insseg-myspformer-v1m1-0-spunet-base'}
+        self.options={'save_path': 'exp/abc_dataset/insseg-myspformer-v1m1-0-spunet-base_fix_mapping2'}
 
 def main():
     # exp/scannetfuselage -c semseg-spunet-v1m1-0-base_lr_split_groupingV2 -n semseg-spunet-v1m1-0-base_lr_split_groupingV2[]
 
-    # args = default_argument_parser().parse_args()
-    args = Args() 
+    args = default_argument_parser().parse_args()
+    # args = Args() 
     cfg = default_config_parser(args.config_file, args.options)
 
     launch(
