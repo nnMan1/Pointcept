@@ -15,13 +15,20 @@ from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExt
 
 class Encoder(nn.Module):
 
-    def __init__(self, backbone, out_channels, backbone_out_channels):
+    def __init__(self, 
+                 backbone, 
+                 out_channels, 
+                 use_dino=False):
         super().__init__()
         self.out_channels = out_channels
 
         # self.backbone = build_model(backbone) 
         self.backbone = PointTransformerV3AddFeatures(**backbone)
-        self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0", merge_strategy="random_sample")
+        
+        self.dino = None
+        if use_dino:
+            self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", merge_strategy="random_sample")
+
         self.mask_features_head = nn.Sequential(
             nn.Linear(64, out_channels),
             nn.LayerNorm(out_channels),
@@ -33,8 +40,9 @@ class Encoder(nn.Module):
 
         offset = data_dict['offset']
 
-        # with torch.no_grad():
-        #     data_dict['add_features'] = self.dino(data_dict)
+        if self.dino is not None:
+            with torch.no_grad():
+                data_dict['add_features'] = self.dino(data_dict)
 
         pcd_features = self.backbone(data_dict).feat
         mask_features = self.mask_features_head(pcd_features)

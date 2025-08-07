@@ -13,19 +13,20 @@ import torch.nn.functional as F
 
 
 class MeshFeatureExtractor(nn.Module):
-    def __init__(self, model_name="facebook/dinov2-small", device="cuda", merge_strategy='mean'):
+    def __init__(self, model_name="facebook/dinov2-small", merge_strategy='mean'):
         super().__init__()
-        self.device = device
+        # self.device = device
         self.merge_strategy = merge_strategy
 
         # Load pretrained DINOv2 model
-        self.model = Dinov2Model.from_pretrained(model_name).to(self.device).eval()
+        self.model = Dinov2Model.from_pretrained(model_name, 
+                                                 local_files_only=True).eval()
 
     def forward(self, data_dict):
         images = data_dict.get('images', [])
             
-        mesh_features = torch.zeros((len(data_dict['coord']), 384), dtype=torch.float32, device=self.device)
-        mesh_features_cnt = torch.zeros((len(data_dict['coord'])), dtype=torch.float32, device=self.device)
+        mesh_features = torch.zeros((len(data_dict['coord']), 384), dtype=torch.float32, device=self.model.device)
+        mesh_features_cnt = torch.zeros((len(data_dict['coord'])), dtype=torch.float32, device=self.model.device)
 
         bs, ibs, mbs, obs = 0, 0, 0, 0
         i=0
@@ -44,7 +45,7 @@ class MeshFeatureExtractor(nn.Module):
 
             patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], dim, dim, -1) 
 
-            features = patch_tokens.to(self.device)
+            features = patch_tokens.to(self.model.device)
             
             mappings_src = data_dict['mappings_src'][mbs:mbe]
             mappings_tgt = data_dict['mappings_tgt'][mbs:mbe]

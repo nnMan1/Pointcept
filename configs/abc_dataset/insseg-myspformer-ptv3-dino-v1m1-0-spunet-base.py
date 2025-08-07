@@ -54,16 +54,9 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
         ),
-        backbone_out_channels=32,
         out_channels=32,
+        use_dino=True,  
      ),
-    #  positional_embedding=dict(
-    #     type='PositionEmbeddingCoordsSine',
-    #     pos_type="fourier",
-    #     d_pos=128,
-    #     gauss_scale=1,
-    #     normalize=True,
-    # ),
      decoder=dict(
         in_channels=32,
         hlevels=6,

@@ -222,7 +222,7 @@ class MechanicalAssemblySynth(Dataset):
         
         data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
-        return data_list
+        return data_list[::-1]
 
     def pixel_point_matches(
                 self,
