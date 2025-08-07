@@ -3,6 +3,7 @@ import gorilla
 import spconv.pytorch as spconv
 import torch
 from collections import OrderedDict
+import os
 from spconv.pytorch.modules import SparseModule
 from torch import nn
 import torch_scatter
@@ -10,6 +11,7 @@ from pointcept.models.utils.structure import Point
 from typing import Callable, Dict, List, Optional, Union
 from pointcept.models.utils import offset2batch
 from pointcept.models.point_transformer_v3 import PointTransformerV3
+from pointcept.utils.visualization import pca_features_visualization
 
 class PointTransformerV3AddFeatures(PointTransformerV3):
     def __init__(self, *args, **kwargs):
@@ -36,6 +38,8 @@ class PointTransformerV3AddFeatures(PointTransformerV3):
             add_features.pop(-1)
             add_features.reverse()
 
+        
+
         for k, layer in self.dec._modules.items():
             point = layer(point)
 
@@ -43,4 +47,16 @@ class PointTransformerV3AddFeatures(PointTransformerV3):
                 point.feat = point.feat + add_features[0][:, :point.feat.shape[1]]
                 add_features.pop(0)
 
+        debugging = os.environ.get("DEBUGING", "false").lower() == "backbone"
+        if debugging:
+
+            print("Visualizing PCA features...")
+
+            pca_features_visualization(
+                point.coord.detach().cpu().numpy(),
+                point.feat.detach().cpu().numpy(),
+                n_components=3,
+                file_path=f"backbone_features_{data_dict['name'][0]}_{k}.ply"
+            )
+            
         return point
