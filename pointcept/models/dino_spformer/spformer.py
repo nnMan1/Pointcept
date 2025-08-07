@@ -18,7 +18,8 @@ class Encoder(nn.Module):
     def __init__(self, 
                  backbone, 
                  out_channels, 
-                 use_dino=False):
+                 dino_version=None,
+                 dino_output_size=384):
         super().__init__()
         self.out_channels = out_channels
 
@@ -26,8 +27,15 @@ class Encoder(nn.Module):
         self.backbone = PointTransformerV3AddFeatures(**backbone)
         
         self.dino = None
-        if use_dino:
-            self.dino = MeshFeatureExtractor(model_name="facebook/dinov2-small", merge_strategy="random_sample")
+        if dino_version is not None:
+            self.dino = MeshFeatureExtractor(model_name=dino_version, merge_strategy="random_sample", fts_dim=dino_output_size)
+
+            self.dino_mapping_mlp = nn.Sequential(
+                nn.Linear(dino_output_size, 256),
+                nn.LayerNorm(256),
+                nn.ReLU(),
+                nn.Linear(256, 256)
+            )
 
         self.mask_features_head = nn.Sequential(
             nn.Linear(64, out_channels),
@@ -43,6 +51,7 @@ class Encoder(nn.Module):
         if self.dino is not None:
             with torch.no_grad():
                 data_dict['add_features'] = self.dino(data_dict)
+                data_dict['add_features'] = self.dino_mapping_mlp(data_dict['add_features'])
 
         pcd_features = self.backbone(data_dict).feat
         mask_features = self.mask_features_head(pcd_features)

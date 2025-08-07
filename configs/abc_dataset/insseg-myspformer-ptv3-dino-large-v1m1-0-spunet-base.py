@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 4 # bs: total bs in all gpus
-num_worker = 16
+num_worker = 4
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -55,8 +55,8 @@ model = dict(
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
         ),
         out_channels=32,
-        dino_version="facebook/dinov2-small",
-        dino_output_size=384
+        dino_version="facebook/dinov2-large",  
+        dino_output_size=1024
      ),
      decoder=dict(
         in_channels=32,

@@ -13,19 +13,22 @@ import torch.nn.functional as F
 
 
 class MeshFeatureExtractor(nn.Module):
-    def __init__(self, model_name="facebook/dinov2-small", merge_strategy='mean'):
+    def __init__(self, model_name="facebook/dinov2-small", merge_strategy='mean', fts_dim=384):
         super().__init__()
         # self.device = device
         self.merge_strategy = merge_strategy
 
         # Load pretrained DINOv2 model
+        print(model_name)
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=True).eval()
 
+        self.fts_dim = fts_dim
+
     def forward(self, data_dict):
         images = data_dict.get('images', [])
-            
-        mesh_features = torch.zeros((len(data_dict['coord']), 384), dtype=torch.float32, device=self.model.device)
+
+        mesh_features = torch.zeros((len(data_dict['coord']), self.fts_dim), dtype=torch.float32, device=self.model.device)
         mesh_features_cnt = torch.zeros((len(data_dict['coord'])), dtype=torch.float32, device=self.model.device)
 
         bs, ibs, mbs, obs = 0, 0, 0, 0
