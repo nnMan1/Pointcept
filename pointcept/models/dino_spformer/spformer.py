@@ -1,4 +1,5 @@
 
+import os
 import torch
 import torch_scatter
 from torch import nn
@@ -12,6 +13,7 @@ from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAtten
 from .utils import compute_stats, select_masks, db_scan
 from .backbone import PointTransformerV3AddFeatures
 from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
+from pointcept.utils.visualization import pca_features_visualization
 
 class Encoder(nn.Module):
 
@@ -51,7 +53,18 @@ class Encoder(nn.Module):
         if self.dino is not None:
             with torch.no_grad():
                 data_dict['add_features'] = self.dino(data_dict)
-                data_dict['add_features'] = self.dino_mapping_mlp(data_dict['add_features'])
+                debugging = os.environ.get("DEBUGING", "false").lower() == "true"
+                if debugging:
+                    print("Visualizing DINO features...")
+                    pca_features_visualization(
+                        data_dict['coord'][:data_dict['offset'][0]].detach().cpu().numpy(),
+                        data_dict['add_features'][:data_dict['offset'][0]].detach().cpu().numpy(),
+                        n_components=3,
+                        file_path=f"features_{data_dict['name']}_dino.ply"
+                    )
+
+            data_dict['add_features'] = self.dino_mapping_mlp(data_dict['add_features'])
+
 
         pcd_features = self.backbone(data_dict).feat
         mask_features = self.mask_features_head(pcd_features)
