@@ -52,6 +52,7 @@ class MCBDataset(Dataset):
         cache=False,
         loop=1,
         class_names = class_names, 
+        label_to_id=None,
     ):
         super(MCBDataset, self).__init__()
         self.data_root = data_root
@@ -59,7 +60,10 @@ class MCBDataset(Dataset):
 
         self.class_names = class_names
         
-        self.label_to_id = {label: id for id, label in enumerate(class_names)}
+        if label_to_id is not None:
+            self.label_to_id = label_to_id
+        else:
+            self.label_to_id = {label: id for id, label in enumerate(class_names)}
 
         self.transform = Compose(transform)
         self.cache = cache
@@ -97,11 +101,11 @@ class MCBDataset(Dataset):
 
         if isinstance(self.split, str):
             for label in class_names:
-                data_list += glob.glob(osp.join(self.data_root, 'MCB_*/dataset_org_norm/', self.split, label, '*.obj'))
+                data_list += glob.glob(osp.join(self.data_root, self.split, label, '*.obj'))
         elif isinstance(self.split, Sequence):
             for split in self.split:
                 for label in class_names:
-                    data_list += glob.glob(osp.join(self.data_root, 'MCB_*/dataset_org_norm/', split, label, '*.obj'))
+                    data_list += glob.glob(osp.join(self.data_root, self.split, label, '*.obj'))
         else:
             raise NotImplementedError
         
@@ -113,7 +117,11 @@ class MCBDataset(Dataset):
 
         try:
             data = self.data_list[idx]
-            pcd = trimesh.load_mesh(data).sample(4096, return_index=False) # weighted by face area by default
+            mesh = trimesh.load_mesh(data)
+            if len(mesh.vertices) == 0:
+                return self.get_data((idx + 1) % len(self.data_list))
+            
+            pcd = mesh.sample(4096, return_index=False) # weighted by face area by default
             coord = np.asarray(pcd)
 
             if len(coord) == 0:
@@ -125,6 +133,8 @@ class MCBDataset(Dataset):
         label_id = self.label_to_id[label] if label in self.class_names else self.label_to_id['other']
         
         return {
+            'verts': mesh.vertices,
+            'faces': mesh.faces,
             'path': data,
             'coord': coord,
             'category': label_id,

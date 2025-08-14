@@ -27,3 +27,5 @@ from .mask_3d import *
 from .spformer import *
 from .edges_detection_mask_3d import *
 from .dino_spformer import *
+
+from .multivew import *

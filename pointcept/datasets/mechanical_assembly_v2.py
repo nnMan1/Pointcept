@@ -110,9 +110,6 @@ class MechanicalAssemblyV2(Dataset):
                                  std=[0.229, 0.224, 0.225]),
         ])
 
-        # for i in range(len(self.data_list)):
-        #     self.get_data(i)
-
     def get_mesh_name(self, dir):
 
         mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
@@ -121,53 +118,6 @@ class MechanicalAssemblyV2(Dataset):
         if len(mesh_files) == 0:
             raise FileNotFoundError(f"No mesh file found in {dir}")
         return os.path.basename(mesh_files[0])
-
-    def prepare_singe_clustering(self, file, annotations=None):
-
-        dir = os.path.dirname(file)
-
-        mesh = trimesh.load(file)
-        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
-        faces = torch.from_numpy(mesh.faces.astype(np.int64))
-        
-        ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-        ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
-        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) // 5).numpy()
-        
-        if 'seg_indices' in annotations:
-            annotations.pop('seg_indices')
-
-        with open(os.path.join(dir, 'annotations.json'), 'w') as json_file:
-            json.dump(annotations, json_file)
-        
-        groupings = {}
-                        
-        groupings['seg_indices1'] = ind1.tolist()
-        groupings['seg_indices2'] = ind2.tolist()
-        groupings['seg_indices3'] = ind3.tolist()
-
-        with open(f'{dir}/grp.json', 'w') as json_file:
-                json.dump(groupings, json_file)
-
-        if os.path.exists(os.path.join(dir, 'cached.pth')):
-            os.remove(os.path.join(dir, 'cached.pth'))
-
-    def prepare_clustering(self):
-        for dir in self.data_list:
-
-            print(dir)
-
-            if os.path.exists(os.path.join(dir, 'grp.json')):
-                print(f"Clustering already prepared for {dir}")
-                continue
-
-            print(os.path.join(dir, 'annotations.json'))
-            file = os.path.join(dir, self.get_mesh_name(dir))
-
-            with open(os.path.join(dir, 'annotations.json')) as json_file:
-                annotations = json.load(json_file)
-
-            self.prepare_singe_clustering(file, annotations)
 
     def get_data_list(self):
         
@@ -183,56 +133,6 @@ class MechanicalAssemblyV2(Dataset):
         data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
         return data_list
-        
-    def pixel_point_matches(
-                self,
-                pts_world: np.ndarray,
-                faces: np.ndarray,  
-                K: np.ndarray,                 # 3×4 projection matrix
-                R: np.ndarray,                 # 3×3 rotation matrix
-                T: np.ndarray,                 # 3D translation vector
-                img_size: tuple[int, int],     # (H, W)
-    ):
-        
-        mesh = Meshes(
-            verts=[torch.from_numpy(pts_world.astype(np.float32)).cuda()],
-            faces=[torch.from_numpy(faces.astype(np.int64)).cuda()],
-        )
-
-        half_fov = np.arctan(1.0 / K[1, 1])
-        fov = 2.0 * half_fov
-        fov = fov * 180.0 / np.pi 
-
-        cameras = FoVPerspectiveCameras(
-            R=torch.from_numpy(R.astype(np.float32)).unsqueeze(0).cuda(),
-            T=torch.from_numpy(T.astype(np.float32)).unsqueeze(0).cuda(),
-            device='cuda:0',
-            fov=fov,
-            zfar=5000000
-        )
-
-        raster_settings = RasterizationSettings(
-            image_size=img_size,
-            blur_radius=0.0,
-            faces_per_pixel=1,
-            cull_backfaces=True
-        )
-
-        rasterizer = MeshRasterizer(
-            cameras=cameras,
-            raster_settings=raster_settings,
-        )
-
-        fragments = rasterizer(mesh)
-        mapping = fragments.pix_to_face[0, :, :, 0].cpu().numpy()  # (H, W)
-
-        src = np.stack(np.where(mapping != -1)).T
-        tgt = mapping[src[:, 0], src[:, 1]]
-
-        tgt = faces[tgt].copy().reshape(-1)
-        src = np.tile(src, (1, 3)).reshape(-1, 2)
-
-        return src, tgt
 
     def get_data(self, idx):
 
@@ -249,8 +149,8 @@ class MechanicalAssemblyV2(Dataset):
         if 'semantic_id' not in annotations:
             annotations['semantic_id'] = np.zeros_like(annotations['instance_id'])
 
-        with open(os.path.join(dir, 'grp.json')) as json_file:
-            groups = json.load(json_file)
+        with open(os.path.join(dir, 'grp_0.01_100.json')) as json_file:
+            groups = np.asarray(json.load(json_file))
 
         mesh = trimesh.load(file)
 
@@ -258,41 +158,23 @@ class MechanicalAssemblyV2(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        # # Transform mesh to point cloud using uniform sampling to 30000 samples
-        import open3d as o3d
-        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
-
-        # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
-        mask = segment_labels != -1
 
-        # Fit KNN on mesh vertices
-        # try:
-        #     knn = NearestNeighbors(n_neighbors=1)
-        #     knn.fit(mesh.vertices[segment_labels != -1])
-        # except Exception as e:
-        #     print(e)
-
-        # # Find nearest neighbors for the sampled points
-        # distances, indices = knn.kneighbors(point_cloud)
-
-        # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
-        normals =  mesh.vertex_normals.copy()#[segment_labels != -1]#[indices.flatten()]
-        # seg_indices = np.asarray(annotations['seg_indices'])#[segment_labels != -1]#[indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])
+        normals =  mesh.vertex_normals.copy()
+        segment_labels = np.asarray(annotations['semantic_id'])
         segment_labels = classes[segment_labels]
         
         image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
         K_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*K.txt')))
         R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
         T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
+        mapping_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*mapping.txt')))
     
         images, mappings_src, mappings_tgt = [], [], []
 
-        for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
+        for i, (image_path, K, R, T, mapping) in enumerate(zip(image_paths, K_paths, R_paths, T_paths, mapping_paths)):
             image = Image.open(image_path).convert('RGB')
             images.append(image)
 
@@ -300,55 +182,23 @@ class MechanicalAssemblyV2(Dataset):
             R = np.loadtxt(R)
             T = np.loadtxt(T)
 
-            # K, R, t = self.decompose_camera_matrix(P)
-            # print(f"Image {i}: K={K}, R={R}, t={t}")
-
-            src, tgt = self.pixel_point_matches(
-                pts_world=mesh.vertices,
-                faces=mesh.faces,
-                K=K,
-                R=R,
-                T=T,
-                img_size=(512, 512)
-            )
+            mapping = np.loadtxt(mapping, dtype=np.int32)
+            src = np.stack(np.where(mapping != -1)).T
+            tgt = mapping[src[:, 0], src[:, 1]]            
+            tgt = mesh.faces[tgt].copy().reshape(-1)
+            src = np.tile(src, (1, 3)).reshape(-1, 2)
 
             src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
             
             mappings_src.append(src.astype(np.int32))
             mappings_tgt.append(tgt.astype(np.int32))
 
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(mesh.vertices)
-            # colors = np.zeros((len(mesh.vertices), 3), dtype=np.float32)
-            # colors[tgt, 0] = 1 - colors[tgt, 0]
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(f'image_{i}.ply', pcd)
 
         mappings_src = np.concatenate(mappings_src, axis=0)
         mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
-        # Load all images from the directory
-        # image_dir = os.path.join(self.data_root, dir)
-        # image_extensions = ('*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff')
-        # image_files = []
-        # for ext in image_extensions:
-        #     image_files.extend(glob.glob(os.path.join(image_dir, ext)))
-        # images = [open(img_path, 'rb').read() for img_path in image_files]
-
-        # # Identify outlier points using DBSCAN
-        # dbscan = DBSCAN(eps=10, min_samples=5)
-        # dbscan.fit(point_cloud)
-        # outlier_mask = dbscan.labels_ == -1
-
-        # # Remove outlier points
-        # point_cloud = point_cloud[~outlier_mask]
-        # normals = normals[~outlier_mask]
-        # instance_labels = instance_labels[~outlier_mask]
-        # segment_labels = segment_labels[~outlier_mask]
-        # seg_indices = seg_indices[~outlier_mask]
 
         data = {
-            # 'coord': point_cloud,
             'coord':  deepcopy(mesh.vertices),
             'face': deepcopy(mesh.faces),
             'normal': normals,
@@ -356,21 +206,16 @@ class MechanicalAssemblyV2(Dataset):
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            # 'seg_indices': seg_indices,
             'name': self.get_data_name(idx),
             'mappings_src': mappings_src,
             'mappings_tgt': mappings_tgt,
             'images': images,
-            # 'ids': np.arange(len(mesh.vertices), dtype=np.int32),
+            'seg_indices': groups
         }
 
         for key in ['coord', 'normal', 'instance', 'segment']:
             if data[key].shape[0] != len(mesh.vertices):
                 print(f"Warning: {key} shape mismatch in {file}: {data[key].shape[0]} != {len(mesh.vertices)}")
-
-        data.update(groups)
-
-        data['seg_indices'] = np.asarray(data['seg_indices1'])
 
         if self.cache:
             torch.save(data, os.path.join(dir, 'cached.pth'))
