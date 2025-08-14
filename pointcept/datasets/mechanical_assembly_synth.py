@@ -309,8 +309,7 @@ class MechanicalAssemblySynth(Dataset):
                 semantic_id.append(np.asarray([0] * len(labels['instance_id'])))
 
             semantic_mapping = np.asarray([self.class_mapping[c] for c in labels['classes']])
-            if 'seg_indices' in labels:
-                semantic_id[-1] = semantic_mapping[semantic_id[-1]]
+            semantic_id[-1] = semantic_mapping[semantic_id[-1]]
 
             frame_id.append(np.asarray([i] * len(labels['instance_id'])))     
             seg_indices1.append(np.asarray(groupings['seg_indices1']))

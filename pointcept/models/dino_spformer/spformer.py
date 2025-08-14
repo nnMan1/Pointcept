@@ -278,13 +278,13 @@ class MySPFormer(nn.Module):
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
 
-        # self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
-        self.query_mapping_mlp = nn.Sequential(
-            nn.Linear(encoder['out_channels'], decoder['query_refinement_modules'][0]['mask_dim']),
-            nn.LayerNorm(decoder['query_refinement_modules'][0]['mask_dim']),
-            nn.ReLU(),
-            nn.Linear(decoder['query_refinement_modules'][0]['mask_dim'], decoder['query_refinement_modules'][0]['mask_dim'])
-        )
+        self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
+        # self.query_mapping_mlp = nn.Sequential(
+        #     nn.Linear(encoder['out_channels'], decoder['query_refinement_modules'][0]['mask_dim']),
+        #     nn.LayerNorm(decoder['query_refinement_modules'][0]['mask_dim']),
+        #     nn.ReLU(),
+        #     nn.Linear(decoder['query_refinement_modules'][0]['mask_dim'], decoder['query_refinement_modules'][0]['mask_dim'])
+        # )
 
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
@@ -310,10 +310,11 @@ class MySPFormer(nn.Module):
             self.positional_embedding = build_positional_embedding(positional_embedding)
     
     def query_pooling(self, data):
-        
-        qrs = data['features'][data['seed_ids']].clone().detach()  
-        qrs = self.query_mapping_mlp(qrs)
-        return qrs
+        queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
+        return queries
+        # qrs = data['features'][data['seed_ids']].clone().detach()  
+        # qrs = self.query_mapping_mlp(qrs)
+        # return qrs
 
     def __compute_loss(self, pred, data):
         

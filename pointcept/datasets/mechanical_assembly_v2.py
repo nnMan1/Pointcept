@@ -149,7 +149,7 @@ class MechanicalAssemblyV2(Dataset):
         if 'semantic_id' not in annotations:
             annotations['semantic_id'] = np.zeros_like(annotations['instance_id'])
 
-        with open(os.path.join(dir, 'grp_0.01_100.json')) as json_file:
+        with open(os.path.join(dir, 'grp_1e-05_100.json')) as json_file:
             groups = np.asarray(json.load(json_file))
 
         mesh = trimesh.load(file)
