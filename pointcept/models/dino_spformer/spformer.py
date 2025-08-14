@@ -20,13 +20,17 @@ class Encoder(nn.Module):
     def __init__(self, 
                  backbone, 
                  out_channels, 
+                 backbone_out_channels=64,
                  dino_version=None,
                  dino_output_size=384):
         super().__init__()
         self.out_channels = out_channels
 
         # self.backbone = build_model(backbone) 
-        self.backbone = PointTransformerV3AddFeatures(**backbone)
+        if backbone is not None:
+            self.backbone = PointTransformerV3AddFeatures(**backbone)
+        else:
+            self.backbone = None
         
         self.dino = None
         if dino_version is not None:
@@ -40,7 +44,7 @@ class Encoder(nn.Module):
             )
 
         self.mask_features_head = nn.Sequential(
-            nn.Linear(64, out_channels),
+            nn.Linear(backbone_out_channels, out_channels),
             nn.LayerNorm(out_channels),
             nn.ReLU(),
             nn.Linear(out_channels, out_channels)
@@ -65,8 +69,11 @@ class Encoder(nn.Module):
 
             data_dict['add_features'] = self.dino_mapping_mlp(data_dict['add_features'])
 
-
-        pcd_features = self.backbone(data_dict).feat
+        if self.backbone is not None:
+            pcd_features = self.backbone(data_dict).feat
+        else:
+            pcd_features = data_dict['add_features']
+            
         mask_features = self.mask_features_head(pcd_features)
         
         return {
@@ -259,6 +266,7 @@ class MySPFormer(nn.Module):
                  encoder, 
                  decoder,
                  instance_ignore_index, 
+                 use_superpoint_pooling=True,
                  positional_embedding = None
                 ):
 
@@ -270,7 +278,13 @@ class MySPFormer(nn.Module):
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
 
-        self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
+        # self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
+        self.query_mapping_mlp = nn.Sequential(
+            nn.Linear(encoder['out_channels'], decoder['query_refinement_modules'][0]['mask_dim']),
+            nn.LayerNorm(decoder['query_refinement_modules'][0]['mask_dim']),
+            nn.ReLU(),
+            nn.Linear(decoder['query_refinement_modules'][0]['mask_dim'], decoder['query_refinement_modules'][0]['mask_dim'])
+        )
 
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
@@ -288,15 +302,18 @@ class MySPFormer(nn.Module):
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
 
+        self.use_superpoint_pooling = use_superpoint_pooling
+
         self.positional_embedding = None
         
         if positional_embedding != None:
             self.positional_embedding = build_positional_embedding(positional_embedding)
     
     def query_pooling(self, data):
-        queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
         
-        return queries
+        qrs = data['features'][data['seed_ids']].clone().detach()  
+        qrs = self.query_mapping_mlp(qrs)
+        return qrs
 
     def __compute_loss(self, pred, data):
         
@@ -382,6 +399,8 @@ class MySPFormer(nn.Module):
 
             pos_encodings_pcd.append(tmp.squeeze(0).permute((1, 0)))
 
+            bs = be
+
         data_dict['positional_embedding'] = torch.cat(pos_encodings_pcd)
 
         return data_dict
@@ -390,6 +409,9 @@ class MySPFormer(nn.Module):
 
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
+
+        if not self.use_superpoint_pooling:
+            data.pop('seg_indices', None)
 
         data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
 
@@ -402,7 +424,6 @@ class MySPFormer(nn.Module):
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
-            
             data = self.superpoint_unpooling(data)
 
         return return_dict

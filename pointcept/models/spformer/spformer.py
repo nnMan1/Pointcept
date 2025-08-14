@@ -341,6 +341,7 @@ class SPFormer(nn.Module):
                 tmp = self.positional_embedding(coords[None, ...].float(), input_range=[scene_min, scene_max])
 
             pos_encodings_pcd.append(tmp.squeeze(0).permute((1, 0)))
+            bs = be
 
         data_dict['positional_embedding'] = torch.cat(pos_encodings_pcd)
 
