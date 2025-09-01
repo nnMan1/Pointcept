@@ -29,3 +29,4 @@ from .edges_detection_mask_3d import *
 from .dino_spformer import *
 
 from .multivew import *
+from .feature_extractors import *

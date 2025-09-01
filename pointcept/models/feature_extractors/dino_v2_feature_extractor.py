@@ -24,12 +24,15 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                  return_features=None, 
                  **kwargs,
                  ):
-        super().__init__(return_features=return_features, **kwargs)
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
         self.model = Dinov2Model.from_pretrained(model_name, 
-                                                 local_files_only=True).eval()
+                                                 local_files_only=True)
+        
+        super().__init__(return_features=return_features, **kwargs)
 
+    def backbone_modules(self):
+        return [self.model]
 
     def forward_features(self, batch: Batch) -> Dict[str, Tensor]:
 

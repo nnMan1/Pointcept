@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 from pointcept.utils.types import AttrDict 
+from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
@@ -21,7 +22,7 @@ except Exception:
 
 # ------------------------------ Base (packed I/O) ------------------------------
 
-class BaseFeatureExtractor(nn.Module):
+class BaseFeatureExtractor(nn.Module, ABC):
     """
     Base for packed point-cloud feature extractors with dict I/O.
 
@@ -48,10 +49,12 @@ class BaseFeatureExtractor(nn.Module):
         self,
         return_features: Optional[Sequence[str]] = None,
         *,
-        global_pool: Optional[str] = "avg",   # 'avg' | 'max' | 'gem' | None
+        global_pool: Optional[str] = "None",   # 'avg' | 'max' | 'gem' | None
         normalize_global: bool = False,
         gem_p: float = 3.0,
         keep_keys: Optional[Iterable[str]] = None,  # passthrough keys
+        freeze_backbone: bool = False,
+        freeze_backbone_bn: bool = False
     ):
         super().__init__()
         if global_pool == "gem" and gem_p <= 0:
@@ -67,6 +70,9 @@ class BaseFeatureExtractor(nn.Module):
         self._return_features = tuple(return_features) if return_features is not None else None
         self._keep_keys = tuple(keep_keys) if keep_keys is not None else tuple()
 
+        if self.freeze_backbone:
+            self.freeze_backbone(freeze_backbone_bn)
+
     def set_return_policy(self, policy_or_names):
         if isinstance(policy_or_names, str):
             groups = getattr(self, "feature_groups", {})
@@ -78,6 +84,7 @@ class BaseFeatureExtractor(nn.Module):
             self.set_return_features(policy_or_names)
 
     # -------- subclass hook --------
+    @abstractmethod
     def forward_features(self, batch: Batch) -> Dict[str, Tensor]:
         raise NotImplementedError
 
@@ -114,6 +121,27 @@ class BaseFeatureExtractor(nn.Module):
         if self.global_dim is not None:
             d["global"] = self.global_dim
         return d
+
+    @abstractmethod
+    def backbone_modules(self) -> Sequence[nn.Module]:
+        raise NotImplementedError
+
+    # --- provided by base ---
+    def freeze_backbone(self, freeze_bn):
+        for m in self.backbone_modules():
+            for p in m.parameters():
+                p.requires_grad = False
+            if freeze_bn:
+                for bn in m.modules():
+                    if isinstance(bn, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                        bn.eval()
+                        for p in bn.parameters():
+                            p.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for m in self.backbone_modules():
+            for p in m.parameters():
+                p.requires_grad = True
 
     @torch.no_grad()
     def feature_shapes(
