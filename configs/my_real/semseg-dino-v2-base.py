@@ -94,7 +94,7 @@ data = dict(
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", 'seg_indices'),
+                keys=("coord", "normal", "segment", "instance"),
             ),
             dict(type="ToTensor"),
             dict(
@@ -142,7 +142,7 @@ data = dict(
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance", "seg_indices"),
+                keys=("coord", "segment", "instance"),
             ),
             # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
@@ -158,9 +158,6 @@ data = dict(
                     "mappings_src",
                     "mappings_tgt",
                     'origin_coord', 'origin_segment', 'origin_instance',
-                    # "instance_centroid",
-                    # "bbox",
-                    "seg_indices",
                     "path",
                     "name",
                     "inverse"
