@@ -1,6 +1,7 @@
 # packed_point_feature_extractor.py
 from __future__ import annotations
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from pointcept.utils.types import AttrDict 
 
 import torch
 import torch.nn as nn
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 
 Tensor = torch.Tensor
 Batch = Mapping[str, Tensor]
-Out = Dict[str, Tensor]
+Out = AttrDict[str, Tensor]
 
 # Optional acceleration (recommended)
 try:
@@ -60,11 +61,21 @@ class BaseFeatureExtractor(nn.Module):
         self.gem_p = float(gem_p)
 
         self.feature_names: Sequence[str] = []
-        self.out_dims: Dict[str, int] = {}
+        self.out_dims: AttrDict[str, int] = {}
         self.global_dim: Optional[int] = None
 
         self._return_features = tuple(return_features) if return_features is not None else None
         self._keep_keys = tuple(keep_keys) if keep_keys is not None else tuple()
+
+    def set_return_policy(self, policy_or_names):
+        if isinstance(policy_or_names, str):
+            groups = getattr(self, "feature_groups", {})
+            names = groups.get(policy_or_names)
+            if names is None:
+                raise ValueError(f"Unknown feature group '{policy_or_names}'")
+            self.set_return_features(names)
+        else:
+            self.set_return_features(policy_or_names)
 
     # -------- subclass hook --------
     def forward_features(self, batch: Batch) -> Dict[str, Tensor]:
@@ -78,7 +89,7 @@ class BaseFeatureExtractor(nn.Module):
             assert t.dim() == 2, f"Feature '{k}' must be (P,C), got {tuple(t.shape)}."
 
         wanted = self._return_features or tuple(self.feature_names)
-        out: Out = {k: feats[k] for k in wanted if k in feats}
+        out: Out = AttrDict({k: feats[k] for k in wanted if k in feats})
 
         if self.global_dim is not None and self.global_pool is not None:
             last = self.feature_names[-1]
@@ -127,11 +138,11 @@ class BaseFeatureExtractor(nn.Module):
     # ------------- internals -------------
     @staticmethod
     def _validate_batch(batch: Batch) -> None:
-        if "points" not in batch:
-            raise KeyError("Batch must include 'points' (P,3).")
-        pts = batch["points"]
+        if "coord" not in batch:
+            raise KeyError("Batch must include 'coord' (P,3).")
+        pts = batch["coord"]
         if pts.dim() != 2 or pts.size(-1) != 3:
-            raise ValueError(f"'points' must be (P,3), got {tuple(pts.shape)}.")
+            raise ValueError(f"'coord' must be (P,3), got {tuple(pts.shape)}.")
         if ("offset" not in batch) and ("batch" not in batch):
             raise KeyError("Provide either 'offset' (B,) cumulative or 'batch' (P,) indices.")
 
@@ -165,7 +176,7 @@ class BaseFeatureExtractor(nn.Module):
             B = int(b.max().item()) + 1 if b.numel() > 0 else 0
             return b, B
         else:
-            return BasePackedFeatureExtractor._offsets_to_batch_index(batch["offset"].long())
+            return BaseFeatureExtractor._offsets_to_batch_index(batch["offset"].long())
 
     @staticmethod
     def _segment_pool(x: Tensor, batch_idx: Tensor, B: int, mode: str, p: float) -> Tensor:
