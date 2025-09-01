@@ -15,7 +15,7 @@ Tensor = torch.Tensor
 Batch = Mapping[str, Tensor]
 Out = Dict[str, Tensor]
 
-MODELS.register_module()
+@MODELS.register_module("DinoV2FeatureExtractor")
 class DinoV2FeatureExtractor(BaseFeatureExtractor):
     def __init__(self, 
                  model_name="facebook/dinov2-small",

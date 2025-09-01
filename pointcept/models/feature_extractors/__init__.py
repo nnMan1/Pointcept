@@ -1,1 +1,1 @@
-from .dino_v2_feature_extractor import DinoV2FeatureExtractor
+from .dino_v2_feature_extractor import *
