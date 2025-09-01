@@ -849,9 +849,9 @@ class GridSample(object):
             for key in self.keys:
                 try:
                     data_dict[key] = data_dict[key][idx_unique]
-                except:
+                except Exception as e:
                     raise KeyError(
-                        f"Key '{key}' not found in data_dict. Available keys: {data_dict.keys()}"
+                        f"Error accessing key '{key}': {e}"
                     )
             return data_dict
 
