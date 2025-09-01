@@ -24,12 +24,15 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                  return_features=None, 
                  **kwargs,
                  ):
+        
+        super().__init__(return_features=return_features, **kwargs)
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=True)
-        
-        super().__init__(return_features=return_features, **kwargs)
+
+        if self._freeze_backbone:
+            self.freeze_backbone(self._freeze_backbone_bn)
 
     def backbone_modules(self):
         return [self.model]
