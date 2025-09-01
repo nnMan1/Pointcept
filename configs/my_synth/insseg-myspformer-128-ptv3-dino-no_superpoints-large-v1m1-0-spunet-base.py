@@ -1,20 +1,21 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base/model/model_best.pth'
+weight = 'exp/abc_dataset/insseg-myspformer-128-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base/model/model_best.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
+instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # model settings
@@ -54,12 +55,12 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
         ),
-        out_channels=32,
+        out_channels=128,
         dino_version="facebook/dinov2-large",  
         dino_output_size=1024
      ),
      decoder=dict(
-        in_channels=32,
+        in_channels=128,
         hlevels=6,
         mask_modules=[
             dict(
@@ -326,7 +327,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

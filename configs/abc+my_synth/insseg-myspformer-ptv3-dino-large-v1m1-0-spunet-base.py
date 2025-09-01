@@ -8,7 +8,7 @@ empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base/model/model_best.pth'
+weight = 'exp/my_synth/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base/model/model_best.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
@@ -58,7 +58,7 @@ model = dict(
         dino_version="facebook/dinov2-large",  
         dino_output_size=1024
      ),
-     decoder=dict(
+    decoder=dict(
         in_channels=32,
         hlevels=6,
         mask_modules=[
@@ -120,8 +120,8 @@ model = dict(
             )
         ],
     ),
-    use_superpoint_pooling=False,
     instance_ignore_index=-1,
+    
 )
 
 
@@ -228,7 +228,7 @@ data = dict(
     val=dict(
        type='MechanicalAssemblyV2',
         split='train',
-        data_root='/home/data/cetim_assembly/downsampled',
+        data_root='/home/data/cetim_assembly/downsampled1',
         cache=False,
         transform=[
             dict(type='CenterShift', apply_z=True),
@@ -311,7 +311,6 @@ data = dict(
                         "screw": 0, 
                         "axe": 0})
 )
-
 
 hooks = [
     dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),

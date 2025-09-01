@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base/model/model_best.pth'
+# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
@@ -54,12 +54,12 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
         ),
-        out_channels=32,
+        out_channels=128,
         dino_version="facebook/dinov2-large",  
         dino_output_size=1024
      ),
      decoder=dict(
-        in_channels=32,
+        in_channels=128,
         hlevels=6,
         mask_modules=[
             dict(
@@ -139,7 +139,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-motor-synthetic/data"
+data_root = "data/segment-assembly-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
@@ -226,48 +226,65 @@ data = dict(
         classes=classes,
     ),
     val=dict(
-       type='MechanicalAssemblyV2',
-        split='train',
-        data_root='/home/data/cetim_assembly/downsampled',
-        cache=False,
+        type=dataset_type,
+        split="val",
+        data_root=data_root,
+        cache=True,
+        recompute_clustering=recompute_clustering,
         transform=[
-            dict(type='CenterShift', apply_z=True),
+            dict(type="CenterShift", apply_z=True),
             dict(
-                type='Copy',
-                keys_dict=dict(
-                    coord='origin_coord',
-                    segment='origin_segment',
-                    instance='origin_instance')),
+                type="Copy",
+                keys_dict={
+                    "coord": "origin_coord",
+                    "segment": "origin_segment",
+                    "instance": "origin_instance",
+                },
+            ),
+            # dict(type="NormalizeCoord"),
             dict(
-                type='GridSample',
+                type="GridSample",
                 grid_size=1,
-                hash_type='fnv',
-                mode='train',
+                hash_type="fnv",
+                mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=('coord', 'segment', 'instance', 'seg_indices')),
-            dict(type='CenterShift', apply_z=False),
+                keys=("coord", "segment", "instance", "seg_indices"),
+            ),
+            # dict(type="SphereCrop", point_max=1000000, mode='center'),
+            dict(type="CenterShift", apply_z=False),
             dict(
-                type='InstanceParser',
-                segment_ignore_index=(-1, ),
-                instance_ignore_index=-1),
-            dict(type='FPSSeed', n_points=100),
-            dict(type='ToTensor'),
+                type="InstanceParser",
+                segment_ignore_index=segment_ignore_index,
+                instance_ignore_index=-1,
+            ),
+            dict(type='FPSSeed', n_points = 100),
+            dict(type="ToTensor"),
             dict(
-                type='Collect',
-                keys=('coord', 'face', 'grid_coord', 'segment', 'instance', 'images',
-                      'mappings_src', 'mappings_tgt', 'origin_coord',
-                      'origin_segment', 'origin_instance', 'seg_indices',
-                      'path', 'name', 'inverse'),
-                feat_keys='coord',
-                offset_keys_dict=dict(
-                    offset='coord',
-                    origin_offset='origin_coord',
-                    image_offset='images',
-                    mappings_offset='mappings_src'))
+                type="Collect",
+                keys=(
+                    "coord",
+                    "grid_coord",
+                    "segment",
+                    "instance",
+                    "images",
+                    "mappings_src",
+                    "mappings_tgt",
+                    'origin_coord', 'origin_segment', 'origin_instance',
+                    # "instance_centroid",
+                    # "bbox",
+                    "seg_indices",
+                    "path",
+                    "name",
+                    "inverse"
+                ),
+                feat_keys=('coord'),
+                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+            ),
         ],
         test_mode=False,
-        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0)),
+        classes=classes,   
+    ),
     test=dict(  
             type='MechanicalAssembly',
             split='train',
@@ -306,12 +323,11 @@ data = dict(
             ],
             test_mode=False,
             classes={"other": 0, 
-                        "gear": 0, 
-                        "nut": 0, 
-                        "screw": 0, 
-                        "axe": 0})
+                        "gear": 1, 
+                        "nut": 2, 
+                        "screw": 3, 
+                        "axe": 4})
 )
-
 
 hooks = [
     dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
