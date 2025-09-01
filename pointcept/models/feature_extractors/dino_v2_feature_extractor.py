@@ -89,7 +89,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
 
         return {
-            "features": mesh_features
+            "feat": mesh_features
         }
 
     def one_random_position_per_value(self, indices: torch.Tensor) -> torch.Tensor:

@@ -13,14 +13,16 @@ num_classes = 3
 model = dict(
     type="DefaultSegmentorV2",
     num_classes=3,
-    backbone_out_channels=64,
+    backbone_out_channels=384,
     backbone=dict(
         type="DinoV2FeatureExtractor",
         model_name="facebook/dinov2-small",
         merge_strategy='random_sample', 
         fts_dim=384,
         freeze_backbone=True,
-        freeze_backbone_bn=True
+        freeze_backbone_bn=True,
+        return_features=["feat"]
+
     ),
     criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
               dict(type='FocalLoss', loss_weight=1.0, ignore_index=-1)],
@@ -42,7 +44,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type='MechanicalAssemblyV2'
-data_root='data/cetim_assembly/downsampled'
+data_root='data/cetim_assembly/dataset/downsampled'
 
 classes={"other": 0, 
         "gear": 0, 
