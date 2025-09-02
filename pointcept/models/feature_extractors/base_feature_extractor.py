@@ -1,7 +1,7 @@
 # packed_point_feature_extractor.py
 from __future__ import annotations
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
-from pointcept.utils.types import AttrDict 
+from pointcept.models.utils.structure import AttrDict 
 from abc import ABC, abstractmethod
 
 import torch
@@ -47,7 +47,7 @@ class BaseFeatureExtractor(nn.Module, ABC):
 
     def __init__(
         self,
-        return_features: Optional[Sequence[str]] = None,
+        return_features: Optional[Sequence[str]] = ['feat'],
         *,
         global_pool: Optional[str] = "None",   # 'avg' | 'max' | 'gem' | None
         normalize_global: bool = False,
@@ -81,6 +81,14 @@ class BaseFeatureExtractor(nn.Module, ABC):
             self.set_return_features(names)
         else:
             self.set_return_features(policy_or_names)
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+
+        if self._freeze_backbone:
+            self.freeze_backbone(self._freeze_backbone_bn)
+
+        return self
 
     # -------- subclass hook --------
     @abstractmethod

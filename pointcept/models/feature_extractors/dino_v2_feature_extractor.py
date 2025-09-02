@@ -31,9 +31,6 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=True)
 
-        if self._freeze_backbone:
-            self.freeze_backbone(self._freeze_backbone_bn)
-
     def backbone_modules(self):
         return [self.model]
 
