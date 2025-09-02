@@ -29,6 +29,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         super().__init__(return_features=return_features, **kwargs)
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
+        self.out_fts_dim = out_fts_dim
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=True)
         
