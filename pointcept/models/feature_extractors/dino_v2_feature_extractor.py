@@ -21,6 +21,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                  model_name="facebook/dinov2-small",
                  merge_strategy='mean', 
                  fts_dim=384,
+                 out_fts_dim=256,
                  return_features=None, 
                  **kwargs,
                  ):
@@ -30,6 +31,8 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         self.fts_dim = fts_dim
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=True)
+        
+        self.proj = nn.Linear(self.fts_dim, self.out_fts_dim)
 
     def backbone_modules(self):
         return [self.model]
@@ -84,6 +87,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
             obs = obe
 
         mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
+        mesh_features = self.proj(mesh_features)
 
         return {
             "feat": mesh_features
