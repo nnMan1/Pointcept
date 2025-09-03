@@ -1,14 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 1 # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
+weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
@@ -54,7 +54,6 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
         ),
-        backbone_out_channels=32,
         out_channels=32,
      ),
     #  positional_embedding=dict(

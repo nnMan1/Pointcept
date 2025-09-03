@@ -23,6 +23,17 @@ model = dict(
     num_query = 100,
     encoder=dict(
         backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="DinoV2FeatureExtractor",
+            fts_dim=384,
+            merge_strategy='random_sample',
+            return_features=['feat'],
+            freeze_backbone=True,
+            freeze_backbone_bn=True
+        ),
+        model2_config=dict(
+            type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
             stride=(2, 2, 2, 2),
@@ -53,12 +64,13 @@ model = dict(
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+            return_features=['feat'],
+            ),
         ),
-        out_channels=32,
-        dino_version="facebook/dinov2-small",
-        dino_output_size=384
+        backbone_out_channels=64,
+        out_channels=32
      ),
-     decoder=dict(
+    decoder=dict(
         in_channels=32,
         hlevels=6,
         mask_modules=[

@@ -95,10 +95,10 @@ data = dict(
     ignore_index=-1,
     names=class_names,
     train=dict(
-        type=dataset_type,
+        type="MechanicalAssemblySynth",
         split="train",
         cache=False,
-        data_root=data_root,
+        data_root="/home/data/segment-motor-synthetic/data/merged",
         transform=[
             dict(type="CenterShift", apply_z=True),
             # dict(

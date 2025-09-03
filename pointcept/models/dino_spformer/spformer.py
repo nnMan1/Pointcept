@@ -12,7 +12,7 @@ from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
 from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
 from .backbone import PointTransformerV3AddFeatures
-from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
+# from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
 from pointcept.utils.visualization import pca_features_visualization
 
 class Encoder(nn.Module):
@@ -20,29 +20,12 @@ class Encoder(nn.Module):
     def __init__(self, 
                  backbone, 
                  out_channels, 
-                 backbone_out_channels=64,
-                 dino_version=None,
-                 dino_output_size=384):
+                 backbone_out_channels=64):
         super().__init__()
         self.out_channels = out_channels
 
-        # self.backbone = build_model(backbone) 
-        if backbone is not None:
-            self.backbone = PointTransformerV3AddFeatures(**backbone)
-        else:
-            self.backbone = None
+        self.backbone = build_model(backbone) 
         
-        self.dino = None
-        if dino_version is not None:
-            self.dino = MeshFeatureExtractor(model_name=dino_version, merge_strategy="random_sample", fts_dim=dino_output_size)
-
-            self.dino_mapping_mlp = nn.Sequential(
-                nn.Linear(dino_output_size, 256),
-                nn.LayerNorm(256),
-                nn.ReLU(),
-                nn.Linear(256, 256)
-            )
-
         self.mask_features_head = nn.Sequential(
             nn.Linear(backbone_out_channels, out_channels),
             nn.LayerNorm(out_channels),
@@ -53,31 +36,12 @@ class Encoder(nn.Module):
     def forward(self, data_dict):
 
         offset = data_dict['offset']
+        values = self.backbone(data_dict)
 
-        if self.dino is not None:
-            with torch.no_grad():
-                data_dict['add_features'] = self.dino(data_dict)
-                debugging = os.environ.get("DEBUGING", "false").lower() == "true"
-                if debugging:
-                    print("Visualizing DINO features...")
-                    pca_features_visualization(
-                        data_dict['coord'][:data_dict['offset'][0]].detach().cpu().numpy(),
-                        data_dict['add_features'][:data_dict['offset'][0]].detach().cpu().numpy(),
-                        n_components=3,
-                        file_path=f"features_{data_dict['name']}_dino.ply"
-                    )
-
-            data_dict['add_features'] = self.dino_mapping_mlp(data_dict['add_features'])
-
-        if self.backbone is not None:
-            pcd_features = self.backbone(data_dict).feat
-        else:
-            pcd_features = data_dict['add_features']
-            
-        mask_features = self.mask_features_head(pcd_features)
+        features = self.mask_features_head(values['feat'])
         
         return {
-                'features': mask_features, 
+                'features': features, 
                 'offset': offset
             }
 
