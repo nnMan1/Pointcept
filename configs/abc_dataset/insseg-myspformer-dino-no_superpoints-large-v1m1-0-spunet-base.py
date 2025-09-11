@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -18,17 +18,61 @@ dim_feedforward=1024
 segment_ignore_index = (-1, )
 
 # model settings
+# model settings
 model = dict(
     type="MySPFormer",
     num_query = 100,
     encoder=dict(
-        backbone=None,
-        backbone_out_channels=256,
-        out_channels=32,
-        dino_version="facebook/dinov2-large",  
-        dino_output_size=1024
+        backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="DinoV2FeatureExtractor",
+            model_name="facebook/dinov2-large",
+            fts_dim=1024,
+            merge_strategy='random_sample',
+            return_features=['feat'],
+            freeze_backbone=True,
+            freeze_backbone_bn=False
+        ),
+        model2_config=dict(
+            type="PT-V3FeatureExtractor",
+            in_channels=3,
+            order=["z", "z-trans", "hilbert", "hilbert-trans"],
+            stride=(2, 2, 2, 2),
+            enc_depths=(2, 2, 2, 6, 2),
+            enc_channels=(32, 64, 128, 256, 512),
+            enc_num_head=(2, 4, 8, 16, 32),
+            enc_patch_size=(1024, 1024, 1024, 1024, 1024),
+            dec_depths=(2, 2, 2, 2),
+            dec_channels=(64, 64, 128, 256),
+            dec_num_head=(4, 4, 8, 16),
+            dec_patch_size=(1024, 1024, 1024, 1024),
+            mlp_ratio=4,
+            qkv_bias=True,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
+            drop_path=0.3,
+            shuffle_orders=True,
+            pre_norm=True,
+            enable_rpe=False,
+            enable_flash=True,
+            upcast_attention=False,
+            upcast_softmax=False,
+            cls_mode=False,
+            pdnorm_bn=False,
+            pdnorm_ln=False,
+            pdnorm_decouple=True,
+            pdnorm_adaptive=False,
+            pdnorm_affine=True,
+            pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+            return_features=['feat'],
+            ),
+        ),
+        backbone_out_channels=64,
+        out_channels=32
      ),
-     decoder=dict(
+    decoder=dict(
         in_channels=32,
         hlevels=6,
         mask_modules=[
@@ -93,6 +137,8 @@ model = dict(
     use_superpoint_pooling=False,
     instance_ignore_index=-1,
 )
+
+
 
 
 # scheduler settings
