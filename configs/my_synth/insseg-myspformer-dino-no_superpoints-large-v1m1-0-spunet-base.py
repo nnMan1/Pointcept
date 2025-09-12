@@ -2,27 +2,37 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 1 # bs: total bs in all gpus
+num_worker = 8
 mix_prob = 0
 empty_cache = True
 enable_amp = False
-# resume=True
-# weight='/home/exp/fuselage/semseg-pt-v1-0-base_250x250x250_hard_rot_uniform_2/model/model_best.pth'
+evaluate = True
+find_unused_parameters = True
+weight = '/home/exp/abc_dataset/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_freze_3/model/model_best.pth'
+# resume = True# weight='backbones/sstnet_pretrain.pth'
 
-num_classes = 3
+
+num_classes = 1
+fts_sizes = 128
+dim_feedforward=1024
+segment_ignore_index = (-1, )
+
+# model settings
 # model settings
 model = dict(
-    type="DefaultSegmentorV2",
-    num_classes=3,
-    backbone_out_channels=64,
-    backbone=dict(
+    type="MySPFormer",
+    num_query = 100,
+    encoder=dict(
+        backbone=dict(
         type="MergeFeatures",
         model1_config=dict(
             type="DinoV2FeatureExtractor",
-            fts_dim=384,
+            model_name="facebook/dinov2-large",
+            fts_dim=1024,
             merge_strategy='random_sample',
             return_features=['feat'],
             freeze_backbone=True,
-            freeze_backbone_bn=True
+            freeze_backbone_bn=False
         ),
         model2_config=dict(
             type="PT-V3FeatureExtractor",
@@ -57,43 +67,111 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
             return_features=['feat'],
+            ),
         ),
+        backbone_out_channels=64,
+        out_channels=32
+     ),
+    decoder=dict(
+        in_channels=32,
+        hlevels=6,
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=1
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
+        ],
     ),
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
-              dict(type='FocalLoss', loss_weight=1.0, ignore_index=-1)],
+    use_superpoint_pooling=False,
+    instance_ignore_index=-1,
 )
 
+
+
+
 # scheduler settings
-epoch = 400
-eval_epoch = 100# sche total eval & checkpoint epoch
-optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+epoch = 500
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
-    pct_start=0.05,
+    pct_start=0.01,
     anneal_strategy="cos",
     div_factor=10.0,
     final_div_factor=1000.0,
 )
 
-
 # dataset settings
-dataset_type='MechanicalAssemblyV2'
-data_root='data/cetim_assembly/dataset/downsampled'
+dataset_type = "MechanicalAssemblySynthV2"
+data_root = "data/segment-motor-synthetic/data/merged"
+recompute_clustering=False
 
 classes={"other": 0, 
         "gear": 0, 
-        "nut": 1, 
-        "screw": 2, 
+        "nut": 0, 
+        "screw": 0, 
         "axe": 0}
 
-class_names = ["other", "nut", "screw"]
+class_names = ["other"]
+
 
 
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -124,13 +202,20 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.3,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance"),
+                keys=("coord", "normal", "segment", "instance", 'seg_indices'),
             ),
+            # dict(type="SphereCrop",  point_max=200000, mode="random"),
+            dict(
+                type="InstanceParser",
+                segment_ignore_index=segment_ignore_index,
+                instance_ignore_index=-1,
+            ),
+            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -142,6 +227,8 @@ data = dict(
                     "images",
                     "mappings_src",
                     "mappings_tgt",
+                    # "instance_centroid",
+                    # "bbox",
                     "seg_indices",
                     "path",
                     "name",
@@ -155,57 +242,48 @@ data = dict(
         classes=classes,
     ),
     val=dict(
-        type=dataset_type,
-        split="val",
-        data_root=data_root,
+       type='MechanicalAssemblyV2',
+        split='train',
+        data_root='/home/data/cetim_assembly/dataset/downsampled1',
         cache=False,
         transform=[
-            dict(type="CenterShift", apply_z=True),
+            dict(type='CenterShift', apply_z=True),
             dict(
-                type="Copy",
-                keys_dict={
-                    "coord": "origin_coord",
-                    "segment": "origin_segment",
-                    "instance": "origin_instance",
-                },
-            ),
-            # dict(type="NormalizeCoord"),
+                type='Copy',
+                keys_dict=dict(
+                    coord='origin_coord',
+                    segment='origin_segment',
+                    instance='origin_instance')),
             dict(
-                type="GridSample",
+                type='GridSample',
                 grid_size=1,
-                hash_type="fnv",
-                mode="train",
+                hash_type='fnv',
+                mode='train',
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance"),
-            ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
-            dict(type="CenterShift", apply_z=False),
-            dict(type="ToTensor"),
+                keys=('coord', 'segment', 'instance', 'seg_indices')),
+            dict(type='CenterShift', apply_z=False),
             dict(
-                type="Collect",
-                keys=(
-                    "coord",
-                    "grid_coord",
-                    "segment",
-                    "instance",
-                    "images",
-                    "mappings_src",
-                    "mappings_tgt",
-                    'origin_coord', 'origin_segment', 'origin_instance',
-                    "path",
-                    "name",
-                    "inverse"
-                ),
-                feat_keys=('coord'),
-                # offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
-            ),
+                type='InstanceParser',
+                segment_ignore_index=(-1, ),
+                instance_ignore_index=-1),
+            dict(type='FPSSeed', n_points=100),
+            dict(type='ToTensor'),
+            dict(
+                type='Collect',
+                keys=('coord', 'face', 'grid_coord', 'segment', 'instance', 'images',
+                      'mappings_src', 'mappings_tgt', 'origin_coord',
+                      'origin_segment', 'origin_instance', 'seg_indices',
+                      'path', 'name', 'inverse'),
+                feat_keys='coord',
+                offset_keys_dict=dict(
+                    offset='coord',
+                    origin_offset='origin_coord',
+                    image_offset='images',
+                    mappings_offset='mappings_src'))
         ],
         test_mode=False,
-        classes=classes,   
-    ),
-    
+        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0)),
     test=dict(  
             type='MechanicalAssembly',
             split='train',
@@ -244,8 +322,27 @@ data = dict(
             ],
             test_mode=False,
             classes={"other": 0, 
-                        "gear": 1, 
-                        "nut": 2, 
-                        "screw": 3, 
-                        "axe": 4})
+                        "gear": 0, 
+                        "nut": 0, 
+                        "screw": 0, 
+                        "axe": 0})
+)
+
+hooks = [
+    dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
+    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
+    dict(type="IterationTimer", warmup_iter=2),
+    dict(type="InformationWriter"),
+    dict(type="InsSegEvaluator",
+         segment_ignore_index=segment_ignore_index,
+         instance_ignore_index=-1,),
+    dict(type="CheckpointSaver", save_freq=None),
+]
+
+# Tester
+test = dict(
+    type="InsSegTester",
+    segment_ignore_index=segment_ignore_index,
+    instance_ignore_index=-1,
+    verbose=False,
 )
