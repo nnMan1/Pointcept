@@ -22,6 +22,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 
 from pytorch3d.structures import Pointclouds, Meshes
+import re
 from pytorch3d.renderer import (
     look_at_view_transform,
     look_at_rotation,
@@ -60,7 +61,8 @@ class MechanicalAssemblySynth(Dataset):
         classes = [],
         recompute_clustering=False,
         use_clustering="random",
-        image_transform=None
+        image_transform=None,
+        load_images=True,
     ):
         super(MechanicalAssemblySynth, self).__init__()
         self.data_root = data_root
@@ -116,9 +118,11 @@ class MechanicalAssemblySynth(Dataset):
                                  std=[0.229, 0.224, 0.225]),
         ])
 
+        self.load_images = load_images
+
     def prepare_clustering(self, dir, annotations=None):
 
-        mesh = trimesh.load(f'{self.data_root}/{dir}/visible1.ply')
+        mesh = trimesh.load(f'{dir}/visible.ply')
         vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
         faces = torch.from_numpy(mesh.faces.astype(np.int64))
         ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
@@ -135,7 +139,6 @@ class MechanicalAssemblySynth(Dataset):
         groupings = {}
 
         for i, (annotation, frame) in enumerate(zip(annotations, frames)):    
-            print(frame)       
             point_cloud = trimesh.load(frame).vertices
             distances, indices = knn.kneighbors(point_cloud)
                         
@@ -273,7 +276,9 @@ class MechanicalAssemblySynth(Dataset):
         dir = self.data_list[idx]
 
         annotations = sorted(glob.glob(os.path.join(dir, '*.json')))
-        annotations = [a for a in annotations if not a.endswith('grp.json')]
+        # Example usage: check if any annotation filename matches a regex pattern
+        pattern = r".*/[0-9]+\.json"
+        annotations = [a for a in annotations if re.match(pattern, a)]
 
         if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
             try:
@@ -345,45 +350,7 @@ class MechanicalAssemblySynth(Dataset):
         R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
         T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
 
-        images, mappings_src, mappings_tgt = [], [], []
-
-        
-            
-        for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
-            image = Image.open(image_path).convert('RGB')
-            images.append(image)
-
-            K = np.loadtxt(K)
-            R = np.loadtxt(R)
-            T = np.loadtxt(T)
-
-            src, tgt = self.pixel_point_matches(
-                pts_world=vertices,
-                normals=normals[keep_ids],
-                K = K,
-                R=R,
-                T=T, 
-                img_size=(512, 512)
-            )
-
-            src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
-
-            mappings_src.append(src.astype(np.int32))
-            mappings_tgt.append(tgt.astype(np.int32))
-            
-        mappings_src = np.concatenate(mappings_src, axis=0)
-        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
-
-        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
-            vertices *= 2
-
-        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
-            vertices /= 2
-            # keep_ids = keep_ids[::2]
-            # vertices = vertices[::2]
-
-        try:
-            data = {
+        data = {
                 'coord': vertices,
                 'normal': normals[keep_ids],
                 'instance': instance_id[keep_ids],
@@ -394,11 +361,53 @@ class MechanicalAssemblySynth(Dataset):
                 'name': self.get_data_name(idx),
                 'seg_indices1': seg_indices1[keep_ids],
                 'seg_indices2': seg_indices2[keep_ids],
-                'seg_indices3': seg_indices3[keep_ids],
+                'seg_indices3': seg_indices3[keep_ids]
+            }
+
+        if self.load_images:
+            images, mappings_src, mappings_tgt = [], [], []
+
+            for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
+                image = Image.open(image_path).convert('RGB')
+                images.append(image)
+
+                K = np.loadtxt(K)
+                R = np.loadtxt(R)
+                T = np.loadtxt(T)
+
+                src, tgt = self.pixel_point_matches(
+                    pts_world=vertices,
+                    normals=normals[keep_ids],
+                    K = K,
+                    R=R,
+                    T=T, 
+                    img_size=(512, 512)
+                )
+
+                src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+
+                mappings_src.append(src.astype(np.int32))
+                mappings_tgt.append(tgt.astype(np.int32))
+                
+            mappings_src = np.concatenate(mappings_src, axis=0)
+            mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+
+            data.update({
                 'mappings_src': mappings_src,
                 'mappings_tgt': mappings_tgt,
-                'images': images,
-            }
+                'images': images
+            })
+
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) < 80:
+            vertices *= 2
+
+        while np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)) > 400:
+            vertices /= 2
+            # keep_ids = keep_ids[::2]
+            # vertices = vertices[::2]
+
+        try:
+            
 
             if self.cache:
                 torch.save(data, os.path.join(dir, 'cached.pth'))
