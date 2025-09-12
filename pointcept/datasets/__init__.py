@@ -21,6 +21,7 @@ from .partnet import PartNet
 from .assembly import Assembly
 from .mechanical_assembly import MechanicalAssembly
 from .mechanical_assembly_v2 import MechanicalAssemblyV2
+from .mechanical_assembly_synth_v2 import MechanicalAssemblySynthV2
 from .abc_dataset import ABCDataset
 from .cetim import Cetim
 from .fuselage import Fuselage

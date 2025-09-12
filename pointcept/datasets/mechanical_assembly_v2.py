@@ -55,6 +55,7 @@ class MechanicalAssemblyV2(Dataset):
         cache=False,
         loop=1,
         classes = [],
+        load_images=True,
         image_transform=None
     ):
         super(MechanicalAssemblyV2, self).__init__()
@@ -109,6 +110,8 @@ class MechanicalAssemblyV2(Dataset):
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
         ])
+
+        self.load_images = load_images
 
     def get_mesh_name(self, dir):
 
@@ -172,32 +175,6 @@ class MechanicalAssemblyV2(Dataset):
         T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
         mapping_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*mapping.txt')))
     
-        images, mappings_src, mappings_tgt = [], [], []
-
-        for i, (image_path, K, R, T, mapping) in enumerate(zip(image_paths, K_paths, R_paths, T_paths, mapping_paths)):
-            image = Image.open(image_path).convert('RGB')
-            images.append(image)
-
-            K = np.loadtxt(K)
-            R = np.loadtxt(R)
-            T = np.loadtxt(T)
-
-            mapping = np.loadtxt(mapping, dtype=np.int32)
-            src = np.stack(np.where(mapping != -1)).T
-            tgt = mapping[src[:, 0], src[:, 1]]            
-            tgt = mesh.faces[tgt].copy().reshape(-1)
-            src = np.tile(src, (1, 3)).reshape(-1, 2)
-
-            src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
-            
-            mappings_src.append(src.astype(np.int32))
-            mappings_tgt.append(tgt.astype(np.int32))
-
-
-        mappings_src = np.concatenate(mappings_src, axis=0)
-        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
-
-
         data = {
             'coord':  deepcopy(mesh.vertices),
             'face': deepcopy(mesh.faces),
@@ -207,11 +184,41 @@ class MechanicalAssemblyV2(Dataset):
             'id': idx,
             'path': self.data_list[idx],
             'name': self.get_data_name(idx),
-            'mappings_src': mappings_src,
-            'mappings_tgt': mappings_tgt,
-            'images': images,
             'seg_indices': groups
         }
+
+        if self.load_images:
+            images, mappings_src, mappings_tgt = [], [], []
+
+            for i, (image_path, K, R, T, mapping) in enumerate(zip(image_paths, K_paths, R_paths, T_paths, mapping_paths)):
+                image = Image.open(image_path).convert('RGB')
+                images.append(image)
+
+                K = np.loadtxt(K)
+                R = np.loadtxt(R)
+                T = np.loadtxt(T)
+
+                mapping = np.loadtxt(mapping, dtype=np.int32)
+                src = np.stack(np.where(mapping != -1)).T
+                tgt = mapping[src[:, 0], src[:, 1]]            
+                tgt = mesh.faces[tgt].copy().reshape(-1)
+                src = np.tile(src, (1, 3)).reshape(-1, 2)
+
+                src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+                
+                mappings_src.append(src.astype(np.int32))
+                mappings_tgt.append(tgt.astype(np.int32))
+
+
+            mappings_src = np.concatenate(mappings_src, axis=0)
+            mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+
+            data.update({ 
+                'mappings_src': mappings_src,
+                'mappings_tgt': mappings_tgt,
+                'images': images
+            })
+        
 
         for key in ['coord', 'normal', 'instance', 'segment']:
             if data[key].shape[0] != len(mesh.vertices):
