@@ -16,6 +16,9 @@ import scipy.stats
 import numpy as np
 import torch
 import copy
+import open3d as o3d
+from sklearn.neighbors import NearestNeighbors
+
 from collections.abc import Sequence, Mapping
 
 from pointcept.utils.registry import Registry
@@ -51,6 +54,7 @@ class Collect(object):
 
             name = name.replace("_keys", "")
             assert isinstance(keys, Sequence)
+            print(name, keys)
             data[name] = torch.cat([data_dict[key].float() for key in keys], dim=1)
         return data
 
@@ -1193,6 +1197,51 @@ class RBFunction(object):
         
         data_dict[self.key] = np.exp(- self.gamma * data_dict[self.key] ** 2)
         return data_dict
+
+@TRANSFORMS.register_module()
+class MeshToPointCloud(object):
+    def __init__(self, num_points=10000, keys=['coord', 'color', 'normal', 'segment', 'instance', 'seg_indices', 'inverse']):
+        self.num_points = num_points
+        self.keys = keys
+
+    def __call__(self, data_dict):
+        if "coord" not in data_dict:
+            print("'coord' key not found in data_dict.")
+        if "face" not in data_dict:
+            print("'face' key not found in data_dict.")
+
+        vertices = data_dict["coord"]
+        faces = data_dict["face"]
+
+        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices), 
+                                             o3d.utility.Vector3iVector(faces))
+
+        points = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=self.num_points).points)
+
+        try:
+            knn = NearestNeighbors(n_neighbors=1)
+            knn.fit(vertices)
+            distances, indices = knn.kneighbors(points)
+        except Exception as e:
+            print(e)
+
+        return_dict = {
+            "coord": points
+        }
+        
+        for key in data_dict.keys():
+            values = data_dict[key]
+            if key in self.keys and key != "coord":
+                if len(values) == len(vertices):
+                    return_dict[key] = values[indices.flatten()]
+                else:
+                    print(f"Key '{key}' has incompatible length. Skipping.")
+            elif key != "coord":
+                return_dict[key] = values
+        for key in data_dict.keys():
+            print(key, data_dict[key].shape if isinstance(data_dict[key], np.ndarray) else type(data_dict[key]), 
+                  return_dict[key].shape if key in return_dict and isinstance(return_dict[key], np.ndarray) else type(return_dict[key]) if key in return_dict else 'N/A')
+        return return_dict
 
 class Compose(object):
     def __init__(self, cfg=None):
