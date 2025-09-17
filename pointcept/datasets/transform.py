@@ -54,7 +54,6 @@ class Collect(object):
 
             name = name.replace("_keys", "")
             assert isinstance(keys, Sequence)
-            print(name, keys)
             data[name] = torch.cat([data_dict[key].float() for key in keys], dim=1)
         return data
 
@@ -1199,12 +1198,23 @@ class RBFunction(object):
         return data_dict
 
 @TRANSFORMS.register_module()
-class MeshToPointCloud(object):
-    def __init__(self, num_points=10000, keys=['coord', 'color', 'normal', 'segment', 'instance', 'seg_indices', 'inverse']):
+class MeshToPointCloud():
+
+    '''
+        Samples points uniformly from mesh surface and interpolate features from mesh vertices to sampled points.
+        Uses Open3D for mesh processing and sampling.
+    '''
+
+    def __init__(self, 
+                 num_points: int = 10000, 
+                 keys: list[str] = ['coord', 'color', 'normal', 'segment', 'instance', 'seg_indices'], 
+                 return_indices: bool = False):
         self.num_points = num_points
         self.keys = keys
+        self.return_indices = return_indices
 
     def __call__(self, data_dict):
+
         if "coord" not in data_dict:
             print("'coord' key not found in data_dict.")
         if "face" not in data_dict:
@@ -1224,6 +1234,7 @@ class MeshToPointCloud(object):
             distances, indices = knn.kneighbors(points)
         except Exception as e:
             print(e)
+            raise e
 
         return_dict = {
             "coord": points
@@ -1238,10 +1249,77 @@ class MeshToPointCloud(object):
                     print(f"Key '{key}' has incompatible length. Skipping.")
             elif key != "coord":
                 return_dict[key] = values
-        for key in data_dict.keys():
-            print(key, data_dict[key].shape if isinstance(data_dict[key], np.ndarray) else type(data_dict[key]), 
-                  return_dict[key].shape if key in return_dict and isinstance(return_dict[key], np.ndarray) else type(return_dict[key]) if key in return_dict else 'N/A')
+        
+        if self.return_indices:        
+            return_dict['indices'] = indices.flatten()
+
         return return_dict
+
+@TRANSFORMS.register_module()
+class CropAround():
+    '''
+        Crops points around a randomly selected point within a given semantic class.
+        If there is no point of the specified class, it defaults to randomly selected point.
+    '''
+    def __init__(self, 
+                 semantic_class: int, 
+                 offset_std: float = 20,
+                 diameter_mean: float = 200,
+                 diameter_std: float = 40,
+                 ord: float = 2.0,
+                 p: float = 1.0,
+                 keys: list[str] = ['coord', 'origin_coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'displacement', 'strength', 'seg_indices']):
+        
+        self.semantic_class = semantic_class
+        self.offset_std = offset_std
+        self.diameter_mean = diameter_mean
+        self.diameter_std = diameter_std
+        self.ord = ord
+        self.keys = keys
+        self.p = p
+
+    def __call__(self, data_dict):
+
+        keys = copy.deepcopy(self.keys)
+        assert "coord" in data_dict.keys()
+
+        while True:
+
+            valid_indices = np.where(data_dict['segment'] == self.semantic_class)
+            if len(valid_indices[0]) > 0 and np.random.rand() < self.p:
+                center_idx = np.random.choice(valid_indices[0])
+            else:
+                center_idx = np.random.randint(data_dict['coord'].shape[0])
+
+            center = data_dict["coord"][center_idx]
+            offset = np.random.normal(scale=self.offset_std, size=(3,))
+            center = center + offset
+
+            diameter = np.random.normal(loc=self.diameter_mean, scale=self.diameter_std)
+            radius = diameter / 2.0
+            dist = np.linalg.norm(data_dict["coord"] - center, axis=1, ord=self.ord)
+            idx_crop = np.where(dist < radius)[0]
+
+            if len(idx_crop) > 100:
+                break
+
+        if 'origin_coord' in keys:
+            dist = np.linalg.norm(data_dict["origin_coord"] - center, axis=1, ord=self.ord)
+            idx_crop = np.where(dist < radius)[0]
+
+            for key in keys:
+                if 'origin' in key:
+                    keys.remove(key)
+                    data_dict[key] = data_dict[key][idx_crop]
+        
+        dist = np.linalg.norm(data_dict["coord"] - center, axis=1, ord=self.ord)
+        idx_crop = np.where(dist < radius)[0]
+
+        for key in keys:
+            if key in data_dict.keys():
+                data_dict[key] = data_dict[key][idx_crop]
+                
+        return data_dict
 
 class Compose(object):
     def __init__(self, cfg=None):
