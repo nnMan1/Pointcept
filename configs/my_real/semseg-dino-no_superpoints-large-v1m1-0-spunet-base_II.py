@@ -8,7 +8,7 @@ empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-weight = '/leonardo_work/EUHPC_D26_009/Pointcept/exp/my_synth/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_att_2/model/model_best.pth'
+weight = 'exp/my_real/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_II/model/model_best.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
@@ -70,6 +70,8 @@ model = dict(
         )
     ),
     backbone_out_channels=64,
+    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
+              dict(type='FocalLoss', loss_weight=1.0, ignore_index=-1)],
 )
 
 
