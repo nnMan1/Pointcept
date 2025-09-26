@@ -249,6 +249,7 @@ class Trainer(TrainerBase):
             pin_memory=True,
             worker_init_fn=init_fn,
             drop_last=True,
+            prefetch_factor=self.cfg.prefetch_factor,
             persistent_workers=True,
         )
         return train_loader

@@ -6,6 +6,7 @@ test_only = False  # test process
 seed = None  # train process will init a random seed and record
 save_path = "exp/default"
 num_worker = 16  # total worker in all gpu
+prefetch_factor = 2  # dataloader prefetch factor, 0 for disable
 batch_size = 16  # total batch size in all gpu
 batch_size_val = None  # auto adapt to bs 1 for each gpu
 batch_size_test = None  # auto adapt to bs 1 for each gpu
