@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 1 # bs: total bs in all gpus
-num_worker = 8
+batch_size = 8 # bs: total bs in all gpus
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -66,7 +66,9 @@ model = dict(
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
-            return_features=['feat'],
+            return_features=['feat'],            
+            freeze_backbone=True,
+            freeze_backbone_bn=False
             ),
         ),
         backbone_out_channels=64,
@@ -243,8 +245,8 @@ data = dict(
     ),
     val=dict(
        type='MechanicalAssemblyV2',
-        split='train',
-        data_root='/home/data/cetim_assembly/dataset/downsampled1',
+        split='val',
+        data_root='/home/data/cetim_assembly/dataset/downsampled',
         cache=False,
         transform=[
             dict(type='CenterShift', apply_z=True),

@@ -12,7 +12,7 @@ weight = 'exp/my_real/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
-num_classes = 1
+num_classes = 2
 fts_sizes = 128
 dim_feedforward=1024
 instance_ignore_index = -1
@@ -22,7 +22,7 @@ segment_ignore_index = (-1, )
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
-    num_classes=3,
+    num_classes=2,
     backbone=dict(
         type="MergeFeatures",
         model1_config=dict(
@@ -70,7 +70,7 @@ model = dict(
         )
     ),
     backbone_out_channels=64,
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1),
+    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1, weight=[0.05, 0.95]),
               dict(type='FocalLoss', loss_weight=1.0, ignore_index=-1)],
 )
 
@@ -104,7 +104,7 @@ class_names = ["other", "screw"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=['class_names'],
+    names= class_names,
     train=dict(
         type=dataset_type,
         split="trainII",
@@ -135,7 +135,7 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=0.5,
                 hash_type="fnv",
                 mode="train",
                 return_inverse=True,
@@ -189,7 +189,7 @@ data = dict(
                     instance='origin_instance')),
             dict(
                 type='GridSample',
-                grid_size=1,
+                grid_size=0.5,
                 hash_type='fnv',
                 mode='train',
                 return_inverse=True,
@@ -216,7 +216,8 @@ data = dict(
                     mappings_offset='mappings_src'))
         ],
         test_mode=False,
-        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0)),
+        classes=classes
+    ),
     test=dict(  
             type='MechanicalAssembly',
             split='train',
@@ -231,7 +232,7 @@ data = dict(
                         instance='origin_instance')),
                 dict(
                     type='GridSample',
-                    grid_size=1,
+                    grid_size=0.4,
                     hash_type='fnv',
                     mode='train',
                     return_grid_coord=True,
@@ -267,16 +268,7 @@ hooks = [
                                replacement=["module.", "module.backbone."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(type="InsSegEvaluator",
-         segment_ignore_index=segment_ignore_index,
-         instance_ignore_index=-1,),
+    dict(type="SemSegEvaluator"),
     dict(type="CheckpointSaver", save_freq=None),
+    dict(type="PreciseEvaluator", test_last=False),
 ]
-
-# Tester
-test = dict(
-    type="InstSegTester",
-    segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
-    verbose=False,
-)

@@ -29,7 +29,13 @@ class PointTransformerV3FeatureExtractor(BaseFeatureExtractor):
                  freeze_backbone: bool = False,
                  freeze_backbone_bn: bool = False,
                  **kwargs):
-        super().__init__(freeze_backbone=freeze_backbone)
+        super().__init__(return_features=return_features, 
+                         global_pool=global_pool,
+                         normalize_global=normalize_global,
+                         gem_p=gem_p,
+                         keep_keys=keep_keys,
+                         freeze_backbone=freeze_backbone,
+                         freeze_backbone_bn=freeze_backbone_bn)
         self.backbone = PointTransformerV3(**kwargs)
 
         self.feature_groups = {

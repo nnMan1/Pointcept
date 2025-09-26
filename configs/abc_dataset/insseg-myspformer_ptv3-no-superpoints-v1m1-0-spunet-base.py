@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16 # bs: total bs in all gpus
+batch_size = 8 # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
@@ -23,6 +23,7 @@ model = dict(
     num_query = 100,
     encoder=dict(
         backbone=dict(
+            type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
             stride=(2, 2, 2, 2),
@@ -53,17 +54,12 @@ model = dict(
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+            return_features=['feat'],
         ),
-        out_channels=32,
+        backbone_out_channels=64,
+        out_channels=32
      ),
-    #  positional_embedding=dict(
-    #     type='PositionEmbeddingCoordsSine',
-    #     pos_type="fourier",
-    #     d_pos=128,
-    #     gauss_scale=1,
-    #     normalize=True,
-    # ),
-     decoder=dict(
+    decoder=dict(
         in_channels=32,
         hlevels=6,
         mask_modules=[
@@ -125,8 +121,10 @@ model = dict(
             )
         ],
     ),
+    use_superpoint_pooling=False,
     instance_ignore_index=-1,
 )
+
 
 
 # scheduler settings
@@ -158,7 +156,7 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=['class_names'],
+    names=class_names,
     train=dict(
         type=dataset_type,
         split="train",
@@ -215,6 +213,9 @@ data = dict(
                     "images",
                     "mappings_src",
                     "mappings_tgt",
+                    # "instance_centroid",
+                    # "bbox",
+                    "seg_indices",
                     "path",
                     "name",
                     "inverse"
@@ -271,9 +272,10 @@ data = dict(
                     "images",
                     "mappings_src",
                     "mappings_tgt",
-                    'origin_coord', 
-                    'origin_segment', 
-                    'origin_instance',
+                    'origin_coord', 'origin_segment', 'origin_instance',
+                    # "instance_centroid",
+                    # "bbox",
+                    "seg_indices",
                     "path",
                     "name",
                     "inverse"
