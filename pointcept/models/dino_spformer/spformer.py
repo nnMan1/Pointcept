@@ -14,6 +14,8 @@ from .utils import compute_stats, select_masks, db_scan
 from .backbone import PointTransformerV3AddFeatures
 # from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
 from pointcept.utils.visualization import pca_features_visualization
+from pointcept.models.utils.matcher import build_matcher
+from pointcept.models.utils.matcher import MaskSelector
 
 class Encoder(nn.Module):
 
@@ -131,8 +133,8 @@ class MaskModule(nn.Module):
         attn_masks = []
         
         return_dict = {
-            'output_class': output_class,
-            'output_score': outputs_score
+            'pred_logits': output_class,
+            'pred_score': outputs_score
         }
 
         bs = 0
@@ -141,7 +143,7 @@ class MaskModule(nn.Module):
             bs = be
 
         outputs_mask = torch.cat(output_masks)
-        return_dict['output_mask'] = outputs_mask
+        return_dict['pred_masks'] = outputs_mask
 
         if self.return_attn_masks:
             
@@ -229,14 +231,13 @@ class MySPFormer(nn.Module):
                  num_query,
                  encoder, 
                  decoder,
-                 instance_ignore_index, 
+                 matcher, 
                  use_superpoint_pooling=True,
-                 positional_embedding = None
+                 positional_embedding = None,
                 ):
 
         super().__init__()
 
-        self.instance_ignore_index = instance_ignore_index
         self.encoder = Encoder(**encoder)   
 
         self.superpoint_pooling = SuperpointPooling()
@@ -254,10 +255,8 @@ class MySPFormer(nn.Module):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
         self.decoder = Decoder(**decoder)
-        self.matcher = HungarianMatcher(cost_class=.5,
-                                        cost_dice=1,
-                                        cost_mask=1,
-                                        instance_ignore_index=instance_ignore_index)
+        self.matcher = build_matcher(matcher)
+        self.mask_selector = MaskSelector()
         
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
         weight[-1] = 0.1
@@ -292,8 +291,25 @@ class MySPFormer(nn.Module):
         intersections = []
         unions = []
         
+        indices = self.matcher(pred[-1], data)
+        matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.mask_selector(pred[-1], data, indices)
+        matched_targets = []
+        matched_seg_targets = []
+
         for p in pred:
-            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
+            # matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
+            matched_outputs = []
+            matched_seg_outputs = []
+            bs = 0
+
+            for i, be in enumerate(data['offset']):
+                pred_ids, tgt_ids,  = indices[i]
+                out_mask = p['pred_masks'][bs:be]
+                out_mask = out_mask[:, pred_ids]
+
+                matched_outputs.append(out_mask)
+                matched_seg_outputs.append(p['pred_logits'][i])
+                bs = be             
             matched_scores = [p['output_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
 
             t = {'seg_ce': [],
@@ -302,8 +318,6 @@ class MySPFormer(nn.Module):
                  'matched_iou': [],
                  'score_loss': []}
             
-            if len(matched_outputs) == 0:
-                pass
 
             for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
@@ -372,6 +386,7 @@ class MySPFormer(nn.Module):
 
     def forward(self, data):
 
+        print(data['path'])
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
 

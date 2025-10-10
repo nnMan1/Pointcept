@@ -1094,9 +1094,11 @@ class InstanceParser(object):
         # mapping ignored instance to ignore index
         instance[~mask] = self.instance_ignore_index
         # reorder left instance
-        unique, inverse = np.unique(instance[mask], return_inverse=True)
+        unique, index, inverse = np.unique(instance[mask], return_inverse=True, return_index=True)
         instance_num = len(unique)
         instance[mask] = inverse
+        # data_dict['instance_segment'][unique == self.instance_ignore_index] = self.segment_ignore_index[0]
+
         # init instance information
         centroid = np.ones((coord.shape[0], 3)) * self.instance_ignore_index
         bbox = np.ones((instance_num, 8)) * self.instance_ignore_index
@@ -1124,6 +1126,9 @@ class InstanceParser(object):
         data_dict["instance"] = instance
         data_dict["instance_centroid"] = centroid
         data_dict["bbox"] = bbox
+
+        unique, inverse = np.unique(instance[mask], return_inverse=True)
+        data_dict['instance_segment'] = segment[index]
         return data_dict
 
 @TRANSFORMS.register_module()
@@ -1268,7 +1273,7 @@ class CropAround():
                  diameter_std: float = 40,
                  ord: float = 2.0,
                  p: float = 1.0,
-                 keys: list[str] = ['coord', 'origin_coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'displacement', 'strength', 'seg_indices']):
+                 keys: list[str] = ['coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'seg_indices']):
         
         self.semantic_class = semantic_class
         self.offset_std = offset_std
@@ -1280,7 +1285,7 @@ class CropAround():
 
     def __call__(self, data_dict):
 
-        keys = copy.deepcopy(self.keys)
+        keys = list(copy.deepcopy(self.keys))
         assert "coord" in data_dict.keys()
 
         while True:
@@ -1306,11 +1311,11 @@ class CropAround():
         if 'origin_coord' in keys:
             dist = np.linalg.norm(data_dict["origin_coord"] - center, axis=1, ord=self.ord)
             idx_crop = np.where(dist < radius)[0]
-
             for key in keys:
                 if 'origin' in key:
-                    keys.remove(key)
                     data_dict[key] = data_dict[key][idx_crop]
+            
+            keys = [k for k in keys if 'origin' not in k]
         
         dist = np.linalg.norm(data_dict["coord"] - center, axis=1, ord=self.ord)
         idx_crop = np.where(dist < radius)[0]
@@ -1318,8 +1323,9 @@ class CropAround():
         for key in keys:
             if key in data_dict.keys():
                 data_dict[key] = data_dict[key][idx_crop]
-                
+
         return data_dict
+
 
 class Compose(object):
     def __init__(self, cfg=None):

@@ -23,6 +23,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                  fts_dim=384,
                  out_fts_dim=256,
                  return_features=None, 
+                 local_files_only=False,
                  **kwargs,
                  ):
         
@@ -31,7 +32,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         self.fts_dim = fts_dim
         self.out_fts_dim = out_fts_dim
         self.model = Dinov2Model.from_pretrained(model_name, 
-                                                 local_files_only=True)
+                                                 local_files_only=local_files_only)
         
         self.proj = nn.Sequential(
                 nn.Linear(fts_dim, out_fts_dim),

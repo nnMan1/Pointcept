@@ -12,7 +12,7 @@ class CostTerm(nn.Module, ABC):
         self.enabled = enabled
 
     @abstractmethod
-    def compute_cost(self, outputs, target, b_idx):
+    def compute_cost(self, outputs, target):
         pass
 
 #TODO: BE CAREFUL ABOUT IGNORED INDICES IN TARGETS
@@ -36,20 +36,19 @@ class ClassCost(CostTerm):
     def compute_cost(self, outputs, targets):
 
         C = []
-        offset = outputs['offset']
 
         bs = 0
-        for i, be in enumerate(offset):
+        for i, be in enumerate(targets['instance_segment_offset']):
             logits = outputs['pred_logits'][i]  
-            labels = targets['instance_segment'].long()        # per point semantic labels
+            labels = targets['instance_segment'][bs:be].long()        # per point semantic labels
 
             prob = logits.softmax(-1) if not self.use_logits else logits
             if not self.use_logits:
                 c = -prob[:, labels]              
             else:
                 logp = F.log_softmax(logits, -1)
-                c = -logp[:, labels]   
-            
+                c = -logp[:, labels]  
+                            
             C.append(c * self.weight)
             bs = be
 
@@ -62,7 +61,7 @@ class MaskBCECost(CostTerm):
         self.sample_points = sample_points
         self.instance_ignore_index = instance_ignore_index
 
-    def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
+    def batch_sigmoid_ce_loss(self, inputs: torch.Tensor, targets: torch.Tensor):
         """
         Args:
             inputs: A float tensor of arbitrary shape.
@@ -89,12 +88,13 @@ class MaskBCECost(CostTerm):
 
         return loss
 
+    @torch.no_grad()
     def compute_cost(self, outputs, target):
 
         C = []
 
         bs = 0
-        for i, be in enumerate(outputs['offset']):
+        for i, be in enumerate(target['offset']):
             pred_masks = outputs['pred_masks'][bs:be]  
             tgt_flat = target['instance'][bs:be]    
 
@@ -113,7 +113,7 @@ class MaskBCECost(CostTerm):
                 pred_masks = pred_masks[:, idx]
                 tgt_masks = tgt_masks[:, idx]
 
-            C.append(self.batch_sigmoid_ce_loss(pred_masks, tgt_masks.float())) * self.weight
+            C.append(self.batch_sigmoid_ce_loss(pred_masks.T, tgt_masks.float().T) * self.weight)
             bs = be
 
         return C
@@ -125,7 +125,7 @@ class MaskDiceCost(CostTerm):
         self.sample_points = sample_points
         self.instance_ignore_index = instance_ignore_index
 
-    def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
+    def batch_dice_loss(self, inputs: torch.Tensor, targets: torch.Tensor):
         """
         Compute the DICE loss, similar to generalized IOU for masks
         Args:
@@ -143,12 +143,13 @@ class MaskDiceCost(CostTerm):
         return loss 
 
 
+    @torch.no_grad()
     def compute_cost(self, outputs, target):
 
         C = []
 
         bs = 0
-        for i, be in enumerate(outputs['offset']):
+        for i, be in enumerate(target['offset']):
             pred_masks = outputs['pred_masks'][bs:be]  
             tgt_flat = target['instance'][bs:be]    
 
@@ -167,7 +168,7 @@ class MaskDiceCost(CostTerm):
                 pred_masks = pred_masks[:, idx]
                 tgt_masks = tgt_masks[:, idx]
 
-            C.append(self.batch_dice_loss(pred_masks, tgt_masks.float()) * self.weight)
+            C.append(self.batch_dice_loss(pred_masks.T, tgt_masks.float().T) * self.weight)
             bs = be
 
         return C

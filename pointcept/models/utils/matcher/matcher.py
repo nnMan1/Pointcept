@@ -7,7 +7,6 @@ import torch.nn as nn
 from .builder import build_cost
 from .builder import MATCHERS
 
-
 class BaseMatcher(nn.Module, ABC):
 
     def __init__(
@@ -35,6 +34,7 @@ class BaseMatcher(nn.Module, ABC):
         for cost in self.cost_terms:
             if Cs is None:
                 Cs = cost.compute_cost(outputs, targets)
+                print([C.shape for C in Cs])
             else:
                 for i, n in enumerate(cost.compute_cost(outputs, targets)):
                     Cs[i] += n
@@ -76,7 +76,7 @@ class HungarianMatcher(BaseMatcher):
         batch_size = len(outputs['pred_logits'])
 
         with torch.no_grad():
-            # Compute the matching cost matrix  
+            # Compute the matching cost matrix
             C = self.compute_cost_matrix(outputs, targets)
             C = [c.cpu() for c in C]
 
