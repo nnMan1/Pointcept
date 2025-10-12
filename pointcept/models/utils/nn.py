@@ -135,23 +135,23 @@ class SuperpointPooling(nn.Module):
 
     def forward(self, data, keys=['instance', 'segment', 'features']):
 
-         data['offset_orig'] = data['offset']
+        data['offset_orig'] = data['offset']
 
-         if 'seg_indices' not in data.keys():
+        if 'seg_indices' not in data.keys():
             data['seg_indices'] = torch.arange(data['coord'].shape[0], device=data['coord'].device)
             return data
-         else:
+        else:
             data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
 
-         label_keys = []
-         if 'instance' in keys:
+        label_keys = []
+        if 'instance' in keys:
             label_keys.append('instance')
 
-         if 'segment' in keys:
+        if 'segment' in keys:
             label_keys.append('segment')
 
          
-         for key in label_keys:
+        for key in label_keys:
             label = []
             for cls in data['seg_indices'].unique():
                cluster_mask = data['seg_indices'] == cls
@@ -162,22 +162,39 @@ class SuperpointPooling(nn.Module):
 
             data[key] = torch.stack(label)
 
-         bs = 0
-         for be in data['offset']:
+        instance_segment = [] 
+        instance_segment_offset = [0]
+        bs, ibs = 0, 0
+        ibe = 0
+
+        for i, be in enumerate(data['offset']):
             instances = data['instance'][bs:be]
+            cnt = instances.max() + 1
             non_ignore_mask = instances != self.instance_ignor_index
             if non_ignore_mask.sum() == 0:
                 continue
 
-            _, new_instance_indices = torch.unique(instances[non_ignore_mask], return_inverse=True)
+            vals, new_instance_indices = torch.unique(instances[non_ignore_mask], return_inverse=True)
             data['instance'][bs:be][non_ignore_mask] = new_instance_indices
-            bs = be
 
-         for key in keys:
+            if 'instance_segment' in data.keys():
+                ibe = data['instance_segment_offset'][i]
+                instance_segment.append(data['instance_segment'][ibs:ibe][vals])
+                instance_segment_offset.append(instance_segment_offset[-1] + vals.shape[0])
+            
+            bs, ibs = be, ibe
+
+        if 'instance_segment' in data.keys():
+            data['instance_segment_origin'] = data['instance_segment']
+            data['instance_segment_offset_origin'] = data['instance_segment_offset']
+            data['instance_segment'] = torch.concat(instance_segment)
+            data['instance_segment_offset'] = torch.tensor(instance_segment_offset, device=data['coord'].device)[1:]
+
+        for key in keys:
             if key not in label_keys:
                 data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
         
-         return data
+        return data
 
 class SuperpointUnpooling(nn.Module):
 
@@ -190,6 +207,12 @@ class SuperpointUnpooling(nn.Module):
             return data
 
         data['offset'] = data['offset_orig']
+
+        if 'instance_segment' in data.keys():
+            data['instance_segment'] = data['instance_segment_origin']
+            data['instance_segment_offset'] = data['instance_segment_offset_origin']
+            del data['instance_segment_origin']
+            del data['instance_segment_offset_origin']
 
         for key in keys:
             data[key] = data[key][data['seg_indices']]

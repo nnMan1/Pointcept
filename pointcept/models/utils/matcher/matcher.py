@@ -34,7 +34,6 @@ class BaseMatcher(nn.Module, ABC):
         for cost in self.cost_terms:
             if Cs is None:
                 Cs = cost.compute_cost(outputs, targets)
-                print([C.shape for C in Cs])
             else:
                 for i, n in enumerate(cost.compute_cost(outputs, targets)):
                     Cs[i] += n
@@ -72,11 +71,9 @@ class HungarianMatcher(BaseMatcher):
         )
 
     def forward(self, outputs, targets):
-        # We flatten to compute the cost matrices in a batch
         batch_size = len(outputs['pred_logits'])
 
         with torch.no_grad():
-            # Compute the matching cost matrix
             C = self.compute_cost_matrix(outputs, targets)
             C = [c.cpu() for c in C]
 
