@@ -7,9 +7,9 @@ from sklearn.cluster import DBSCAN
 import numpy as np
 
 def select_masks(out, superpoints):
-        pred_labels = out['output_class'][0]
-        pred_masks = out['output_mask'].T
-        pred_scores = out['output_score'][0]
+        pred_labels = out['pred_logits'][0]
+        pred_masks = out['pred_masks'].T
+        pred_scores = out['pred_score'][0]
 
         num_class = pred_labels.shape[1] - 1
         num_query = pred_labels.shape[0]

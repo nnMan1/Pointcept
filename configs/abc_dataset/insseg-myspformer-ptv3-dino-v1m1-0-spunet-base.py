@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 4 # bs: total bs in all gpus
-num_worker = 64
+num_worker = 4
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -227,6 +227,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -238,7 +239,13 @@ data = dict(
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"
+                ),
             ),
         ],
         test_mode=False,
@@ -286,6 +293,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -295,10 +303,16 @@ data = dict(
                     "seg_indices",
                     "path",
                     "name",
-                    "inverse"
+                    "inverse",
+                    "instance_segment"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
