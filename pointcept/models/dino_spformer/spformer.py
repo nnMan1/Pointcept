@@ -291,15 +291,10 @@ class MySPFormer(nn.Module):
         intersections = []
         unions = []
         
-        indices = self.matcher(pred[-1], data)
-        matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.mask_selector(pred[-1], data, indices)
-        matched_targets = []
-        matched_seg_targets = []
-
         for p in pred:
             # matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
-
-            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.mask_selector(pred[-1], data, indices)
+            indices = self.matcher(p, data)
+            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.mask_selector(p, data, indices)
 
             matched_scores = [p['pred_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
 

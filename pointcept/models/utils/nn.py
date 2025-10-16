@@ -137,6 +137,10 @@ class SuperpointPooling(nn.Module):
 
         data['offset_orig'] = data['offset']
 
+        if 'instance_segment' in data.keys():
+            data['instance_segment_origin'] = data['instance_segment']
+            data['instance_segment_offset_origin'] = data['instance_segment_offset']
+
         if 'seg_indices' not in data.keys():
             data['seg_indices'] = torch.arange(data['coord'].shape[0], device=data['coord'].device)
             return data
@@ -185,8 +189,6 @@ class SuperpointPooling(nn.Module):
             bs, ibs = be, ibe
 
         if 'instance_segment' in data.keys():
-            data['instance_segment_origin'] = data['instance_segment']
-            data['instance_segment_offset_origin'] = data['instance_segment_offset']
             data['instance_segment'] = torch.concat(instance_segment)
             data['instance_segment_offset'] = torch.tensor(instance_segment_offset, device=data['coord'].device)[1:]
 

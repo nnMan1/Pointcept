@@ -1,8 +1,8 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
-num_worker = 4
+batch_size = 16 # bs: total bs in all gpus
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -15,6 +15,7 @@ find_unused_parameters = True
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
+instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # model settings
@@ -135,7 +136,7 @@ model = dict(
     matcher=dict(
         type='HungarianMatcher',
         cost_terms=[
-            dict(type='ClassCost', weight=1.0, enabled=True, use_logits=False),
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
             dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
             dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
         ],
@@ -375,8 +376,8 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
+    instance_ignore_index=instance_ignore_index,
     verbose=False,
 )
