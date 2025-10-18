@@ -51,6 +51,8 @@ class PointTransformerV3FeatureExtractor(BaseFeatureExtractor):
     def forward_features(self, batch: Batch) -> Dict[str, Tensor]:
         point = Point(batch)
 
+        fts_dist_loss = torch.tensor(0.0, device=point.feat.device)
+
         return_dict = {}
 
         point.serialization(order=self.backbone.order, shuffle_orders=self.backbone.shuffle_orders)
@@ -64,7 +66,7 @@ class PointTransformerV3FeatureExtractor(BaseFeatureExtractor):
             point = layer(point)
             if add_features[-1] is not None:
                 if point.pooling_inverse != {}:
-                    add_features.append(torch_scatter.scatter_mean(add_features[-1],  point.pooling_inverse, dim=0))
+                    add_features.append(torch_scatter.scatter_max(add_features[-1],  point.pooling_inverse, dim=0)[0])
                 else:
                     add_features.append(add_features[-1])
 
@@ -78,11 +80,15 @@ class PointTransformerV3FeatureExtractor(BaseFeatureExtractor):
             point = layer(point)
 
             if add_features[0] is not None:
-                point.feat = point.feat + add_features[0][:, :point.feat.shape[1]]
-                add_features.pop(0)
+                valid_fts_mask = add_features[0].abs().sum(dim=1) > 0
+                if valid_fts_mask.sum() > 0:
+                    fts_dist_loss += F.mse_loss(point.feat[valid_fts_mask], add_features[0][valid_fts_mask, :point.feat.shape[1]])
+                    point.feat[valid_fts_mask] = (point.feat[valid_fts_mask] + add_features[0][valid_fts_mask, :point.feat.shape[1]]) / 2.0
+                    add_features.pop(0)
 
             return_dict[f'dec_{k}'] = point.feat
 
         return_dict['feat'] = point.feat
+        return_dict['loss'] = fts_dist_loss
 
         return return_dict

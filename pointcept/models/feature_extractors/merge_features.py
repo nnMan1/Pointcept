@@ -1,5 +1,6 @@
 from .base_feature_extractor import BaseFeatureExtractor
 from pointcept.models.builder import build_model, MODELS
+import torch
 
 @MODELS.register_module("MergeFeatures")
 class MergeFeatures(BaseFeatureExtractor):
@@ -17,7 +18,13 @@ class MergeFeatures(BaseFeatureExtractor):
 
     def forward_features(self, x):
 
-        x['add_features'] = self.feature_extractor1(x).feat
+        out1 = self.feature_extractor1(x)
+        x['add_features'] = out1.feat
         outputs = self.feature_extractor2(x)
+
+        if 'loss' not in outputs:
+            outputs['loss'] = torch.tensor(0.0, device=out1.feat.device)
+
+        outputs['loss'] += out1.get('loss', 0.0)
 
         return outputs

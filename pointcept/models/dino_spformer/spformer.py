@@ -44,7 +44,8 @@ class Encoder(nn.Module):
         
         return {
                 'features': features, 
-                'offset': offset
+                'offset': offset,
+                'fts_loss': values.get('loss', 0.0)
             }
 
 class Decoder(nn.Module):
@@ -342,7 +343,7 @@ class MySPFormer(nn.Module):
         axiliary_losses['loss'] = 0.5 * axiliary_losses['seg_ce'] + \
                                   1.0 * axiliary_losses['mask_ce'] + \
                                   1.0 * axiliary_losses['mask_dice']  + \
-                                  0.5 * axiliary_losses['score_loss']
+                                  0.5 * axiliary_losses['score_loss'] + data['fts_loss']
         return axiliary_losses
 
     def __get_pos_encs(self, data_dict):

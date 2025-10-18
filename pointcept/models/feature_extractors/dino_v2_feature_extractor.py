@@ -24,6 +24,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                  out_fts_dim=256,
                  return_features=None, 
                  local_files_only=False,
+                 project_fts=True,
                  **kwargs,
                  ):
         
@@ -31,6 +32,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
         self.out_fts_dim = out_fts_dim
+        self.project_fts = project_fts
         self.model = Dinov2Model.from_pretrained(model_name, 
                                                  local_files_only=local_files_only)
         
@@ -122,8 +124,10 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                 obs = obe
 
             mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
-            
-        mesh_features = self.proj(mesh_features)
+
+        if self.project_fts:
+            mesh_features = self.proj(mesh_features)
+            mesh_features[mesh_features_cnt == 0] = 0.0
 
         return {
             "feat": mesh_features
@@ -143,3 +147,4 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
         random_positions = perm[first_in_shuffle]
 
         return random_positions
+    

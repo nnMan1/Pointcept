@@ -100,7 +100,7 @@ class BaseFeatureExtractor(nn.Module, ABC):
         self._validate_batch(batch)
         feats = self.forward_features(batch)  # each (P, Ck)
         for k, t in feats.items():
-            assert t.dim() == 2, f"Feature '{k}' must be (P,C), got {tuple(t.shape)}."
+            assert t.dim() == 2 or k == 'loss', f"Feature '{k}' must be (P,C), got {tuple(t.shape)}."
 
         wanted = self._return_features or tuple(self.feature_names)
         out: Out = AttrDict({k: feats[k] for k in wanted if k in feats})
@@ -118,6 +118,12 @@ class BaseFeatureExtractor(nn.Module, ABC):
         for k in self._keep_keys:
             if k in batch:
                 out[k] = batch[k]
+
+        if 'loss' not in feats:
+            out['loss'] = torch.tensor(0.0, device=next(self.parameters()).device)
+        else:
+            out['loss'] = feats['loss']
+
         return out
 
     def set_return_features(self, names: Optional[Iterable[str]]) -> None:
