@@ -82,12 +82,39 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                     mappings_src = mappings_src[random_positions]
                     mappings_tgt = mappings_tgt[random_positions]
 
-                a, b, c = mappings_src.T
-                b //= div_factor
-                c //= div_factor
+                    a, b, c = mappings_src.T
+                    b //= div_factor
+                    c //= div_factor
 
-                mesh_features[bs:be][mappings_tgt] += features[a, b, c]
-                mesh_features_cnt[bs:be][mappings_tgt] += 1
+                    mesh_features[bs:be][mappings_tgt] += features[a, b, c]
+                    mesh_features_cnt[bs:be][mappings_tgt] += 1
+                elif self.merge_strategy == 'mean':
+                    for i in range(ibe - ibs):
+                        mask = (mappings_src[:, 0] == i)
+                        if torch.sum(mask) == 0:
+                            continue
+                        selected_mappings_src = mappings_src[mask]
+                        selected_mappings_tgt = mappings_tgt[mask]
+                        a, b, c = selected_mappings_src.T
+                        b //= div_factor
+                        c //= div_factor
+
+                        mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
+                        mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
+                elif self.merge_strategy == 'max':
+                    for i in range(ibe - ibs):
+                        mask = (mappings_src[:, 0] == i)
+                        if torch.sum(mask) == 0:
+                            continue
+                        selected_mappings_src = mappings_src[mask]
+                        selected_mappings_tgt = mappings_tgt[mask]
+                        a, b, c = selected_mappings_src.T
+                        b //= div_factor
+                        c //= div_factor
+
+                        mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c]) 
+                        mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
+
 
                 bs = be
                 ibs = ibe
