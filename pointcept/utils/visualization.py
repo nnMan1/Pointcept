@@ -10,6 +10,7 @@ import open3d as o3d
 import numpy as np
 import torch
 from matplotlib import colors as mcolors
+from sklearn.decomposition import PCA
 
 colors = list(dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS).values())
 colors = np.asarray([mcolors.to_rgba(color)[:3] for color in colors])
@@ -149,3 +150,37 @@ def to_o3d(pos, faces=None, verts_colors=None):
             geom.colors = o3d.utility.Vector3dVector(to_numpy(verts_colors))
 
     return geom
+
+def pca_features_visualization(coord, features, n_components=3, file_path=None, logger=None) -> o3d.geometry.PointCloud:
+    """
+    Visualize PCA features of point cloud.
+    
+    Args:
+        coord (np.ndarray): Point cloud coordinates.
+        features (np.ndarray): Features to visualize.
+        file_path (str): Path to save the visualization.
+        logger: Logger for logging information.
+    Returns:
+        o3d.geometry.PointCloud: Open3D point cloud object with PCA features.
+    """
+
+    pca = PCA(n_components=n_components)
+    colors = pca.fit_transform(features)[:, -3:]
+
+    print(colors.shape, coord.shape)
+
+    # Normalize colors
+    colors -= colors.min(axis=0)
+    colors /= colors.max(axis=0)
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(coord)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    if file_path is not None:
+        o3d.io.write_point_cloud(file_path, pcd)
+
+        if logger is not None:
+            logger.info(f"Save PCA Features Visualization to: {file_path}")
+    
+    return pcd

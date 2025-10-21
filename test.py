@@ -14,10 +14,9 @@ from pointcept.models.utils.nn import SuperpointPooling, SuperpointUnpooling
 
 dataset = build_dataset(dict(
                         type='MechanicalAssembly',
-                        split='train',
-                        data_root='data/crops',
-                        augment_holes=True,
-                        transform=[
+                        split='val',
+                        data_root='data/cetim_assembly/data',
+                              transform=[
                                 dict(type="CenterShift", apply_z=True),
                                 dict(
                                     type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
@@ -68,7 +67,9 @@ dataset = build_dataset(dict(
                                         'rrivet_t2': 4
                                     })))
 
-colors = np.random.randint(0, 255, (55500, 3)) / 255
+dataset.prepare_clustering()
+
+colors = np.random.randint(0, 255, (1500, 3)) / 255
 
 for i, s in enumerate(dataset):
 
@@ -90,10 +91,12 @@ for i, s in enumerate(dataset):
     pcd.points = o3d.utility.Vector3dVector(s['coord'])
     pcd.colors = o3d.utility.Vector3dVector(colors[s['segment']+1])
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name="test")
-    vis.add_geometry(pcd)
-    vis.run()
-    vis.destroy_window()
+   o3d.io.write_point_cloud('test.ply', pcd)
+   exit(0)
+#    vis = o3d.visualization.Visualizer()
+#    vis.create_window(window_name=s['path'])
+#    vis.add_geometry(pcd)
+#    vis.run()
+#    vis.destroy_window()
 
    # o3d.visualization.draw_geometries([pc 

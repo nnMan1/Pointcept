@@ -1,12 +1,13 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 4 # bs: total bs in all gpus
+batch_size = 16 # bs: total bs in all gpus
 num_worker = 8
 mix_prob = 0
 empty_cache = False
 enable_amp = False
 evaluate = True
+find_unused_parameters=True
 resume=False
 weight='backbones/sstnet_pretrain.pth'
 
@@ -120,7 +121,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 10
+epoch = 512
+eval_epoch = 32 
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.05)
 scheduler = dict(
     type="PolyLR",
@@ -159,13 +161,13 @@ data = dict(
             # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 keys=("coord", "color", "normal", "segment", "instance", "seg_indices"),
             ),
-            dict(type="SphereCrop", sample_rate=1, point_max=250000, mode="random"),
+            dict(type="SphereCrop", point_max=250000, mode="random"),
             dict(type="NormalizeColor"),
             dict(
                 type="InstanceParser",
@@ -181,7 +183,6 @@ data = dict(
                     "segment",
                     "instance",
                     "seg_indices",
-                    "group_segment"
                 ),
                 feat_keys=("color", "coord"),
             ),
@@ -205,7 +206,7 @@ data = dict(
             ),
             dict(
                 type="GridSample",
-                grid_size=1,
+                grid_size=0.02,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -230,7 +231,6 @@ data = dict(
                     "origin_segment",
                     "origin_instance",
                     "seg_indices",
-                    "group_segment"
                 ),
                 feat_keys=("color", "coord"),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),

@@ -7,12 +7,10 @@ from torch.cuda.amp import autocast
 from pointcept.models.builder import MODELS, build_model
 from pointcept.positional_embeddings import build_positional_embedding
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
-from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
-from .nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
+from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
 from .utils import compute_stats, select_masks, db_scan
 from .backbone import SpUNet
-from .query_decoder import QueryDecoder
 
 class Encoder(nn.Module):
 
@@ -77,6 +75,7 @@ class Decoder(nn.Module):
                                                     attention_mask,
                                                     data['offset'],
                                                     query_features,
+                                                    pos = data['positional_embedding']
                                                     )
                     
                     out.append(masks)
@@ -141,7 +140,7 @@ class MaskModule(nn.Module):
                 attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
                 bs = be
 
-            return_dict['attn_mask'] = torch.cat(attn_masks)
+            return_dict['attn_mask'] = torch.cat(attn_masks).detach()
 
         return return_dict
 
@@ -179,10 +178,13 @@ class QueryRefinement(nn.Module):
                     activation='gelu'
                 )
                     
-    def forward(self, point_features, attn_mask, offset, queries):
+    def forward(self, point_features, attn_mask, offset, queries, pos):
 
         point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
+
+        if pos is not None:
+            pos, _, _ = pad_data(pos, offset, self.sample_size, rand_idx, mask_idx)
                 
         m = torch.stack(mask_idx)
         attn_mask = torch.logical_or(attn_mask, m[..., None])
@@ -194,6 +196,7 @@ class QueryRefinement(nn.Module):
                     key = point_features,
                     value = point_features,
                     attn_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
+                    pos=pos
                 )
                 
         output = self.self_attention(
@@ -216,6 +219,7 @@ class SPFormer(nn.Module):
                  encoder, 
                  decoder,
                  instance_ignore_index, 
+                 positional_embedding = None
                 ):
 
         super().__init__()
@@ -232,19 +236,6 @@ class SPFormer(nn.Module):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
         self.decoder = Decoder(**decoder)
-        # self.decoder = QueryDecoder(**{
-        #     'num_layer': 6,
-        #     'num_query': 400,
-        #     'd_model': 256,
-        #     'nhead': 8,
-        #     'hidden_dim': 1024,
-        #     'dropout': 0.0,
-        #     'activation_fn': 'gelu',
-        #     'iter_pred': True,
-        #     'attn_mask': True,
-        #     'pe': False
-        # }, in_channel=32, num_class=18)
-
         self.matcher = HungarianMatcher(cost_class=.5,
                                         cost_dice=1,
                                         cost_mask=1,
@@ -256,9 +247,11 @@ class SPFormer(nn.Module):
         self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+
+        self.positional_embedding = None
         
-        # self.iou_ce_loss = nn.BCEWithLogitsLoss()
-        # self.iou_mse_loss = nn.MSELoss()
+        if positional_embedding != None:
+            self.positional_embedding = build_positional_embedding(positional_embedding)
     
     def query_pooling(self, data):
         queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
@@ -286,6 +279,9 @@ class SPFormer(nn.Module):
                  'mask_dice': [],
                  'matched_iou': [],
                  'score_loss': []}
+            
+            if len(matched_outputs) == 0:
+                pass
 
             for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
@@ -327,11 +323,37 @@ class SPFormer(nn.Module):
                                   0.5 * axiliary_losses['score_loss']
         return axiliary_losses
 
+    def __get_pos_encs(self, data_dict):
+
+        if self.positional_embedding == None:
+            data_dict['positional_embedding'] = None
+            return data_dict
+
+        pos_encodings_pcd = []
+
+        bs = 0
+        for be in data_dict['offset']:
+            coords = data_dict['coord'][bs:be]
+            scene_min = coords.min(dim=0)[0][None, ...]
+            scene_max = coords.max(dim=0)[0][None, ...]
+
+            with autocast(enabled=False):
+                tmp = self.positional_embedding(coords[None, ...].float(), input_range=[scene_min, scene_max])
+
+            pos_encodings_pcd.append(tmp.squeeze(0).permute((1, 0)))
+            bs = be
+
+        data_dict['positional_embedding'] = torch.cat(pos_encodings_pcd)
+
+        return data_dict
+
     def forward(self, data):
 
         data.update(self.encoder(data))
+        data.update(self.__get_pos_encs(data))
 
         data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
+
         queries = self.query_pooling(data)    
 
         pred = self.decoder(data, queries) 
@@ -341,7 +363,7 @@ class SPFormer(nn.Module):
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
-
+            
             data = self.superpoint_unpooling(data)
 
         return return_dict

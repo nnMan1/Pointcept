@@ -1,88 +1,187 @@
+import sys
+sys.path.append('/home')
+
 import os
-import os.path as osp
-import open3d as o3d
-import json
+import torch
 import numpy as np
-import trimesh
-
-labels = ["other", "gear", "nut", "screw", "axe", "rivet", "sting-stif", "ruber-seal", "main_panel", "hole", "rivet_t1", "rrivet_t2"]
-labels = {l: i for i, l in enumerate(labels)}
-
-colors = np.asarray([
-            [144, 238, 144],   # Light Green
-            [70, 130, 180],    # Steel Blue
-            [255, 140, 0],     # Dark Orange
-            [255, 215, 0],     # Gold
-            [0, 255, 255],     # Aqua
-            [0, 191, 255],     # Deep Sky Blue
-            [34, 139, 34],     # Forest Green
-            [255, 69, 0],      # Orange Red
-            [138, 43, 226],    # Blue Violet
-            [173, 216, 230],   # Light Blue
-            [128, 0, 128],     # Purple
-            [0, 0, 128],       # Navy
-            [128, 128, 128],   # Gray
-            [0, 255, 0],       # Lime
-            [0, 0, 255],       # Blue
-            [255, 255, 0],     # Yellow
-            [0, 255, 255],     # Cyan
-            [255, 0, 255],     # Magenta
-            [255, 182, 193],   # Light Pink
-            [255, 99, 71],     # Tomato
-            [255, 228, 181],   # Moccasin
-            [255, 222, 173],   # Navajo White
-            [255, 160, 122],   # Light Salmon
-            [255, 127, 80],    # Coral
-            [240, 230, 140],   # Khaki
-            [230, 230, 250],   # Lavender
-            [216, 191, 216],   # Thistle
-            [221, 160, 221],   # Plum
-            [238, 130, 238],   # Violet
-        ])
-
-scans = ['data/raw_scans/panel-1/airplane panel 1NoTable.obj',
-         'data/raw_scans/panel-2/Scan1NoTable.stl',
-         'data/raw_scans/panel-3/Scan1.stl',
-         'data/raw_scans/panel-4/Scan1.stl',
-         'data/raw_scans/panel-5/cetim_fuselage_data_P5_test_part3_Raw_with_stickerDots_orig.stl',
-         'data/raw_scans/panel1/15/Scan 1.stl',
-         'data/raw_scans/panel2/scan1/Scan 1.stl',
-         'data/raw_scans/panel3/4-4_rivets_damaged_4_missing/scan2/Scan 1.stl',
-         'data/raw_scans/panel4/1-all_rivets_present/scan1/Scan 1.stl',
-         'data/raw_scans/panel5/4-two_rivets_missing/NoTable.stl']
+from common_tools import VData
+import open3d as o3d 
+from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
+from pointcept.models import build_model
+from pointcept.utils.visualization import to_o3d, colors
+from sklearn.cluster import DBSCAN
+from torch import nn
+import torch_scatter
+from sklearn.decomposition import PCA
+from functools import partial
+from torchvision import transforms
+from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
 
 
-for i, s in enumerate(scans):
-    print(i, s)
-    dir = osp.dirname(s)
-    anntoatoon = json.load(open(osp.join(dir, 'annotations.json')))
-    mesh = trimesh.load(s)
+dataset = build_dataset(dict(
+        type='MechanicalAssemblyV2',
+        split='val',
+        data_root='data/cetim_assembly/data',
+        cache=True,
+        transform=[
+            dict(type='CenterShift', apply_z=True),
+            dict(
+                type='Copy',
+                keys_dict=dict(
+                    coord='origin_coord',
+                    segment='origin_segment',
+                    instance='origin_instance')),
+            dict(
+                type='GridSample',
+                grid_size=1,
+                hash_type='fnv',
+                mode='train',
+                return_inverse=True,
+                return_grid_coord=True,
+                keys=('coord', 'segment', 'instance', 'seg_indices')),
+            dict(type='CenterShift', apply_z=False),
+            dict(
+                type='InstanceParser',
+                segment_ignore_index=(-1, ),
+                instance_ignore_index=-1),
+            dict(type='ToTensor'),
+            dict(
+                type='Collect',
+                keys=('coord', 'grid_coord', 'segment', 'instance', 'images',
+                      'mappings_src', 'mappings_tgt', 'origin_coord',
+                      'origin_segment', 'origin_instance', 'seg_indices',
+                      'path', 'name', 'inverse'),
+                feat_keys='coord',
+                offset_keys_dict=dict(
+                    offset='coord',
+                    origin_offset='origin_coord',
+                    image_offset='images',
+                    mappings_offset='mappings_src'))
+        ],
+        test_mode=False,
+        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0)))
 
-    cls_id = {c:i for i, c in enumerate(anntoatoon['classes'])}
-    sem = np.asanyarray(anntoatoon['semantic_id'])
-    for cls in anntoatoon['classes']:
-        sem[sem == cls_id[cls]] = labels[cls]
+model = build_model(dict(
+    type='MySPFormer',
+    num_query=100,
+    encoder=dict(
+        backbone=dict(
+            input_channel=3,
+            blocks=5,
+            block_reps=2,
+            media=32,
+            normalize_before=True,
+            return_blocks=True,
+            pool='mean'),
+        backbone_out_channels=32,
+        out_channels=32),
+    decoder=dict(
+        in_channels=32,
+        hlevels=6,
+        mask_modules=[
+            dict(
+                num_classes=1, return_attn_masks=True, hidden_dim=128, reuse=1)
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0),
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0),
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0),
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0),
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0),
+            dict(
+                in_channels=128,
+                mask_dim=128,
+                dim_feedforward=1024,
+                pre_norm=False,
+                num_heads=8,
+                dropout=0)
+        ]),
+    instance_ignore_index=-1))
 
-    print(mesh.vertices.shape, sem.shape)
+model = model.cuda()
+model.load_state_dict(torch.load('exp/abc_dataset/insseg-myspformer-v1m1-0-spunet-base_fix_mapping2/model/model_best.pth')['state_dict'])
+model.eval()
+print(model)
 
-    mesh.visual.vertex_colors = colors[sem] 
-    print(colors[sem].shape)
-    mesh.export(osp.join(f'{i}_colored_mesh.ply'))
-    # input()
-    # o3d.visualization.draw_geometries([pcd])
-    # print(np.asarray(pcd.points))
+dataloader = torch.utils.data.DataLoader(dataset,
+                                         batch_size=1,
+                                         collate_fn=partial(point_collate_fn),
+                                        )
 
-    # with open(osp.join(scan_dir, 'points.json')) as f:
-    #     points = json.load(f)
-    #     print(points)
-    #     pcd = o3d.geometry.PointCloud()
-    #     pcd.points = o3d.utility.Vector3dVector(points)
-    #     o3d.visualization.draw_geometries([pcd])
+colors = np.random.randint(0, 255, (1500, 3)) / 255
 
-    # with open(osp.join(scan_dir, 'mesh.json')) as f:
-    #     mesh = json.load(f)
-    #     print(mesh)
-    #     mesh = o3d.geometry.TriangleMesh()
-    #     mesh.vertices = o3d.utility.Vector3dVector(mesh['vertices'])
-    #     mesh.triangles = o3d.utility.Vector3iVector(mesh['triangles'])
-    #     o3d.visualization.draw_geometries([mesh])
+feature_extractor = MeshFeatureExtractor(model_name="facebook/dinov2-small", device="cuda:0")
+
+for i, s in enumerate(dataloader):
+    print(i, ": ", s['name'])
+
+    print(s['origin_coord'].shape)
+    print(s['coord'].shape)
+
+    with torch.no_grad():
+        for key in s.keys():
+            try:
+                s[key] = s[key].cuda()
+            except:
+                pass    
+        pred = model(s)
+
+    sorted_indices = pred['pred_scores'].argsort()[::-1]
+    pred['pred_scores'] = pred['pred_scores'][sorted_indices]
+    pred['pred_masks'] = pred['pred_masks'][sorted_indices]
+
+    pred['pred_masks'] = pred['pred_masks'] * pred['pred_scores'][..., None]
+
+    mask = pred['pred_masks'].argmax(0)
+
+    # print(pred.keys())
+    # for score, mask in zip(pred['pred_scores'], pred['pred_masks']):
+    #     if score < 0.2:
+    #         break    
+    #     print(score, mask)
+    #     print(mask.sum())
+    data = VData.from_dict({
+        'points': s['coord'].cpu(),
+        'labels': mask.astype(np.int32),
+    })
+
+    # o3d.visualization.draw_geometries([data.to_o3d_pointcloud(color='labels')], point_show_normal=False)
+
+    o3d.io.write_point_cloud(f'data2_{i}.ply', data.to_o3d_pointcloud(color='labels'))
+
+    # data = VData.from_dict({
+    #     'points': b['coord'].cpu(),
+    #     'border_dist': b['border_dist'].cpu() 
+    # })
+
+    # o3d.io.write_point_cloud(f'data2_gt_{i}.ply', data.to_o3d_pointcloud(color='border_dist'))

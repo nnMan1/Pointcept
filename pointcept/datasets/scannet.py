@@ -90,10 +90,10 @@ class ScanNetDataset(Dataset):
                 data_list += glob.glob(os.path.join(self.data_root, split, "*.pth"))
         else:
             raise NotImplementedError
-        
-        # if self.split == 'train':
-        #     data_list = data_list[:5]
-        
+
+        if self.split == 'train':
+            return data_list
+            
         return data_list
 
     def get_data(self, idx):
@@ -126,16 +126,9 @@ class ScanNetDataset(Dataset):
         else:
             instance = np.ones(coord.shape[0]) * -1
 
-        uni = np.unique(seg_indices)
-
-        # #TODO: OVO NIJE DOBRO
+        #TODO: OVO NIJE DOBRO
         segment = segment - 2
         segment[segment < 0] = -1
-
-        for i, v in enumerate(uni):
-            seg_indices[seg_indices == v] = i
-
-        group_segment = torch_scatter.scatter_mean(torch.tensor(segment), seg_indices).numpy()
 
         data_dict = dict(
             coord=coord,
@@ -144,8 +137,7 @@ class ScanNetDataset(Dataset):
             segment=segment,
             instance=instance,
             scene_id=scene_id,
-            seg_indices=seg_indices,
-            group_segment=group_segment
+            seg_indices=seg_indices
         )
 
         if self.la:

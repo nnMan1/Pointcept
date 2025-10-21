@@ -1,16 +1,16 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 1  # bs: total bs in all gpus
-num_worker = 2
+batch_size = 6  # bs: total bs in all gpus
+num_worker = 16
 mix_prob = 0
 empty_cache = True
-enable_amp = True
+enable_amp = False
 evaluate = True
-# resume=True
+resume=False
 # weight='backbones/sstnet_pretrain.pth'
-weight='exp/fuselage_lr_split/semseg-spunet-v1m1-0-base_lr_split_grid_size_0_3/model/model_last.pth'
-# weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base/model/model_best.pth'
+# weight='exp/fuselage_hole_detection/semseg-spunet-v1-m1-0-base_lr_split_holes-empt-hole/model/model_best.pth'
+weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base_2/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -43,14 +43,21 @@ model = dict(
         channels=(32, 64, 128, 128, 96, 96),
         layers=(2, 3, 4, 2, 2, 2),
     ),
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
+    criteria=[dict(type='CrossEntropyLoss', 
+                   loss_weight=1.0, 
+                   ignore_index=-1,
+                   weight=[1.0, 1.0, 1.0, 1.0, 1.0, 2.0] ),
+             dict(type="FocalLoss",
+                   loss_weight=1.0,
+                   ignore_index=-1)]
 )
 
 
 # scheduler settings
 epoch = 500
 eval_epoch = 100  # sche total eval & checkpoint epoch
-optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+# optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+optimizer = dict(type="AdamW", lr=0.01, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -63,7 +70,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
-data_root = "data/crops"
+data_root = "data/Fuselage/crops"
 
 data = dict(
     num_classes=num_classes,
@@ -73,6 +80,7 @@ data = dict(
         type=dataset_type,
         split="train",
         data_root=data_root,
+        augment_holes=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -151,11 +159,11 @@ data = dict(
     test=dict(),  # currently not available
 )
 
-hooks = [
-    dict(type="CheckpointLoader", keywords=["module.backbone.final", "module.backbone.conv_input.0.weight"], replacement=["module.dummy", "module.dummy"]),
-    dict(type="IterationTimer", warmup_iter=2),
-    dict(type="InformationWriter"),
-    dict(type="SemSegEvaluator"),
-    dict(type="CheckpointSaver", save_freq=None),
-    dict(type="PreciseEvaluator", test_last=False),
-]
+# hooks = [
+#     dict(type="CheckpointLoader", keywords=["module.backbone.final"], replacement=["module.dummy"]),
+#     dict(type="IterationTimer", warmup_iter=2),
+#     dict(type="InformationWriter"),
+#     dict(type="SemSegEvaluator"),
+#     dict(type="CheckpointSaver", save_freq=None),
+#     dict(type="PreciseEvaluator", test_last=False),
+# ]

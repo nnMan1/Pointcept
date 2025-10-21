@@ -231,15 +231,15 @@ class CheckpointLoader(HookBase):
             state_key = "state_dict" if "state_dict" in checkpoint else "model"
             for key, value in checkpoint[state_key].items():
                 if not key.startswith("module."):
-                    if comm.get_world_size() == 1:
-                        key = "module." + key  # xxx.xxx -> module.xxx.xxx
-                # Now all keys contain "module." no matter DDP or not.
+                    key = "module." + key  
                 for keyword, replacement in zip(self.keywords, self.replacement):
                     if keyword in key:
                         key = key.replace(keyword, replacement)
                 if comm.get_world_size() == 1:
                     key = key[7:]  # module.xxx.xxx -> xxx.xxx
                 weight[key] = value
+            
+            # print(weight.keys())
             load_state_info = self.trainer.model.load_state_dict(
                 weight, strict=self.strict
             )

@@ -62,11 +62,11 @@ class ABCDataset(Dataset):
     def get_data_list(self):
         
         if isinstance(self.split, str):
-            data_list = open(os.path.join(self.data_root, 'raw', f"{self.split}_files.txt")).readlines()
+            data_list = open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines()
         elif isinstance(self.split, Sequence):
             data_list = []
             for split in self.split:
-                data_list += torch.load(open(os.path.join(self.data_root, 'raw', f"{self.split}_files.txt")).readlines())
+                data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
         else:
             raise NotImplementedError
         

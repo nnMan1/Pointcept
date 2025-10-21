@@ -16,6 +16,7 @@ def minkovski_batch_to_coord_feature(batch, original_coords):
     offset = batch2offset(coords[:, 0])
 
     return {
+        'batch': batch,
         'coords': coords[:, 1:], 
         'features': features, 
         'offset': offset,
@@ -40,10 +41,13 @@ class Res16UNetBase(ResNetBase):
         self, in_channels, out_channels, bn_momentum=0.02, conv1_kernel_size=5, D=3, out_fpn=False, **kwargs
     ):
         self.bn_momentum = bn_momentum
+        self.out_channels = out_channels
         self.conv1_kernel_size=conv1_kernel_size
         super().__init__(in_channels, out_channels, {'bn_momentum': bn_momentum,
                                                      'conv1_kernel_size': conv1_kernel_size}, D)
         self.out_fpn = out_fpn
+        self.output = None
+        self.pooling = ME.MinkowskiAvgPooling(kernel_size=2, stride=2, dimension=3)
 
     def network_initialization(self, in_channels, out_channels, config, D):
         # Setup net_metadata
@@ -345,6 +349,8 @@ class Res16UNetBase(ResNetBase):
         out = me.cat(out, out_p1)
         out = self.block8(out)
 
+        self.output = out
+
         feature_maps.append(minkovski_batch_to_coord_feature(out, x))
 
         if not self.out_fpn:
@@ -352,6 +358,18 @@ class Res16UNetBase(ResNetBase):
         else:
             return out.features, feature_maps
 
+    def pool(self, x, k):
+        features = me.SparseTensor(
+            features=x,
+            coordinate_manager=self.output.coordinate_manager,
+            coordinate_map_key=self.output.coordinate_map_key,
+            device=self.output.device,
+        )
+
+        for i in range(k):
+            features = self.pooling(features)
+
+        return features.features
 
 class Res16UNet14(Res16UNetBase):
     BLOCK = BasicBlock
@@ -425,7 +443,7 @@ class Res16UNet34A(Res16UNet34):
 class Res16UNet34B(Res16UNet34):
     PLANES = (32, 64, 128, 256, 256, 128, 64, 32)
 
-@MODELS.register_module('')
+@MODELS.register_module('Res16UNet34C')
 class Res16UNet34C(Res16UNet34):
     PLANES = (32, 64, 128, 256, 256, 128, 96, 96)
 

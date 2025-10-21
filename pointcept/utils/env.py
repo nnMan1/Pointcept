@@ -27,7 +27,7 @@ def set_seed(seed=None):
     if seed is None:
         seed = get_random_seed()
     random.seed(seed)
-    np.random.seed(seed)
+    np.random.seed(seed % (2**32 - 1))
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)

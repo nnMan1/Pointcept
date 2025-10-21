@@ -18,7 +18,10 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
 from segmentator import segment_mesh
-import copy
+from PIL import Image
+import torchvision.transforms as transforms
+
+import pytorch3d
 
 class HoleAugmentor:
 
@@ -155,6 +158,7 @@ class HoleAugmentor:
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
+<<<<<<< HEAD
         # if np.random.uniform() < 0.2:
         #     data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
 
@@ -163,6 +167,20 @@ class HoleAugmentor:
 
         if np.random.uniform() < 0.7:
             data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
+=======
+        if np.random.uniform() < 0.2:
+            r = np.random.uniform(1, 2)
+            data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
+            new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
+            data_dict = self.remove_radius(data_dict, new_center, 0.9*r)
+        else:
+            if np.random.uniform() < 0.7:
+                data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
+            else:
+                if np.random.uniform() < 0.5:
+                    r = np.random.uniform(0, 0.5)
+                    data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
+>>>>>>> origin/multiview
 
         return data_dict
 
@@ -180,7 +198,8 @@ class MechanicalAssembly(Dataset):
         cache=False,
         loop=1,
         classes = [],
-        augment_holes=False
+        augment_holes=False,
+        image_transform=None
     ):
         super(MechanicalAssembly, self).__init__()
         self.data_root = data_root
@@ -207,6 +226,10 @@ class MechanicalAssembly(Dataset):
             self.class_mapping = {c: i for i, c in enumerate(classes)}
         else:
             self.class_mapping = classes
+        
+        categories = list(self.class_mapping.items())
+        categories.reverse()
+        self.categories = {v: k for k,v in categories}
 
         self.ignore_index = ignore_index
         logger = get_root_logger()
@@ -221,28 +244,78 @@ class MechanicalAssembly(Dataset):
         self.augment_holes = augment_holes
         self.hole_augmentatior = HoleAugmentor(self.class_mapping)
 
+        self.image_size = (448, 448)  # or (518, 518) for ViT-Giant
+
+        assert self.image_size[0] % 14 == 0 and self.image_size[1] % 14 == 0, \
+            "Image size must be divisible by 14 for ViT models."
+
+        self.image_transform = transforms.Compose([
+            transforms.Resize(self.image_size),  # or 518 for ViT-Giant
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
 
+<<<<<<< HEAD
+=======
+    def get_mesh_name(self, dir):
+        mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
+                     glob.glob(os.path.join(dir, "*.obj")) + \
+                     glob.glob(os.path.join(dir, "*.stl"))
+        if len(mesh_files) == 0:
+            raise FileNotFoundError(f"No mesh file found in {dir}")
+        return os.path.basename(mesh_files[0])
+
+    def prepare_singe_clustering(self, file, annotations=None):
+
+        dir = os.path.dirname(file)
+
+        mesh = trimesh.load(file)
+        vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
+        faces = torch.from_numpy(mesh.faces.astype(np.int64))
+        
+        ind1 = segment_mesh(vertices, faces, 0.0001, 5).numpy()
+        ind2 = segment_mesh(vertices, faces, 0.001, 10).numpy()
+        ind3 = segment_mesh(vertices, faces, 0.001, len(vertices) // 5).numpy()
+        
+        if 'seg_indices' in annotations:
+            annotations.pop('seg_indices')
+
+        with open(os.path.join(dir, 'annotations.json'), 'w') as json_file:
+            json.dump(annotations, json_file)
+        
+        groupings = {}
+                        
+        groupings['seg_indices1'] = ind1.tolist()
+        groupings['seg_indices2'] = ind2.tolist()
+        groupings['seg_indices3'] = ind3.tolist()
+
+        with open(f'{dir}/grp.json', 'w') as json_file:
+                json.dump(groupings, json_file)
+
+        if os.path.exists(os.path.join(dir, 'cached.pth')):
+            os.remove(os.path.join(dir, 'cached.pth'))
+
+>>>>>>> origin/multiview
     def prepare_clustering(self):
-        for file in self.data_list:
-            dir = os.path.dirname(file)
+        for dir in self.data_list:
 
-            with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
-                annotations = json.load(json_file)
+            print(dir)
 
-            if 'seg_indices' in annotations.keys():
+            if os.path.exists(os.path.join(dir, 'grp.json')):
+                print(f"Clustering already prepared for {dir}")
                 continue
 
-            mesh = trimesh.load(f'{self.data_root}/{file}')
-            vertices = torch.from_numpy(mesh.vertices.astype(np.float32))
-            faces = torch.from_numpy(mesh.faces.astype(np.int64))
-            ind = segment_mesh(vertices, faces, 0.0001, 5).numpy()
-            
-            annotations['seg_indices'] = ind.tolist()
+            print(os.path.join(dir, 'annotations.json'))
+            file = os.path.join(dir, self.get_mesh_name(dir))
 
-            with open(os.path.join(self.data_root, dir, 'annotations.json'), 'w') as json_file:
-                json.dump(annotations, json_file)
+            with open(os.path.join(dir, 'annotations.json')) as json_file:
+                annotations = json.load(json_file)
+
+            self.prepare_singe_clustering(file, annotations)
 
     def get_hole_centers(self, data_dict):
 
@@ -289,29 +362,102 @@ class MechanicalAssembly(Dataset):
                 data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
         else:
             raise NotImplementedError
-        
-        data_list = [f.strip() for f in data_list]   
+
+        data_list = [os.path.join(self.data_root, 'files', f.strip()) for f in data_list]
 
         return data_list
+    
+    def pixel_point_matches(
+                self,
+                pts_world: np.ndarray,
+                normals: np.ndarray,
+                P: np.ndarray,                 # 3×4 projection matrix
+                img_size: tuple[int, int],     # (H, W)
+    ):
+        """
+        Project a point cloud, keep one front‑most point per pixel,
+        and return pixel <‑‑> point index correspondences.
+
+        Returns
+        -------
+        pix_uv  : (M,2) int   integer (u, v) pixel coords
+        pc_idx  : (M,)  int   indices into `pts_world`
+        """
+        
+        H, W = img_size
+        N = len(pts_world)
+
+        # Homogeneous coordinates
+        pts_h = np.c_[pts_world, np.ones(N)]         # (N, 4)
+        img_h = pts_h @ P                            # (N, 3)
+
+        x_proj = img_h[:, 0]
+        y_proj = img_h[:, 1]
+        z_proj = img_h[:, 2]
+
+        # Valid depth mask
+        valid = z_proj > 1e-6
+        if not np.any(valid):
+            return np.empty((0, 2), dtype=int), np.empty((0,), dtype=int)
+
+        x = x_proj[valid] / z_proj[valid]
+        y = y_proj[valid] / z_proj[valid]
+        z = z_proj[valid]
+        pts_idx = np.nonzero(valid)[0]
+
+        # Convert to pixel coordinates
+        u = ((1 - x) * W / 2).round().astype(int)
+        v = ((1 - y) * H / 2).round().astype(int)
+
+        # Keep only points inside image
+        in_bounds = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+        u, v, z, pts_idx = u[in_bounds], v[in_bounds], z[in_bounds], pts_idx[in_bounds]
+
+        # if normals is not None and len(normals) == len(pts_world):
+        #     cam_dirs = -pts_world[pts_idx]
+        #     cam_dirs = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-8)
+        #     nrm = normals[pts_idx]
+        #     nrm = nrm / (np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-8)
+        #     dot = np.sum(nrm * cam_dirs, axis=1)
+        #     front_mask = dot > 0
+        #     u, v, z, pts_idx = u[front_mask], v[front_mask], z[front_mask], pts_idx[front_mask]
+
+        # Initialize depth buffer and index buffer
+        depth_buffer = np.full((H, W), np.inf)
+        index_buffer = np.full((H, W), -1, dtype=int)
+
+        for i in range(len(u)):
+            ui, vi = u[i], v[i]
+            if z[i] < depth_buffer[vi, ui]:
+                depth_buffer[vi, ui] = z[i]
+                index_buffer[vi, ui] = pts_idx[i]
+
+        # Extract valid pixels and corresponding point indices
+        valid_mask = index_buffer >= 0
+        v_coords, u_coords = np.nonzero(valid_mask)
+        pix_uv = np.stack([u_coords, v_coords], axis=1)
+        pc_idx = index_buffer[v_coords, u_coords]
+
+        return pix_uv, pc_idx
 
     def get_data(self, idx):
 
         idx = idx % len(self.data_list)
-        file = self.data_list[idx]
-        dir = os.path.dirname(file)
+        dir = self.data_list[idx]
+        file = os.path.join(dir, self.get_mesh_name(dir))
 
-        if self.preloaded_data[idx] != None:
-            return copy.deepcopy(self.preloaded_data[idx])
+        if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
+            return torch.load(os.path.join(dir, 'cached.pth'))
+                
 
-        if os.path.exists(os.path.join(self.data_root, dir, 'cached.pth')):
-            self.preloaded_data[idx] = torch.load(os.path.join(self.data_root, dir, 'cached.pth'))
-            return copy.deepcopy(self.preloaded_data[idx])
-        
-
-        with open(os.path.join(self.data_root, dir, 'annotations.json')) as json_file:
+        with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
-        mesh = trimesh.load(f'{self.data_root}/{file}')
+        with open(os.path.join(dir, 'grp.json')) as json_file:
+            groups = json.load(json_file)
+
+
+        mesh = trimesh.load(file)
 
         if len(mesh.vertices) < 2048:
             del mesh
@@ -319,48 +465,112 @@ class MechanicalAssembly(Dataset):
     
         # # Transform mesh to point cloud using uniform sampling to 30000 samples
         import open3d as o3d
-        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=250000).points)
+        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
+        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
 
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
         mask = segment_labels != -1
 
         # Fit KNN on mesh vertices
-        knn = NearestNeighbors(n_neighbors=1)
-        knn.fit(mesh.vertices[segment_labels != -1])
+        # try:
+        #     knn = NearestNeighbors(n_neighbors=1)
+        #     knn.fit(mesh.vertices[segment_labels != -1])
+        # except Exception as e:
+        #     print(e)
 
         # # Find nearest neighbors for the sampled points
-        distances, indices = knn.kneighbors(point_cloud)
+        # distances, indices = knn.kneighbors(point_cloud)
 
         # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])[segment_labels != -1][indices.flatten()]
-        normals =  mesh.vertex_normals[segment_labels != -1][indices.flatten()]
-        # seg_indices = np.asarray(annotations['seg_indices'])[segment_labels != -1][indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])[segment_labels != -1][indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
+        normals =  mesh.vertex_normals.copy()#[segment_labels != -1]#[indices.flatten()]
+        # seg_indices = np.asarray(annotations['seg_indices'])#[segment_labels != -1]#[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
         segment_labels = classes[segment_labels]
         
+        image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
+        P_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*.txt')))
 
-        self.preloaded_data[idx] = self.get_hole_centers({
-            'coord': point_cloud,
-            # 'coord': mesh.vertices[mask],
-            # 'face': mesh.faces,
+        images, mappings_src, mappings_tgt = [], [], []
+
+        for i, (image_path, P_path) in enumerate(zip(image_paths, P_paths)):
+            image = Image.open(image_path).convert('RGB')
+            images.append(image)
+
+            P = np.loadtxt(P_path)
+
+            src, tgt = self.pixel_point_matches(
+                pts_world=mesh.vertices,
+                normals=normals,
+                P=P,
+                img_size=(224, 224)
+            )
+
+            src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+
+            mappings_src.append(src.astype(np.int32))
+            mappings_tgt.append(tgt.astype(np.int32))
+            
+        mappings_src = np.concatenate(mappings_src, axis=0)
+        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+
+        # Load all images from the directory
+        # image_dir = os.path.join(self.data_root, dir)
+        # image_extensions = ('*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff')
+        # image_files = []
+        # for ext in image_extensions:
+        #     image_files.extend(glob.glob(os.path.join(image_dir, ext)))
+        # images = [open(img_path, 'rb').read() for img_path in image_files]
+
+        # # Identify outlier points using DBSCAN
+        # dbscan = DBSCAN(eps=10, min_samples=5)
+        # dbscan.fit(point_cloud)
+        # outlier_mask = dbscan.labels_ == -1
+
+        # # Remove outlier points
+        # point_cloud = point_cloud[~outlier_mask]
+        # normals = normals[~outlier_mask]
+        # instance_labels = instance_labels[~outlier_mask]
+        # segment_labels = segment_labels[~outlier_mask]
+        # seg_indices = seg_indices[~outlier_mask]
+
+        data = {
+            # 'coord': point_cloud,
+            'coord':  deepcopy(mesh.vertices),
+            'face': deepcopy(mesh.faces),
             'normal': normals,
             'instance': instance_labels,
             'segment': segment_labels,
             'id': idx,
             'path': self.data_list[idx],
-            # 'seg_indices': seg_indices
-        })
+            # 'seg_indices': seg_indices,
+            'name': self.get_data_name(idx),
+            'mappings_src': mappings_src,
+            'mappings_tgt': mappings_tgt,
+            'images': images,
+            # 'ids': np.arange(len(mesh.vertices), dtype=np.int32),
+        }
 
-        torch.save(self.preloaded_data[idx], os.path.join(self.data_root, dir, 'cached.pth'))
+        for key in ['coord', 'normal', 'instance', 'segment']:
+            if data[key].shape[0] != len(mesh.vertices):
+                print(f"Warning: {key} shape mismatch in {file}: {data[key].shape[0]} != {len(mesh.vertices)}")
+
+        data.update(groups)
+
+        data['seg_indices'] = np.asarray(data['seg_indices1'])
+
+        if self.cache:
+            torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
-        return copy.deepcopy(self.preloaded_data[idx])
+        return data
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
         data_name = data_name.replace(".ply", "")
+        data_name = data_name.replace(".obj", "")
+        data_name = data_name.replace(".stl", "")
         data_name = data_name.replace("/", "_")
         return data_name
 
@@ -372,6 +582,16 @@ class MechanicalAssembly(Dataset):
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
             data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = np.stack([
+                    self.image_transform(image).numpy() for image in data_dict['images']
+                ])
+            else:
+                data_dict['images'] = []
 
         data_dict = self.transform(data_dict)
 
@@ -380,9 +600,19 @@ class MechanicalAssembly(Dataset):
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+
+        if self.image_transform is not None:
+            if 'images' in data_dict:
+                data_dict['images'] = [
+                    self.image_transform(image) for image in data_dict['images']
+                ]
+            else:
+                data_dict['images'] = []
+
+        data_dict_list = []        
         segment = data_dict.pop("segment")
         data_dict = self.transform(data_dict)
-        data_dict_list = []
+
         for aug in self.aug_transform[:1]:
             data_dict_list.append(aug(deepcopy(data_dict)))
 
@@ -401,6 +631,7 @@ class MechanicalAssembly(Dataset):
         data_dict = dict(
             fragment_list=input_dict_list, segment=segment, name=self.get_data_name(idx)
         )
+
         return data_dict
 
     def __getitem__(self, idx):

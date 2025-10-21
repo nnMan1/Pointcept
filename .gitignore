@@ -24,3 +24,5 @@ tests
 .env
 *.ply
 backbones
+libs
+logs

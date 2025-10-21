@@ -16,6 +16,9 @@ import scipy.stats
 import numpy as np
 import torch
 import copy
+import open3d as o3d
+from sklearn.neighbors import NearestNeighbors
+
 from collections.abc import Sequence, Mapping
 
 from pointcept.utils.registry import Registry
@@ -847,7 +850,12 @@ class GridSample(object):
                     )
                 data_dict["displacement"] = displacement[idx_unique]
             for key in self.keys:
-                data_dict[key] = data_dict[key][idx_unique]
+                try:
+                    data_dict[key] = data_dict[key][idx_unique]
+                except Exception as e:
+                    raise KeyError(
+                        f"Error accessing key '{key}': {e}"
+                    )
             return data_dict
 
         elif self.mode == "test":  # test mode
@@ -1086,9 +1094,11 @@ class InstanceParser(object):
         # mapping ignored instance to ignore index
         instance[~mask] = self.instance_ignore_index
         # reorder left instance
-        unique, inverse = np.unique(instance[mask], return_inverse=True)
+        unique, index, inverse = np.unique(instance[mask], return_inverse=True, return_index=True)
         instance_num = len(unique)
         instance[mask] = inverse
+        # data_dict['instance_segment'][unique == self.instance_ignore_index] = self.segment_ignore_index[0]
+
         # init instance information
         centroid = np.ones((coord.shape[0], 3)) * self.instance_ignore_index
         bbox = np.ones((instance_num, 8)) * self.instance_ignore_index
@@ -1116,6 +1126,9 @@ class InstanceParser(object):
         data_dict["instance"] = instance
         data_dict["instance_centroid"] = centroid
         data_dict["bbox"] = bbox
+
+        unique, inverse = np.unique(instance[mask], return_inverse=True)
+        data_dict['instance_segment'] = segment[index]
         return data_dict
 
 @TRANSFORMS.register_module()
@@ -1188,6 +1201,131 @@ class RBFunction(object):
         
         data_dict[self.key] = np.exp(- self.gamma * data_dict[self.key] ** 2)
         return data_dict
+
+@TRANSFORMS.register_module()
+class MeshToPointCloud():
+
+    '''
+        Samples points uniformly from mesh surface and interpolate features from mesh vertices to sampled points.
+        Uses Open3D for mesh processing and sampling.
+    '''
+
+    def __init__(self, 
+                 num_points: int = 10000, 
+                 keys: list[str] = ['coord', 'color', 'normal', 'segment', 'instance', 'seg_indices'], 
+                 return_indices: bool = False):
+        self.num_points = num_points
+        self.keys = keys
+        self.return_indices = return_indices
+
+    def __call__(self, data_dict):
+
+        if "coord" not in data_dict:
+            print("'coord' key not found in data_dict.")
+        if "face" not in data_dict:
+            print("'face' key not found in data_dict.")
+
+        vertices = data_dict["coord"]
+        faces = data_dict["face"]
+
+        o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices), 
+                                             o3d.utility.Vector3iVector(faces))
+
+        points = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=self.num_points).points)
+
+        try:
+            knn = NearestNeighbors(n_neighbors=1)
+            knn.fit(vertices)
+            distances, indices = knn.kneighbors(points)
+        except Exception as e:
+            print(e)
+            raise e
+
+        return_dict = {
+            "coord": points
+        }
+        
+        for key in data_dict.keys():
+            values = data_dict[key]
+            if key in self.keys and key != "coord":
+                if len(values) == len(vertices):
+                    return_dict[key] = values[indices.flatten()]
+                else:
+                    print(f"Key '{key}' has incompatible length. Skipping.")
+            elif key != "coord":
+                return_dict[key] = values
+        
+        if self.return_indices:        
+            return_dict['indices'] = indices.flatten()
+
+        return return_dict
+
+@TRANSFORMS.register_module()
+class CropAround():
+    '''
+        Crops points around a randomly selected point within a given semantic class.
+        If there is no point of the specified class, it defaults to randomly selected point.
+    '''
+    def __init__(self, 
+                 semantic_class: int, 
+                 offset_std: float = 20,
+                 diameter_mean: float = 200,
+                 diameter_std: float = 40,
+                 ord: float = 2.0,
+                 p: float = 1.0,
+                 keys: list[str] = ['coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'seg_indices']):
+        
+        self.semantic_class = semantic_class
+        self.offset_std = offset_std
+        self.diameter_mean = diameter_mean
+        self.diameter_std = diameter_std
+        self.ord = ord
+        self.keys = keys
+        self.p = p
+
+    def __call__(self, data_dict):
+
+        keys = list(copy.deepcopy(self.keys))
+        assert "coord" in data_dict.keys()
+
+        while True:
+
+            valid_indices = np.where(data_dict['segment'] == self.semantic_class)
+            if len(valid_indices[0]) > 0 and np.random.rand() < self.p:
+                center_idx = np.random.choice(valid_indices[0])
+            else:
+                center_idx = np.random.randint(data_dict['coord'].shape[0])
+
+            center = data_dict["coord"][center_idx]
+            offset = np.random.normal(scale=self.offset_std, size=(3,))
+            center = center + offset
+
+            diameter = np.random.normal(loc=self.diameter_mean, scale=self.diameter_std)
+            radius = diameter / 2.0
+            dist = np.linalg.norm(data_dict["coord"] - center, axis=1, ord=self.ord)
+            idx_crop = np.where(dist < radius)[0]
+
+            if len(idx_crop) > 100:
+                break
+
+        if 'origin_coord' in keys:
+            dist = np.linalg.norm(data_dict["origin_coord"] - center, axis=1, ord=self.ord)
+            idx_crop = np.where(dist < radius)[0]
+            for key in keys:
+                if 'origin' in key:
+                    data_dict[key] = data_dict[key][idx_crop]
+            
+            keys = [k for k in keys if 'origin' not in k]
+        
+        dist = np.linalg.norm(data_dict["coord"] - center, axis=1, ord=self.ord)
+        idx_crop = np.where(dist < radius)[0]
+
+        for key in keys:
+            if key in data_dict.keys():
+                data_dict[key] = data_dict[key][idx_crop]
+
+        return data_dict
+
 
 class Compose(object):
     def __init__(self, cfg=None):

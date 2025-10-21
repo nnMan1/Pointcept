@@ -9,7 +9,7 @@ from pointcept.positional_embeddings import build_positional_embedding
 from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
 from pointcept.models.utils.matcher.my_matcher import MyMatcher
 from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
-from .nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, pad_data
+from pointcept.models.utils.nn import *
 from .utils import compute_stats, select_masks, db_scan
 
 class Encoder(nn.Module):
@@ -21,36 +21,24 @@ class Encoder(nn.Module):
         self.backbone = build_model(backbone) 
 
         self.mask_features_head = nn.Linear(
-            in_features=self.backbone.PLANES[7],
+            in_features=self.backbone.out_channels,
             out_features=self.out_channels,
             bias=True
         )
 
     def forward(self, data):
 
-        offset = data['offset']
-        seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
-
         pcd_features, aux = self.backbone(data)
         mask_features = self.mask_features_head(pcd_features)
 
-        if seg_indices is not None: 
-
-            return {
-                'features': torch_scatter.scatter_mean(mask_features, seg_indices, dim=0), 
-                'offset': torch.tensor([seg_indices[:off].max() for off in offset], dtype=torch.int), 
-                'aux': aux
-            }
-        
         return {
-                'features': mask_features, 
-                'offset': offset, 
-                'aux': aux
-            }
+            'features': mask_features, 
+            'aux': aux
+        }
 
 class Decoder(nn.Module):
 
-    def __init__(self, in_channels, positional_encoding, mask_modules, query_refinement_modules, hlevels):
+    def __init__(self, in_channels, positional_embedding, mask_modules, query_refinement_modules, hlevels, pooling):
 
         super().__init__()
         
@@ -65,11 +53,12 @@ class Decoder(nn.Module):
                 hidden_use_bias=True,
             )
 
-        self.pos_enc = build_positional_embedding(positional_encoding)
+        self.pos_enc = build_positional_embedding(positional_embedding)
 
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
 
         self.query_refinement = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
+        self.pooling = pooling
 
     def __get_pos_encs(self, coords):
 
@@ -119,16 +108,16 @@ class Decoder(nn.Module):
     def __init__query_features(self, query_points, query_embeddings):
         return torch.zeros_like(query_embeddings, device=query_embeddings.device)
 
-    def forward(self, data, features, query_points):
+    def forward(self, data, query_points):
         
         offset = data['offset']
         seg_indices = data['seg_indices'] if 'seg_indices' in data.keys() else None
 
-        mask_features = features['features']
+        mask_features = data['features']
 
         out = []
 
-        point_embedding = self.__get_pos_encs(features['aux'])
+        point_embedding = self.__get_pos_encs(data['aux'])
 
         query_embedding = self.__embed_queries(data, query_points)
         query_embedding = self.query_projection(query_embedding)
@@ -137,7 +126,6 @@ class Decoder(nn.Module):
 
         for mask_module in self.mask_modules:
             for _ in range(mask_module.reuse):
-
                 for level in range(self.hlevels):
 
                     mask_module_data = {
@@ -149,20 +137,19 @@ class Decoder(nn.Module):
 
                     masks = mask_module(mask_module_data)
 
-                    attention_mask = masks['attn_mask']
+                    output_mask = masks['output_mask']
 
                     if seg_indices is not None:
-                        attention_mask = attention_mask[seg_indices] # create per point attention mask
+                        output_mask = output_mask[seg_indices] # create per point attention mask
 
-                    attention_mask = torch_scatter.scatter_mean(attention_mask.float(), features['aux'][level]['original_ids'], dim=0) > 0.5
-
+                    attention_mask = (self.pooling(output_mask, self.hlevels-level-1).sigmoid() < 0.5).bool().detach()
                     pos_embedding = point_embedding[level]
 
                     query_features = self.query_refinement[level](
-                                                    features['aux'][level]['features'],
+                                                    data['aux'][level]['features'],
                                                     attention_mask,
                                                     pos_embedding,
-                                                    features['aux'][level]['offset'],
+                                                    data['aux'][level]['offset'],
                                                     query_features,
                                                     query_embedding 
                                                     )
@@ -212,7 +199,7 @@ class MaskModule(nn.Module):
         output_class = self.class_embed_head(query_feat)
 
         output_masks = []
-        output_segments = []
+        attn_masks = []
         
         return_dict = {
             'output_class': output_class
@@ -226,10 +213,14 @@ class MaskModule(nn.Module):
         output_mask = torch.cat(output_masks)
         return_dict['output_mask'] = output_mask
 
-
         if self.return_attn_masks:
-            attn_mask = output_mask.detach().sigmoid() < 0.5
-            return_dict['attn_mask'] = attn_mask
+            bs = 0
+            for be in offset:
+                attn_masks.append((output_mask[bs:be].detach().sigmoid() < 0.5).bool())
+                attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
+                bs = be
+
+            return_dict['attn_mask'] = torch.cat(attn_masks)
                         
         return return_dict
 
@@ -269,7 +260,6 @@ class QueryRefinement(nn.Module):
                 )
                     
     def forward(self, point_features, attn_mask, pos_encoding, offset, queries, query_pos_encoding):
-
         point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
         pos_encoding, _, _ = pad_data(pos_encoding, offset, self.sample_size, rand_idx, mask_idx)
@@ -290,9 +280,10 @@ class QueryRefinement(nn.Module):
         query_pos_encoding = query_pos_encoding
         
         output = self.cross_attention(
-                    queries,
-                    src_pcd,
-                    memory_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
+                    query=queries,
+                    key=src_pcd,
+                    value=src_pcd,
+                    attn_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
                     memory_key_padding_mask=None,  # here we do not apply masking on padded region
                     pos=pos_encoding,
                     query_pos=query_pos_encoding,
@@ -317,14 +308,7 @@ class Mask3D(nn.Module):
     def __init__(self, 
                  encoder, 
                  decoder,
-                #  position_encoding, 
-                #  num_decoders, 
-                #  dim_feedforward, 
-                #  mask_dim, 
-                #  hidden_dim,
                  instance_ignore_index, 
-                #  mask_module_config, 
-                #  query_refinement_config
                 ):
 
         super().__init__()
@@ -335,6 +319,7 @@ class Mask3D(nn.Module):
         for i, _ in enumerate(decoder['mask_modules']):
             decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
 
+        decoder['pooling'] = self.encoder.backbone.pool
         self.decoder = Decoder(**decoder)
         self.matcher = HungarianMatcher(cost_class=2,
                                         cost_dice=2,
@@ -344,17 +329,18 @@ class Mask3D(nn.Module):
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
         weight[-1] = 0.1
 
+        self.superpoint_pooling = SuperpointPooling()
+        self.superpoint_unpooling = SuperpointUnpooling()
+
         self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
-        
-        # self.iou_ce_loss = nn.BCEWithLogitsLoss()
-        # self.iou_mse_loss = nn.MSELoss()
 
+        
     def query_pooling(self, data):
 
-        offset = data['offset']
-        grid_coordinates = data['grid_coord']
+        offset = data['offset_orig']
+        grid_coordinates = data['coord']
         seed_ids = data['seed_ids']
 
         sampled_coords = []
@@ -367,44 +353,15 @@ class Mask3D(nn.Module):
 
         return torch.stack(sampled_coords)
 
-    def __prepare_seg_indices(self, seg_indices, offset):
-
-        bs = 0
-        off = 0
-
-        offs = []
-
-        for be in offset:
-            tmp = seg_indices[bs:be]
-            _, inverse_indices = torch.unique(tmp, return_inverse=True)
-            seg_indices[bs:be] = inverse_indices + off
-            off = seg_indices[:be].max() + 1 
-            offs.append(off)
-            bs = be
-    
-        return seg_indices, torch.tensor(offs)
-
     def __compute_loss(self, pred, data):
         
-        offset_key = 'offset'
-
-        if 'seg_indices' in data.keys():
-            seg_indices = data['seg_indices']
-            instance = data['instance']
-            segment = data['segment']
-
-            data['instance'] = torch_scatter.scatter_mean(instance, seg_indices)
-            data['segment'] =  torch_scatter.scatter_mean(segment, seg_indices)
-            offset_key = 'group_offset'
-
-
         axiliary_losses = {'seg_ce': [],
                            'mask_ce': [],
                            'mask_dice': [],
                            'matched_iou': []}
 
         for p in pred:
-            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data[offset_key])
+            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
 
             for mask, target, p_seg, t_seg in zip(matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
                 axiliary_losses['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
@@ -422,49 +379,27 @@ class Mask3D(nn.Module):
             axiliary_losses['matched_iou'].append(ious.mean())
 
         for key, value in axiliary_losses.items():
-            # if key != 'matched_iou':
-            #     axiliary_losses[key] = torch.stack(axiliary_losses[key]).sum()
-            # else:
+            if key != 'matched_iou':
+                axiliary_losses[key] = torch.stack(axiliary_losses[key]).sum() / len(data['offset'])
+            else:
                 axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
 
-        
-        # axiliary_losses['loss'] = 5 * 65 * axiliary_losses['mask_ce'] + 2 * 65 *  axiliary_losses['mask_dice'] + 2 * 12 * axiliary_losses['seg_ce'] 
         axiliary_losses['loss'] = 5 * axiliary_losses['mask_ce'] + 2 * axiliary_losses['mask_dice'] + 2 * axiliary_losses['seg_ce'] 
         
         return axiliary_losses
 
     def forward(self, data):
+        data.update(self.encoder(data))
 
-        if 'seg_indices' in data.keys():
-            data['seg_indices'], data['group_offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
-
-        features = self.encoder(data)
+        data = self.superpoint_pooling(data)
         queries = self.query_pooling(data)
-        pred = self.decoder(data, features, queries)   
+
+        pred = self.decoder(data, queries)  
 
         return_dict = self.__compute_loss(pred, data)
         
         if not self.training:
-            masks = pred[-1]
-            masks['output_mask'] = masks['output_mask'][data['seg_indices'].cpu()]
-            
-            # masks = db_scan(data, masks)
-
-            data['segment'] = data['segment'][data['seg_indices']]
-            data['instance'] = data['instance'][data['seg_indices']]
-            return_dict.update(compute_stats(masks, data, data['offset']))
-
-            return_dict['pred_classes'] = masks['output_class'][..., :-1] #We remove dummy class from predictions
-            
-            return_dict['pred_masks'], return_dict['pred_scores'], return_dict['pred_classes'] = select_masks(masks['output_mask'].cpu(), return_dict['pred_classes'].cpu(), return_dict['pred_scores'].cpu(), offset=data['offset'])
-            
-            return_dict['pred_masks'] = return_dict['pred_masks'][0].T
-            return_dict['pred_scores'] = return_dict['pred_scores'][0]
-            return_dict['pred_classes'] = return_dict['pred_classes'][0]
-            # return_dict['matched_masks'] = matched_outputs
-            # return_dict['matched_targets'] = matched_targets
-            # return_dict['matched_targets'] = matched_targets
-            # return_dict['matched_seg_targets'] = matched_seg_targets
-
+            return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
+            data = self.superpoint_unpooling(data)
 
         return return_dict

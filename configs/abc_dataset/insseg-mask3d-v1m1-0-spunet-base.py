@@ -1,53 +1,102 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 32 # bs: total bs in all gpus
-num_worker = 32
+batch_size = 8 # bs: total bs in all gpus
+num_worker = 8
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 resume=True
-weight='exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base-dense2/model/model_last.pth'
+# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+weight = 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
 
-class_names = [
-    "assembly",
-]
 num_classes = 1
+fts_sizes = 128
+dim_feedforward=1024
 segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
     type="Mask-3D",
-    backbone=dict(
-        type="MinkUNet34C",
-        in_channels = 3,
-        out_channels = 128,
-        out_fpn=True, #return intermidiate features
-    ),
-    position_encoding=dict(
-        type='PositionEmbeddingCoordsSine',
-        pos_type="fourier",
-        d_pos=128,
-        gauss_scale=1,
+    encoder=dict(
+        backbone=dict(
+            type="Res16UNet34C",
+            in_channels = 3,
+            out_channels = 96,
+            out_fpn=True, #return intermidiate features
+        ),
+        out_channels=128,
+     ),
+     decoder=dict(
+        in_channels=128,
+        hlevels=5,
+        positional_embedding=dict(
+            type='PositionEmbeddingCoordsSine',
+            pos_type="fourier",
+            d_pos=128,
+            gauss_scale=1,
         normalize=True,
+        ),
+        mask_modules=[
+            dict(
+                num_classes=num_classes, 
+                return_attn_masks=True, 
+                hidden_dim=fts_sizes,
+                reuse=3
+            )
+        ],
+        query_refinement_modules=[
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=200,
+            ),
+            dict(
+                in_channels=256,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=800,
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=3200,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=12800,
+            ),
+            dict(
+                in_channels=96,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0,
+                sample_size=51200,
+            ),
+        ],
     ),
-    mask_module_config=dict(
-        num_classes=1, 
-        return_attn_masks=True, 
-        use_seg_masks=False
-    ),
-    query_refinement_config=dict(
-        pre_norm=False,
-        num_heads=8, 
-        dropout=0
-    ),
-    num_decoders=1,
-    dim_feedforward=1024,
-    hidden_dim=128,
-    mask_dim=128,
-    instance_ignore_index=-1
+    instance_ignore_index=-1,
 )
+
 
 # scheduler settings
 epoch = 600
@@ -63,6 +112,8 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ABCDataset"
+data_root = "data/abc_dataset/old"
+class_names = ['other']
 
 data = dict(
     num_classes=num_classes,
@@ -71,6 +122,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         split="train",
+        data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -78,8 +130,8 @@ data = dict(
             ),
             # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="x", p=0.5),
-            dict(type="RandomRotate", angle=[-1 / 64, 1 / 64], axis="y", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
             dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
@@ -122,6 +174,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
+        data_root=data_root,
         split="val",
         transform=[
             dict(type="CenterShift", apply_z=True),
@@ -169,13 +222,14 @@ data = dict(
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
-        test_mode=False,
+        test_mode=False
     ),
     test=dict(),  # currently not available
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords="module.", replacement="module."),
+    dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
+    # dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.conv0p1s1", "encoder.backbone.final", "decoder.mask_modules.0.class_embed_head", "semantic_ce_loss.weight"], replacement=["module.", "dummy", "dummy", "dummy", "dummy"]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",),

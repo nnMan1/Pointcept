@@ -11,65 +11,7 @@ from torch.cuda.amp import autocast
 from multiprocessing import Pool
 import torch_scatter
 import numpy as np
-
-# from detectron2.projects.point_rend.point_features import point_sample
-
-
-def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
-    """
-    Compute the DICE loss, similar to generalized IOU for masks
-    Args:
-        inputs: A float tensor of arbitrary shape.
-                The predictions for each example.
-        targets: A float tensor with the same shape as inputs. Stores the binary
-                 classification label for each element in inputs
-                (0 for the negative class and 1 for the positive class).
-    """
-    inputs = inputs.sigmoid()
-    inputs = inputs.flatten(1)
-    numerator = 2 * torch.einsum("nc,mc->nm", inputs, targets)
-    denominator = inputs.sum(-1)[:, None] + targets.sum(-1)[None, :]
-    loss = 1 - (numerator + 1) / (denominator + 1)
-    return loss
-
-
-batch_dice_loss_jit = torch.jit.script(
-    batch_dice_loss
-)  # type: torch.jit.ScriptModule
-
-
-def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
-    """
-    Args:
-        inputs: A float tensor of arbitrary shape.
-                The predictions for each example.
-        targets: A float tensor with the same shape as inputs. Stores the binary
-                 classification label for each element in inputs
-                (0 for the negative class and 1 for the positive class).
-    Returns:
-        Loss tensor
-    """
-    hw = inputs.shape[1]
-
-    pos = F.binary_cross_entropy_with_logits(
-        inputs, torch.ones_like(inputs), reduction="none"
-    ) / hw
-
-    neg = F.binary_cross_entropy_with_logits(
-        inputs, torch.zeros_like(inputs), reduction="none"
-    ) / hw
-
-    loss = torch.einsum("nc,mc->nm", pos, targets) + torch.einsum(
-        "nc,mc->nm", neg, (1 - targets)
-    )
-
-    return loss
-
-
-batch_sigmoid_ce_loss_jit = torch.jit.script(
-    batch_sigmoid_ce_loss
-)  # type: torch.jit.ScriptModule
-
+from .builder import build_cost
 
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
@@ -81,10 +23,7 @@ class HungarianMatcher(nn.Module):
 
     def __init__(
         self,
-        cost_class: float = 1,
-        cost_mask: float = 1,
-        cost_dice: float = 1,
-        num_points: int = 0,
+        cost_terms: list,
         instance_ignore_index: int = -1
     ):
         """Creates the matcher
@@ -95,9 +34,9 @@ class HungarianMatcher(nn.Module):
             cost_dice: This is the relative weight of the dice loss of the binary mask in the matching cost
         """
         super().__init__()
-        self.cost_class = cost_class
-        self.cost_mask = cost_mask
-        self.cost_dice = cost_dice
+        self.cost_terms = nn.ModuleList()
+        for ct in cost_terms:
+            self.cost_terms.append(build_cost(ct))    
 
         self.instance_ignore_index = instance_ignore_index
 
@@ -109,44 +48,19 @@ class HungarianMatcher(nn.Module):
         matched_sem_outputs = []
         matched_sem_targets = []
 
-        batch_start = 0
-        for i, batch_end in enumerate(offset):
+        Cs = None
 
-            with torch.no_grad():
-                out_mask = outputs['output_mask'][batch_start:batch_end].T.float()
-                out_seg = outputs['output_class'][i].softmax(-1) 
-                tgt_mask = targets['instance'][batch_start:batch_end]
-                tgt_segm = targets['segment'][batch_start:batch_end]
+        for cost in self.cost_terms:
+            if Cs is None:
+                Cs = [cost.compute_cost(outputs, targets)]
+            else:
+                for o, n in zip(Cs, cost.compute_cost(outputs, targets)):
+                    o += n
 
-                instances, idx = np.unique(tgt_mask.cpu(), return_index=True)
-                if instances[0] == -1:
-                    idx = idx[1:]
-
-                instances_seg = tgt_segm[idx]
-                
-                filter = tgt_mask != self.instance_ignore_index
-
-                if filter.sum() == 0:
-                    indices.append((None, None))
-                    batch_start = batch_end
-                    continue
-                
-                cost_class = - out_seg[:, instances_seg]
-
-                tgt_mask = F.one_hot(tgt_mask+1)[:, 1:].T
-                tgt_mask = tgt_mask.float()
-
-                cost_mask = batch_sigmoid_ce_loss_jit(out_mask, tgt_mask)
-                cost_dice = batch_dice_loss_jit(out_mask, tgt_mask)
-
-                C = self.cost_mask * cost_mask + self.cost_class * cost_class + self.cost_dice * cost_dice
-                C = C.cpu().numpy()
-
-                indices.append(linear_sum_assignment(C))
-
-            batch_start = batch_end
-
-        batch_start = 0
+        Cs = [c.cpu() for c in Cs]
+        for c in Cs:
+            c = c.numpy()
+            indices.append(linear_sum_assignment(c))
 
         for i, batch_end in enumerate(offset):
         
