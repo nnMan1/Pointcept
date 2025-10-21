@@ -158,16 +158,6 @@ class HoleAugmentor:
 
         new_center = interpolated['coord'][np.linalg.norm(interpolated['coord'] - center, axis=-1).argmin()]
 
-<<<<<<< HEAD
-        # if np.random.uniform() < 0.2:
-        #     data_dict = self.augment_rivet_hole_shape(data_dict, new_center, rivet_diam / 1.3, new_center - center)
-
-
-        new_center = data_dict['coord'][np.linalg.norm(data_dict['coord'] - new_center, axis=-1).argmin()]
-
-        if np.random.uniform() < 0.7:
-            data_dict = self.remove_radius(data_dict, new_center, np.random.uniform(1, 2))
-=======
         if np.random.uniform() < 0.2:
             r = np.random.uniform(1, 2)
             data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
@@ -180,7 +170,6 @@ class HoleAugmentor:
                 if np.random.uniform() < 0.5:
                     r = np.random.uniform(0, 0.5)
                     data_dict = self.augment_rivet_hole_shape(data_dict, new_center, r, new_center - center)
->>>>>>> origin/multiview
 
         return data_dict
 
