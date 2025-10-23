@@ -17,7 +17,6 @@ from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
-from segmentator import segment_mesh
 from PIL import Image
 import torchvision.transforms as transforms
 

@@ -17,7 +17,6 @@ from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
-from segmentator import segment_mesh
 from PIL import Image
 import torchvision.transforms as transforms
 
@@ -248,8 +247,6 @@ class MechanicalAssembly(Dataset):
         # for i in range(len(self.data_list)):
         #     self.get_data(i)
 
-<<<<<<< HEAD
-=======
     def get_mesh_name(self, dir):
         mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
                      glob.glob(os.path.join(dir, "*.obj")) + \
@@ -288,7 +285,6 @@ class MechanicalAssembly(Dataset):
         if os.path.exists(os.path.join(dir, 'cached.pth')):
             os.remove(os.path.join(dir, 'cached.pth'))
 
->>>>>>> origin/multiview
     def prepare_clustering(self):
         for dir in self.data_list:
 
