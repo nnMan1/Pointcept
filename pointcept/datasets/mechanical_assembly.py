@@ -248,6 +248,7 @@ class MechanicalAssembly(Dataset):
         #     self.get_data(i)
 
     def get_mesh_name(self, dir):
+
         mesh_files = glob.glob(os.path.join(dir, "*.ply")) + \
                      glob.glob(os.path.join(dir, "*.obj")) + \
                      glob.glob(os.path.join(dir, "*.stl"))
@@ -431,15 +432,14 @@ class MechanicalAssembly(Dataset):
         dir = self.data_list[idx]
         file = os.path.join(dir, self.get_mesh_name(dir))
 
-        if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
-            return torch.load(os.path.join(dir, 'cached.pth'))
+        # if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
+        #     return torch.load(os.path.join(dir, 'cached.pth'))
                 
-
         with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
-        with open(os.path.join(dir, 'grp.json')) as json_file:
-            groups = json.load(json_file)
+        # with open(os.path.join(dir, 'grp.json')) as json_file:
+        #     groups = json.load(json_file)
 
 
         mesh = trimesh.load(file)
@@ -448,26 +448,10 @@ class MechanicalAssembly(Dataset):
             del mesh
             return self.get_data(idx + 1)
     
-        # # Transform mesh to point cloud using uniform sampling to 30000 samples
-        import open3d as o3d
-        # o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(mesh.vertices), o3d.utility.Vector3iVector(mesh.faces))
-        # point_cloud = np.asarray(o3d_mesh.sample_points_uniformly(number_of_points=500000).points)
-
         # Assign labels using KNN
         segment_labels = np.asarray(annotations['semantic_id'])
         mask = segment_labels != -1
 
-        # Fit KNN on mesh vertices
-        # try:
-        #     knn = NearestNeighbors(n_neighbors=1)
-        #     knn.fit(mesh.vertices[segment_labels != -1])
-        # except Exception as e:
-        #     print(e)
-
-        # # Find nearest neighbors for the sampled points
-        # distances, indices = knn.kneighbors(point_cloud)
-
-        # Assign labels from the nearest neighbors
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
         instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
         normals =  mesh.vertex_normals.copy()#[segment_labels != -1]#[indices.flatten()]
@@ -498,8 +482,8 @@ class MechanicalAssembly(Dataset):
             mappings_src.append(src.astype(np.int32))
             mappings_tgt.append(tgt.astype(np.int32))
             
-        mappings_src = np.concatenate(mappings_src, axis=0)
-        mappings_tgt = np.concatenate(mappings_tgt, axis=0)
+        # mappings_src = np.concatenate(mappings_src, axis=0)
+        # mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
         # Load all images from the directory
         # image_dir = os.path.join(self.data_root, dir)
@@ -523,8 +507,8 @@ class MechanicalAssembly(Dataset):
 
         data = {
             # 'coord': point_cloud,
-            'coord':  deepcopy(mesh.vertices),
-            'face': deepcopy(mesh.faces),
+            'coord':  np.asarray(deepcopy(mesh.vertices)),
+            'face':  np.asarray(deepcopy(mesh.faces)),
             'normal': normals,
             'instance': instance_labels,
             'segment': segment_labels,
@@ -542,12 +526,12 @@ class MechanicalAssembly(Dataset):
             if data[key].shape[0] != len(mesh.vertices):
                 print(f"Warning: {key} shape mismatch in {file}: {data[key].shape[0]} != {len(mesh.vertices)}")
 
-        data.update(groups)
+        # data.update(groups)
 
-        data['seg_indices'] = np.asarray(data['seg_indices1'])
+        # data['seg_indices'] = np.asarray(data['seg_indices1'])
 
-        if self.cache:
-            torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
+        # if self.cache:
+        #     torch.save(data, os.path.join(self.data_root, dir, 'cached.pth'))
         
         return data
 
@@ -563,20 +547,20 @@ class MechanicalAssembly(Dataset):
         # load data
         data_dict = self.get_data(idx)    
 
-        if self.augment_holes:
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
-            data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        # if self.augment_holes:
+        #     data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        #     data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        #     data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        #     data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
+        #     data_dict = self.hole_augmentatior.remove_rivet(data_dict=data_dict)
 
-        if self.image_transform is not None:
-            if 'images' in data_dict:
-                data_dict['images'] = np.stack([
-                    self.image_transform(image).numpy() for image in data_dict['images']
-                ])
-            else:
-                data_dict['images'] = []
+        # if self.image_transform is not None:
+        #     if 'images' in data_dict:
+        #         data_dict['images'] = np.stack([
+        #             self.image_transform(image).numpy() for image in data_dict['images']
+        #         ])
+        #     else:
+        #         data_dict['images'] = []
 
         data_dict = self.transform(data_dict)
 
