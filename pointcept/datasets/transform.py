@@ -1211,7 +1211,7 @@ class MeshToPointCloud():
     '''
 
     def __init__(self, 
-                 num_points: int = 10000, 
+                 num_points: int = 100000, 
                  keys: list[str] = ['coord', 'color', 'normal', 'segment', 'instance', 'seg_indices'], 
                  return_indices: bool = False):
         self.num_points = num_points
