@@ -1326,6 +1326,71 @@ class CropAround():
 
         return data_dict
 
+@TRANSFORMS.register_module()
+class ResampleUniformly():
+    '''
+        """
+        Resample points uniformly from a mesh surface and propagate vertex-wise features.
+
+        This transform samples `num_points` points uniformly from the triangle mesh
+        defined by data_dict['coord'] (vertices) and data_dict['face'] (triangles).
+        The original mesh is kept under 'mesh_coord' and 'mesh_face'. The sampled
+        point cloud replaces data_dict['coord'] and data_dict['face'] is removed.
+
+        Vertex-wise attributes (arrays with length equal to original number of
+        vertices) are transferred to sampled points by nearest-neighbor lookup on
+        the original vertices. Other keys are left unchanged.
+
+        Parameters
+        ----------
+        num_points : int
+            Number of points to sample from the mesh surface.
+        keys : list[str]
+            List of keys to attempt to propagate to the sampled points. Keys that
+            correspond to vertex attributes (len == original vertex count) will be
+            mapped; other keys are copied through unchanged.
+
+        Raises
+        ------
+        AssertionError
+            If required keys ('coord' or 'face') are missing.
+        """
+    '''
+    def __init__(self, 
+                 num_points: int = 500000,
+                 keys: list[str] = ['coord', 'grid_coord', 'color', 'normal', 'segment', 'instance', 'seg_indices']):
+        
+        self.num_points = num_points
+        self.keys = keys
+
+    def __call__(self, data_dict):
+
+        keys = list(copy.deepcopy(self.keys))
+        assert "coord" in data_dict.keys()
+        assert "face" in data_dict.keys() 
+
+        mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(data_dict['coord']), 
+                                         o3d.utility.Vector3iVector(data_dict['face']))
+        point_cloud = np.asarray(mesh.sample_points_uniformly(number_of_points=500000).points)
+
+        knn = NearestNeighbors(n_neighbors=1)
+        knn.fit(data_dict['coord'])
+
+        distances, indices = knn.kneighbors(point_cloud)
+
+        data_dict['mesh_coord'] = data_dict['coord']
+        data_dict['mesh_face'] = data_dict['face']
+
+        data_dict.pop('face')
+        data_dict['coord'] = point_cloud
+
+        for key in self.keys:
+            if key == 'coord':
+                continue
+
+            data_dict[key] = data_dict[key][indices]
+
+        return data_dict
 
 class Compose(object):
     def __init__(self, cfg=None):
