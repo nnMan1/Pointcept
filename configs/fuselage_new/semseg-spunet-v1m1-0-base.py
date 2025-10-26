@@ -5,12 +5,12 @@ batch_size = 8  # bs: total bs in all gpus
 num_worker = 16
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 evaluate = True
 resume=False
 # weight='backbones/sstnet_pretrain.pth'
 # weight='exp/fuselage_hole_detection/semseg-spunet-v1-m1-0-base_lr_split_holes-empt-hole/model/model_best.pth'
-weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base_2/model/model_best.pth'
+# weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base_2/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -83,7 +83,7 @@ data = dict(
         augment_holes=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            # dict(type="MeshToPointCloud", num_points=250000),
+            dict(type="MeshToPointCloud", num_points=250000),
             dict(
                 type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
             ),
@@ -113,6 +113,7 @@ data = dict(
                     "coord",
                     "grid_coord",
                     "segment",
+                    "name"
                 ),
                 feat_keys=("coord", "normal"),
             ),
@@ -126,6 +127,7 @@ data = dict(
         data_root=data_root,
         transform=[
             dict(type="CenterShift", apply_z=True),
+            dict(type="MeshToPointCloud", num_points=250000),
             dict(
                 type="Copy",
                 keys_dict={
@@ -133,7 +135,6 @@ data = dict(
                     "segment": "origin_segment",
                 },
             ),
-            # dict(type="MeshToPointCloud", num_points=250000),
             dict(
                 type="GridSample",
                 grid_size=0.3,

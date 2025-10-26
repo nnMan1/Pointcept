@@ -453,10 +453,10 @@ class MechanicalAssembly(Dataset):
         mask = segment_labels != -1
 
         classes = np.asarray([self.class_mapping[cls] for cls in annotations['classes']])
-        instance_labels = np.asarray(annotations['instance_id'])#[segment_labels != -1]#[indices.flatten()]
-        normals =  mesh.vertex_normals.copy()#[segment_labels != -1]#[indices.flatten()]
+        instance_labels = np.asarray(annotations['instance_id'])
+        normals =  mesh.vertex_normals.copy()
         # seg_indices = np.asarray(annotations['seg_indices'])#[segment_labels != -1]#[indices.flatten()]
-        segment_labels = np.asarray(annotations['semantic_id'])#[segment_labels != -1]#[indices.flatten()]
+        segment_labels = np.asarray(annotations['semantic_id'])
         segment_labels = classes[segment_labels]
         
         image_paths = sorted(glob.glob(os.path.join(dir, 'color', '*.png')))
