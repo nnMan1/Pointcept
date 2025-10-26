@@ -1,13 +1,16 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
-mix_prob = 0.8
+batch_size = 8  # bs: total bs in all gpus
+num_worker = 16
+mix_prob = 0
 empty_cache = True
 enable_amp = False
-# resume=True
-# weight='exp/fuselage_lr_split/semseg-pt-v3-0-base-ce-loss/model/model_last.pth'
-
+evaluate = True
+resume=False
+# weight='backbones/sstnet_pretrain.pth'
+# weight='exp/fuselage_hole_detection/semseg-spunet-v1-m1-0-base_lr_split_holes-empt-hole/model/model_best.pth'
+weight='exp/fuselage_instance/semseg-spunet-v1m1-0-base_2/model/model_best.pth'
 
 classes={"other": 0, 
          "gear": -1, 
@@ -24,21 +27,37 @@ classes={"other": 0,
 
 class_names = ["other", "rivet", "string-stif", "ruber-seal", "main-panel", "hole"]
 
-# model settings
+
+fts_sizes = 128
+dim_feedforward=512
+segment_ignore_index = (-1, )
+num_classes = 6
+segment_ignore_index = (-1, )
+
 model = dict(
     type="DefaultSegmentor",
     backbone=dict(
-        type="PointTransformer-Seg26",
+        type="SpUNet-v1m1",
         in_channels=6,
         num_classes=6,
+        channels=(32, 64, 128, 128, 96, 96),
+        layers=(2, 3, 4, 2, 2, 2),
     ),
-    criteria=[dict(type='CrossEntropyLoss', loss_weight=1.0, ignore_index=-1)],
+    criteria=[dict(type='CrossEntropyLoss', 
+                   loss_weight=1.0, 
+                   ignore_index=-1)]
+            #        ,
+            #  dict(type="FocalLoss",
+            #        loss_weight=1.0,
+            #        ignore_index=-1)]
 )
 
+
 # scheduler settings
-epoch = 400
-eval_epoch = 100# sche total eval & checkpoint epoch
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.02)
+epoch = 500
+eval_epoch = 100  # sche total eval & checkpoint epoch
+optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
+# optimizer = dict(type="AdamW", lr=0.01, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -48,12 +67,10 @@ scheduler = dict(
     final_div_factor=1000.0,
 )
 
-# dataset settings
 
 # dataset settings
 dataset_type = "MechanicalAssembly"
 data_root = "data/fuselage/crops"
-num_classes = 6
 
 data = dict(
     num_classes=num_classes,
@@ -66,6 +83,7 @@ data = dict(
         augment_holes=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
+            # dict(type="MeshToPointCloud", num_points=250000),
             dict(
                 type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
             ),
@@ -115,6 +133,7 @@ data = dict(
                     "segment": "origin_segment",
                 },
             ),
+            # dict(type="MeshToPointCloud", num_points=250000),
             dict(
                 type="GridSample",
                 grid_size=0.3,

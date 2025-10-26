@@ -98,7 +98,7 @@ data = dict(
         data_root=data_root,
         augment_holes=True,
         transform=[
-            dict(type="MeshToPointCloud", num_points=200000),
+            dict(type="MeshToPointCloud", num_points=100000),
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
@@ -141,7 +141,7 @@ data = dict(
         split="val",
         data_root=data_root,
         transform=[
-            dict(type="MeshToPointCloud", num_points=200000),
+            dict(type="MeshToPointCloud", num_points=100000),
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="Copy",

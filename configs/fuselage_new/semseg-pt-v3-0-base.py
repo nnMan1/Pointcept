@@ -27,11 +27,11 @@ class_names = ["other", "rivet", "string-stif", "ruber-seal", "main-panel", "hol
 # model settings
 model = dict(
     type="DefaultSegmentorV2",
-    num_classes=4,
+    num_classes=6,
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
-        in_channels=3,
+        in_channels=6,
         order=["z", "z-trans", "hilbert", "hilbert-trans"],
         stride=(2, 2, 2),
         enc_depths=(2, 2, 2, 4),
