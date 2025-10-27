@@ -578,9 +578,9 @@ class MechanicalAssembly(Dataset):
             else:
                 data_dict['images'] = []
 
-        data_dict_list = []        
+        data_dict_list = []    
+        data_dict = self.transform(data_dict)    
         segment = data_dict.pop("segment")
-        data_dict = self.transform(data_dict)
 
         for aug in self.aug_transform[:1]:
             data_dict_list.append(aug(deepcopy(data_dict)))
