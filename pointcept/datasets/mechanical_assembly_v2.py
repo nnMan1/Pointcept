@@ -17,7 +17,7 @@ from .transform import Compose, TRANSFORMS
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 from sklearn.neighbors import NearestNeighbors
-from segmentator import segment_mesh
+# from segmentator import segment_mesh
 from PIL import Image
 import torchvision.transforms as transforms
 
@@ -99,10 +99,7 @@ class MechanicalAssemblyV2(Dataset):
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
 
-        self.image_size = (448, 448)  # or (518, 518) for ViT-Giant
-
-        assert self.image_size[0] % 14 == 0 and self.image_size[1] % 14 == 0, \
-            "Image size must be divisible by 14 for ViT models."
+        self.image_size = (448, 448) # or (518, 518) for ViT-Giant
 
         self.image_transform = transforms.Compose([
             transforms.Resize(self.image_size),  # or 518 for ViT-Giant
