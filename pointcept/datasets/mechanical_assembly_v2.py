@@ -56,6 +56,7 @@ class MechanicalAssemblyV2(Dataset):
         loop=1,
         classes = [],
         load_images=True,
+        image_size=(448, 448),
         image_transform=None
     ):
         super(MechanicalAssemblyV2, self).__init__()
@@ -99,7 +100,7 @@ class MechanicalAssemblyV2(Dataset):
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
 
-        self.image_size = (448, 448) # or (518, 518) for ViT-Giant
+        self.image_size = image_size # or (518, 518) for ViT-Giant
 
         self.image_transform = transforms.Compose([
             transforms.Resize(self.image_size),  # or 518 for ViT-Giant
@@ -186,6 +187,7 @@ class MechanicalAssemblyV2(Dataset):
 
         if self.load_images:
             images, mappings_src, mappings_tgt = [], [], []
+            img_id = 0
 
             for i, (image_path, K, R, T, mapping) in enumerate(zip(image_paths, K_paths, R_paths, T_paths, mapping_paths)):
                 image = Image.open(image_path).convert('RGB')
@@ -201,10 +203,11 @@ class MechanicalAssemblyV2(Dataset):
                 tgt = mesh.faces[tgt].copy().reshape(-1)
                 src = np.tile(src, (1, 3)).reshape(-1, 2)
 
-                src = np.stack([np.ones(len(src)) * i, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
+                src = np.stack([np.ones(len(src)) * img_id, src[:, 0], src[:, 1]], axis=1)  # (N, 3)
                 
                 mappings_src.append(src.astype(np.int32))
                 mappings_tgt.append(tgt.astype(np.int32))
+                img_id += 1
 
 
             mappings_src = np.concatenate(mappings_src, axis=0)
