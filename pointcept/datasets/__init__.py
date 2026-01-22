@@ -28,5 +28,7 @@ from .fuselage import Fuselage
 from .mechanical_assembly_synth import MechanicalAssemblySynth
 from .mcb_dataset import MCBDataset 
 
+from .hdf5_dataset import HDF5_Dataset
+
 # dataloader
 from .dataloader import MultiDatasetDataloader
