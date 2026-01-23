@@ -5,22 +5,62 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 
+from transformers import Dinov2Model
 from transformers import AutoModel, AutoImageProcessor, pipeline
-from torchvision import transforms
+from .base_feature_extractor import BaseFeatureExtractor
 
 from  pointcept.models.builder import MODELS
-from .base_feature_extractor import BaseFeatureExtractor
-from PIL import Image
-from sklearn.decomposition import PCA
 
 Tensor = torch.Tensor
 Batch = Mapping[str, Tensor]
 Out = Dict[str, Tensor]
 
-@MODELS.register_module("DinoV3FeatureExtractor")
-class DinoV3FeatureExtractor(BaseFeatureExtractor):
+@MODELS.register_module("ImageFeatureExtractor")
+class ImageFeatureExtractor(nn.Module):
     def __init__(self, 
-                 model_name="facebook/dinov3-vith16plus-pretrain-lvd1689m",
+                 model_type="DinoV2",
+                 model_name="facebook/dinov2-small",
+                ):
+        super().__init__()
+        self.model_type = model_type
+        self.div_factor = 1
+
+        if model_type == "DinoV2":
+            self.model = Dinov2Model.from_pretrained(model_name)
+            self.div_factor = 14
+        elif model_type == "DinoV3":
+            self.model = AutoModel.from_pretrained(model_name)
+            self.div_factor = self.model.patch_embed.patch_size[0]
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+
+    def __call__(self, images: Tensor) -> Tensor:
+
+        outputs = self.model(images, output_hidden_states=True)
+
+        if self.model_type == "DinoV2":
+            patch_tokens = outputs.last_hidden_state[:, 1:, :] 
+        elif self.model_type == "DinoV3":
+            patch_tokens = outputs.last_hidden_state[:, 5:, :]  
+
+        input_w, input_h = images.shape[-1], images.shape[-2]
+        ogrid_w = input_w // self.div_factor
+        ogrid_h = input_h // self.div_factor
+
+        n_patches = patch_tokens.shape[1]
+        dim = int(n_patches ** 0.5)
+        assert dim * dim == n_patches, "Patch tokens are not square!"
+
+        patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], ogrid_w, ogrid_h, -1) 
+
+        return patch_tokens
+
+    
+@MODELS.register_module()
+class Image2PointCLoud(BaseFeatureExtractor):
+    def __init__(self, 
+                 model_type = "DinoV2",
+                 model_name = "facebook/dinov2-small",
                  merge_strategy='mean', 
                  fts_dim=384,
                  out_fts_dim=256,
@@ -35,7 +75,7 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
         self.fts_dim = fts_dim
         self.out_fts_dim = out_fts_dim
         self.project_fts = project_fts
-        self.model = AutoModel.from_pretrained(model_name)
+        self.model = ImageFeatureExtractor(model_type, model_name)
         
         self.proj = nn.Sequential(
                 nn.Linear(fts_dim, out_fts_dim),
@@ -59,18 +99,7 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
             i=0
 
             for be, ibe, mbe, obe in zip(batch['offset'], batch['image_offset'], batch['mappings_offset'], batch['origin_offset']):
-                outputs = self.model(images[ibs: ibe], output_hidden_states=True)
-            
-                patch_tokens = outputs.last_hidden_state[:, 5:, :]  # remove CLS token
-
-                n_patches = patch_tokens.shape[1]
-                dim = int(n_patches ** 0.5)
-                assert dim * dim == n_patches, "Patch tokens are not square!"
-
-                img_size = torch.tensor(images[ibs].shape[-2:], dtype=torch.int32)
-                div_factor = 512 // dim
-
-                patch_tokens = patch_tokens.reshape(patch_tokens.shape[0], dim, dim, -1) 
+                patch_tokens = self.model(images[ibs:ibe])
 
                 features = patch_tokens.to(self.model.device)
 
@@ -86,10 +115,9 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
                     mappings_tgt = mappings_tgt[random_positions]
 
                     a, b, c = mappings_src.T
-                    b //= div_factor
-                    c //= div_factor
+                    b //= self.model.div_factor
+                    c //= self.model.div_factor
 
-                    print(mesh_features[bs:be][mappings_tgt].shape, features[a, b, c].shape)
                     mesh_features[bs:be][mappings_tgt] += features[a, b, c]
                     mesh_features_cnt[bs:be][mappings_tgt] += 1
                 elif self.merge_strategy == 'mean':
@@ -100,8 +128,8 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= div_factor
-                        c //= div_factor
+                        b //= self.model.div_factor
+                        c //= self.model.div_factor
 
                         mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
                         mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
@@ -113,8 +141,8 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= div_factor
-                        c //= div_factor
+                        b //= self.model.div_factor
+                        c //= self.model.div_factor
 
                         mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c]) 
                         mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
@@ -150,3 +178,4 @@ class DinoV3FeatureExtractor(BaseFeatureExtractor):
 
         return random_positions
     
+

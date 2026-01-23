@@ -132,7 +132,7 @@ class HDF5_Dataset(Dataset):
             'images': [],            
             'mappings_src': [],
             'mappings_tgt': [],
-            'name': sample_id,
+            'name': f'{os.path.basename(h5_path)}/{sample_id}',
             'path': h5_path
         }
 
