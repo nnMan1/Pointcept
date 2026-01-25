@@ -9,7 +9,9 @@ import os
 import h5py
 import time
 import numpy as np
-from uuid import uuid4
+import threading
+import queue
+import shutil
 
 from collections import OrderedDict
 import torch
@@ -30,10 +32,6 @@ from pointcept.utils.misc import (
     intersection_and_union_gpu,
     make_dirs,
 )
-try:
-    import pointops
-except:
-    pointops = None
 
 
 PREEXTRACTORS = Registry("feature_preextractor")
@@ -59,6 +57,10 @@ class ExtractorBase:
         self.samples_in_current_shard = 0
         self.shard_size = cfg.shard_size
         self._get_new_shard()
+
+        self.write_queue = queue.Queue(maxsize=20) 
+        self.writer_thread = threading.Thread(target=self._async_writer, daemon=True)
+        self.writer_thread.start()
     
         self.cfg = cfg
         self.verbose = verbose
@@ -135,9 +137,9 @@ class ExtractorBase:
             collate_fn=partial(point_collate_fn, mix_prob=self.cfg.mix_prob),
             pin_memory=True,
             worker_init_fn=init_fn,
-            drop_last=True,
+            drop_last=False,
             prefetch_factor=self.cfg.prefetch_factor,
-            persistent_workers=True,
+            persistent_workers=False,
         )
         return train_loader
 
@@ -146,12 +148,15 @@ class ExtractorBase:
 
     def _get_new_shard(self):
         if self.h5_file:
-            self.h5_file.close()
+            self.close_shard()
 
+        # shard_path = f"/tmp/{self.rank}_shard_{self.current_shard_idx:04d}.h5"
         shard_path = f"{self.base_path}/{self.rank}_shard_{self.current_shard_idx:04d}.h5"
-        print(shard_path)
-        self.h5_file = h5py.File(shard_path, 'w', libver='latest')
-        self.current_shard_idx += 1
+        
+        self.h5_file = h5py.File(
+            shard_path, 'w', libver='latest', rdcc_nbytes=1024**2 * 4 
+        )
+
         self.samples_in_current_shard = 0
         
         self.dt_float = h5py.vlen_dtype(np.dtype('float32'))
@@ -168,16 +173,34 @@ class ExtractorBase:
             grp = self.h5_file.create_group(sample_name)
             grp.create_dataset(
                 'features', 
-                data=features.astype(np.float32), 
-                compression="gzip", 
-                compression_opts=4 
+                data=features.astype(np.float16), 
+                compression=None 
             )
             
             self.samples_in_current_shard += 1
         except Exception as e:
             print(e)
             
+    def _async_writer(self):
+        while True:
+            data = self.write_queue.get()
+            if data is None:
+                break
+            
+            name, features_cpu = data
+            self.save_sample_to_shard(name, features_cpu)
+            
+            self.write_queue.task_done()
 
+    def close_shard(self):
+        self.h5_file.close()
+
+        # tmp_path = f"/tmp/{self.rank}_shard_{self.current_shard_idx:04d}.h5"
+        # final_dest = f"{self.base_path}/{self.rank}_shard_{self.current_shard_idx:04d}.h5"
+
+        # shutil.move(tmp_path, final_dest)
+        self.current_shard_idx += 1
+        
     @staticmethod
     def collate_fn(batch):
         raise collate_fn(batch)
@@ -193,28 +216,49 @@ class IMG_Extractor(ExtractorBase):
         logger = get_root_logger()
         logger.info(">>>>>>>>>>>>>>>> Start Feature Pre-extracting >>>>>>>>>>>>>>>>>")
         self.logger.info(f"Rank {self.rank}: Starting extraction...")
+
+        start_data_load = time.time()
         
         for i, input_dict in enumerate(self.data_loader):
+
+            data_load_time = time.time() - start_data_load
+            
+            start_data_transfer = time.time()
+
             for key in input_dict.keys():
                 if isinstance(input_dict[key], torch.Tensor):
                     input_dict[key] = input_dict[key].cuda(non_blocking=True)
+
+            data_transfer_time = time.time() - start_data_transfer
+            
+            start_gpu = time.time()
             with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
                 features = self.model(input_dict['images'])
+
+            gpu_time = time.time() - start_gpu
             
             features = features.cpu().numpy()
             names = input_dict["name"]
+
+            start_writing_time = time.time()
             
             bs = 0
             for j, be in enumerate(input_dict['image_offset']):
-                self.save_sample_to_shard(names[j], features[bs:be])
+                self.write_queue.put((names[j], features[bs:be]))
+                # self.save_sample_to_shard(names[j], features[bs:be])
                 bs = be
+
+            writing_time = time.time() - start_writing_time
             
             if i % 10 == 0 and self.rank == 0:
                 self.logger.info(f"Progress: {i}/{len(self.data_loader)} batches")
+                self.logger.info(f"Dataload time: {data_load_time}, data_transfer_time: {data_transfer_time}, gpu_time: {gpu_time}, writing_time: {writing_time}")
+
+            start_data_load = time.time()
 
         if self.h5_file:
             print("Closing h5 file")
-            self.h5_file.close()
+            self.close_shard()
 
         comm.synchronize()
         self.logger.info(f"Rank {self.rank}: Extraction finished.")

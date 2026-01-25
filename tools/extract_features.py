@@ -12,7 +12,7 @@ from pointcept.engines.defaults import (
     default_config_parser,
     default_setup,
 )
-from pointcept.engines.preextract_features import PREEXTRACTORS
+from pointcept.engines.extract_features import PREEXTRACTORS
 from pointcept.engines.launch import launch
 
 

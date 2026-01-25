@@ -1,13 +1,13 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 32
-num_worker = 16
+batch_size = 128
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
-prefetch_factor=4
+prefetch_factor=2
 
 num_classes = 1
 fts_sizes = 128
@@ -17,8 +17,8 @@ segment_ignore_index = (-1, )
 # model settings
 model = dict(
     type="ImageFeatureExtractor",
-    model_type="DinoV3",
-    model_name="backbones/dinov3-vith16plus-pretrain-lvd1689m",
+    model_type="DinoV2",
+    model_name="facebook/dinov2-small",
 )
 
 epoch = 1
@@ -41,7 +41,6 @@ data = dict(
         split='train',
         data_root='data/data/processed/abc_dataset/',
         load_images=True,
-        image_size=(512, 512),
         transform=[
                 dict(type="ToTensor"),
                 dict(

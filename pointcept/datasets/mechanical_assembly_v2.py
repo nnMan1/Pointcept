@@ -21,26 +21,6 @@ from sklearn.neighbors import NearestNeighbors
 from PIL import Image
 import torchvision.transforms as transforms
 
-from pytorch3d.structures import Pointclouds, Meshes
-from pytorch3d.renderer import (
-    look_at_view_transform,
-    look_at_rotation,
-    FoVPerspectiveCameras, 
-    PerspectiveCameras,
-    PointLights, 
-    DirectionalLights, 
-    Materials, 
-    RasterizationSettings, 
-    MeshRendererWithFragments, 
-    MeshRasterizer, 
-    SoftSilhouetteShader, 
-    SoftPhongShader,
-    MeshRenderer,
-    BlendParams,
-    TexturesUV,
-    TexturesVertex
-)
-
 @DATASETS.register_module("MechanicalAssemblyV2")
 class MechanicalAssemblyV2(Dataset):
 

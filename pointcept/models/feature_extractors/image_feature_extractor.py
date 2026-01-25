@@ -26,11 +26,11 @@ class ImageFeatureExtractor(nn.Module):
         self.div_factor = 1
 
         if model_type == "DinoV2":
-            self.model = Dinov2Model.from_pretrained(model_name)
+            self.model = Dinov2Model.from_pretrained(model_name, local_files_only=True)
             self.div_factor = 14
         elif model_type == "DinoV3":
             self.model = AutoModel.from_pretrained(model_name)
-            self.div_factor = self.model.patch_embed.patch_size[0]
+            self.div_factor = 16
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -101,7 +101,10 @@ class Image2PointCLoud(BaseFeatureExtractor):
             for be, ibe, mbe, obe in zip(batch['offset'], batch['image_offset'], batch['mappings_offset'], batch['origin_offset']):
                 patch_tokens = self.model(images[ibs:ibe])
 
-                features = patch_tokens.to(self.model.device)
+                if 'image_features' not in batch:
+                    features = patch_tokens.to(self.model.device)
+                else:
+                    features = batch['image_features']
 
                 mappings_src = batch['mappings_src'][mbs:mbe]
                 mappings_tgt = batch['mappings_tgt'][mbs:mbe]
