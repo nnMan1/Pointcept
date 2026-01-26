@@ -20,6 +20,7 @@ def main_worker(cfg):
     cfg = default_setup(cfg)
     extractor = PREEXTRACTORS.build(dict(type=cfg.preextractor.type, cfg=cfg))
     extractor.extract()
+    extractor.create_index_map()
 
 class Args:
     def __init__(self):

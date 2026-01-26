@@ -1,165 +1,109 @@
-import sys
-sys.path.append('/home')
-
-import os
-import torch
-import numpy as np
-import open3d as o3d 
 from pointcept.datasets import build_dataset
-from pointcept.utils.visualization import to_o3d, colors
-from sklearn.cluster import DBSCAN
-from torch import nn
-import torch_scatter
+from pointcept.models import build_model
+from torch import Tensor
+from pointcept.utils.visualization import pca_features_visualization
 
 
-class SuperpointPooling(nn.Module):
+classes={"other": 0, 
+        "gear": 0, 
+        "nut": 0, 
+        "screw": 0, 
+        "axe": 0}
 
-    def __init__(self, pool_function = torch_scatter.scatter_mean):
-        super().__init__()
+class_names = ["other"]
 
-        self.pool_function = pool_function
-
-    def __prepare_seg_indices(self, seg_indices, offset):
-
-        bs = 0
-        off = 0
-
-        offs = []
-
-        for be in offset:
-            tmp = seg_indices[bs:be]
-            _, inverse_indices = torch.unique(tmp, return_inverse=True)
-            seg_indices[bs:be] = inverse_indices + off
-            off = seg_indices[:be].max() + 1 
-            offs.append(off)
-            bs = be
-    
-        return seg_indices, torch.tensor(offs)
-
-    def forward(self, data, keys=['instance', 'segment', 'features']):
-
-         if 'seg_indices' not in data.keys():
-               return data
-
-         data['offset_orig'] = data['offset']
-         data['seg_indices'], data['offset'] = self.__prepare_seg_indices(data['seg_indices'], data['offset'])
-
-         label_keys = []
-         if 'instance' in keys:
-            label_keys.append('instance')
-            keys.remove('instance')
-
-         if 'segment' in keys:
-            label_keys.append('segment')
-            keys.remove('segment')
-
-         
-         for key in label_keys:
-            label = []
-            for cls in np.unique(data['seg_indices']):
-               cluster_mask = data['seg_indices'] == cls
-          
-               unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
-               print(unique_labels, counts)
-               majority_label = unique_labels[torch.argmax(counts)]
-               label.append(majority_label)
-
-            data[key] = np.asarray(label)
-
-         for key in keys:
-            data[key] = torch_scatter.scatter_mean(data[key],  data['seg_indices'], dim=0)
-        
-         return data
-
+segment_ignore_index = ( -1, )
 
 dataset = build_dataset(dict(
-                        type='MechanicalAssembly',
-                        split='val',
-                        data_root='data/cetim_assembly/data',
-                              transform=[
-                                dict(type="CenterShift", apply_z=True),
-                                dict(
-                                    type="Copy",
-                                    keys_dict={
-                                        "coord": "origin_coord",
-                                        "segment": "origin_segment",
-                                        "instance": "origin_instance",
-                                    },
-                                ),
-                                dict(
-                                    type="GridSample",
-                                    grid_size=1.5,
-                                    hash_type="fnv",
-                                    mode="train",
-                                    return_grid_coord=True,
-                                    keys=("coord", "normal", "segment", "instance"),
-                                ),
-                                # # dict(type="SphereCrop", point_max=1000000, mode='center'),
-                                # dict(type="CenterShift", apply_z=False),
-                                # dict(type="NormalizeColor"),
-                                # dict(
-                                #     type="InstanceParser",
-                                #     segment_ignore_index=(-1, ),
-                                #     instance_ignore_index=-1,
-                                # ),
-                                # dict(type="ToTensor"),
-                                # dict(
-                                #     type="Collect",
-                                #     keys=(
-                                #         "coord",
-                                #         "grid_coord",
-                                #         "segment",
-                                #         "instance",
-                                #         "origin_coord",
-                                #         "origin_segment",
-                                #         "origin_instance",
-                                #         "instance_centroid",
-                                #         "bbox",
-                                #         "seg_indices",
-                                #         "path"
-                                #     ),
-                                #     feat_keys=("coord", "normal"),
-                                #     offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
-                                # ),
-                            ],test_mode=False,
-                        classes={"other": 0, 
-                                 "gear": -1, 
-                                 "nut": -1, 
-                                 "screw": -1, 
-                                 "axe": -1, 
-                                 "rivet": 1, 
-                                 "sting-stif": 2, 
-                                 "ruber-seal": 3, 
-                                 "main_panel": 4,
-                                 "hole": 5,
-                                 "rivet_t1": 1,
-                                 "rrivet_t2": 1}))
+    type='HDF5_Dataset',
+    split='train',
+    data_root='data/data/processed/abc_dataset',
+    load_images=True,
+    load_features=dict(
+        image_features='preextracted_features/dino_v2_small/features'
+    ),
+    transform=[
+            dict(type="CenterShift", apply_z=True),
+          
+            dict(
+                type="Copy",
+                keys_dict={
+                    "coord": "origin_coord",
+                    "segment": "origin_segment",
+                    "instance": "origin_instance",
+                },
+            ),
+            # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
+            dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
+            dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
+            dict(type="RandomScale", scale=[0.9, 1.1]),
+            dict(type="RandomFlip", p=0.8),
+            dict(type="RandomJitter", sigma=0.001, clip=0.02),
+            dict(
+                type="GridSample",
+                grid_size=1,
+                hash_type="fnv",
+                mode="train",
+                return_inverse=True,
+                return_grid_coord=True,
+                keys=("coord", "normal", "segment", "instance"),
+            ),
+            dict(
+                type="InstanceParser",
+                segment_ignore_index=segment_ignore_index,
+                instance_ignore_index=-1,
+            ),
+            dict(type="ToTensor"),
+            dict(
+                type="Collect",
+                keys=(
+                    "coord",
+                    "grid_coord",
+                    "segment",
+                    "instance",
+                    "instance_segment",
+                    "images",
+                    "mappings_src",
+                    "mappings_tgt",
+                    "path",
+                    "name",
+                    "inverse",
+                    "name",
+                    "image_features"
+                ),
+                feat_keys=("coord"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"
+                ),
+            ),
+        ],
+        test_mode=False,
+        classes=classes,
+    ),
+)
 
-dataset.prepare_clustering()
+model = build_model(dict(
+    type='Image2PointCLoud',
+    return_features = ['feat'],
+    project_fts = False
+))
 
-colors = np.random.randint(0, 255, (1500, 3)) / 255
+model.to('cuda')
 
-for s in dataset:
 
-   s['offset'] = [len(s['coord'])]
-#    s = SuperpointPooling()(s, ['instance', 'segment'])
-#    s['segment'] = s['segment'][s['seg_indices']]
-    
-   # pcd = o3d.geometry.TriangleMesh()
-   # pcd.vertices = o3d.utility.Vector3dVector(s['coord'])
-   # pcd.triangles = o3d.utility.Vector3iVector(s['face'])
-   # pcd.vertex_normals = o3d.utility.Vector3dVector(s['normal'])
-   # pcd.vertex_colors = o3d.utility.Vector3dVector(colors[s['segment']])
-   pcd = o3d.geometry.PointCloud()
-   pcd.points = o3d.utility.Vector3dVector(s['coord'])
-   pcd.colors = o3d.utility.Vector3dVector(colors[s['segment']])
+for i, sample in enumerate(dataset):
+    for k, v in sample.items():
+        if isinstance(v, Tensor):
+            sample[k] = v.cuda()
+            
+    fts = model(sample)
+    pca_features_visualization(sample['coord'].cpu().numpy(), fts['feat'].cpu().numpy(), file_path=f"features{i}.ply")
+    # print(sample['name'], sample['image_features'].shape, fts['feat'].shape, sample['coord'].shape)
 
-   o3d.io.write_point_cloud('test.ply', pcd)
-   exit(0)
-#    vis = o3d.visualization.Visualizer()
-#    vis.create_window(window_name=s['path'])
-#    vis.add_geometry(pcd)
-#    vis.run()
-#    vis.destroy_window()
-
-   # o3d.visualization.draw_geometries([pc 
+    if i > 10:
+        exit(0)

@@ -12,6 +12,7 @@ import numpy as np
 import threading
 import queue
 import shutil
+import pickle
 
 from collections import OrderedDict
 import torch
@@ -26,16 +27,9 @@ from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from pointcept.models import build_model
 from pointcept.utils.logger import get_root_logger
 from pointcept.utils.registry import Registry
-from pointcept.utils.misc import (
-    AverageMeter,
-    intersection_and_union,
-    intersection_and_union_gpu,
-    make_dirs,
-)
-
+from pointcept.utils.misc import make_dirs
 
 PREEXTRACTORS = Registry("feature_preextractor")
-
 
 class ExtractorBase:
     def __init__(self, cfg, model=None, data_loader=None, verbose=False) -> None:
@@ -201,10 +195,28 @@ class ExtractorBase:
         # shutil.move(tmp_path, final_dest)
         self.current_shard_idx += 1
         
+    def create_index_map(self):
+
+        if comm.get_rank() != 0:
+            return
+
+        index_map = []
+        shard_files = sorted([f for f in os.listdir(self.base_path) if f.endswith('.h5')])
+        
+        for shard_name in shard_files:
+            path = os.path.join(self.base_path, shard_name)
+            with h5py.File(path, 'r') as f:
+                names = f.keys()
+                for i, name in enumerate(names):
+                    index_map.append((path, i, name))
+        
+        with open(os.path.join(self.base_path, 'feature_index.pkl'), 'wb') as f:
+            pickle.dump(index_map, f)
+        return index_map
+
     @staticmethod
     def collate_fn(batch):
         raise collate_fn(batch)
-
 
 @PREEXTRACTORS.register_module()
 class IMG_Extractor(ExtractorBase):
@@ -244,6 +256,7 @@ class IMG_Extractor(ExtractorBase):
             
             bs = 0
             for j, be in enumerate(input_dict['image_offset']):
+                print("adding:", names[j])
                 self.write_queue.put((names[j], features[bs:be]))
                 # self.save_sample_to_shard(names[j], features[bs:be])
                 bs = be

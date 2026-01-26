@@ -4,6 +4,7 @@ import glob
 import h5py
 import numpy as np
 import torch
+import pickle
 from sklearn.cluster import DBSCAN
 from copy import deepcopy
 from torch.utils.data import Dataset
@@ -36,6 +37,7 @@ class HDF5_Dataset(Dataset):
         load_images=True,
         image_size=(448, 448),
         image_transform=None,
+        load_features={},
         loop=1,
     ):
         super(HDF5_Dataset, self).__init__()
@@ -76,7 +78,7 @@ class HDF5_Dataset(Dataset):
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
 
-        self.image_size = image_size # or (518, 518) for ViT-Giant
+        self.image_size = image_size 
 
         self.image_transform = transforms.Compose([
             transforms.Resize(self.image_size),  # or 518 for ViT-Giant
@@ -88,6 +90,19 @@ class HDF5_Dataset(Dataset):
         self.load_images = load_images
 
         self.open_files = {}
+
+        self.open_features_files = {}
+        self.load_features = load_features
+
+        for k, v in self.load_features.items():
+            self.load_features[k] = {}
+
+            with open(os.path.join(v, 'feature_index.pkl'), 'rb') as f:
+                index_map = pickle.load(f)
+
+            for u, i, uid in index_map:
+                self.load_features[k][uid] = u
+
         
     def get_data_list(self):
         
@@ -132,7 +147,7 @@ class HDF5_Dataset(Dataset):
             'images': [],            
             'mappings_src': [],
             'mappings_tgt': [],
-            'name': f'{os.path.basename(h5_path)}/{sample_id}',
+            'name': f'{os.path.basename(h5_path)}#{sample_id}',
             'path': h5_path
         }
 
@@ -174,12 +189,25 @@ class HDF5_Dataset(Dataset):
 
                 point_offset += n_points
 
+        for ftk_key in self.load_features:
+            h5_path = self.load_features[ftk_key][data['name']]
+            
+            if h5_path not in self.open_features_files:
+                if len(self.open_files) > 32: 
+                    oldest_path = next(iter(self.open_features_files))
+                    self.open_features_files[oldest_path].close()
+                    del self.open_features_files[oldest_path]
+                self.open_features_files[h5_path] = h5py.File(h5_path, 'r', swmr=True)
+
+            f = self.open_features_files[h5_path]
+            data[ftk_key] = np.asarray(f[data['name']]['features'])
+
+
         for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src', 'mappings_tgt']:
             if len(data[key]) > 0:
                 data[key] = np.concatenate(data[key], axis=0)
 
         return data     
-
 
     def prepare_train_data(self, idx):
         data_dict = self.get_data(idx)    

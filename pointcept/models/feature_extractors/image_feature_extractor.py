@@ -55,6 +55,9 @@ class ImageFeatureExtractor(nn.Module):
 
         return patch_tokens
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
     
 @MODELS.register_module()
 class Image2PointCLoud(BaseFeatureExtractor):
@@ -99,16 +102,17 @@ class Image2PointCLoud(BaseFeatureExtractor):
             i=0
 
             for be, ibe, mbe, obe in zip(batch['offset'], batch['image_offset'], batch['mappings_offset'], batch['origin_offset']):
-                patch_tokens = self.model(images[ibs:ibe])
-
                 if 'image_features' not in batch:
-                    features = patch_tokens.to(self.model.device)
+                    features = self.model(images[ibs:ibe])
                 else:
                     features = batch['image_features']
 
+                features = features.to(self.model.device)
+                
                 mappings_src = batch['mappings_src'][mbs:mbe]
                 mappings_tgt = batch['mappings_tgt'][mbs:mbe]
                 inverse = batch['inverse'][obs:obe]
+
                 mappings_tgt = inverse[mappings_tgt] # Apply inverse mapping from points to voxels
 
                 if self.merge_strategy == 'random_sample':
@@ -118,8 +122,11 @@ class Image2PointCLoud(BaseFeatureExtractor):
                     mappings_tgt = mappings_tgt[random_positions]
 
                     a, b, c = mappings_src.T
-                    b //= self.model.div_factor
-                    c //= self.model.div_factor
+                    b //= 16
+                    c //= 16
+
+                    print(b.max(), c.max())
+                    exit(0)
 
                     mesh_features[bs:be][mappings_tgt] += features[a, b, c]
                     mesh_features_cnt[bs:be][mappings_tgt] += 1
@@ -131,8 +138,8 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= self.model.div_factor
-                        c //= self.model.div_factor
+                        b //= 16
+                        c //= 16
 
                         mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
                         mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
@@ -144,8 +151,8 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= self.model.div_factor
-                        c //= self.model.div_factor
+                        b //= 16
+                        c //= 16
 
                         mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c]) 
                         mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
