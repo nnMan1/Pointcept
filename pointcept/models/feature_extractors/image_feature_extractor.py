@@ -78,7 +78,11 @@ class Image2PointCLoud(BaseFeatureExtractor):
         self.fts_dim = fts_dim
         self.out_fts_dim = out_fts_dim
         self.project_fts = project_fts
-        self.model = ImageFeatureExtractor(model_type, model_name)
+
+        if model_type is not None:
+            self.model = ImageFeatureExtractor(model_type, model_name)
+        else:
+            self.model = None
         
         self.proj = nn.Sequential(
                 nn.Linear(fts_dim, out_fts_dim),
@@ -95,8 +99,8 @@ class Image2PointCLoud(BaseFeatureExtractor):
         with torch.no_grad():
             images = batch.get('images', [])
 
-            mesh_features = torch.zeros((len(batch['coord']), self.fts_dim), dtype=torch.float32, device=self.model.device)
-            mesh_features_cnt = torch.zeros((len(batch['coord'])), dtype=torch.float32, device=self.model.device)
+            mesh_features = torch.zeros((len(batch['coord']), self.fts_dim), dtype=torch.float32, device=self.device)
+            mesh_features_cnt = torch.zeros((len(batch['coord'])), dtype=torch.float32, device=self.device)
 
             bs, ibs, mbs, obs = 0, 0, 0, 0
             i=0
@@ -107,7 +111,7 @@ class Image2PointCLoud(BaseFeatureExtractor):
                 else:
                     features = batch['image_features']
 
-                features = features.to(self.model.device)
+                features = features.to(self.device)
                 
                 mappings_src = batch['mappings_src'][mbs:mbe]
                 mappings_tgt = batch['mappings_tgt'][mbs:mbe]
@@ -124,9 +128,6 @@ class Image2PointCLoud(BaseFeatureExtractor):
                     a, b, c = mappings_src.T
                     b //= 16
                     c //= 16
-
-                    print(b.max(), c.max())
-                    exit(0)
 
                     mesh_features[bs:be][mappings_tgt] += features[a, b, c]
                     mesh_features_cnt[bs:be][mappings_tgt] += 1

@@ -101,7 +101,7 @@ class HDF5_Dataset(Dataset):
                 index_map = pickle.load(f)
 
             for u, i, uid in index_map:
-                self.load_features[k][uid] = u
+                self.load_features[k][uid] = f'{v}/{os.path.basename(u)}'
 
         
     def get_data_list(self):
@@ -125,6 +125,7 @@ class HDF5_Dataset(Dataset):
         return self.data_list
 
     def get_data(self, idx):
+
         h5_path, sample_id = self.data_list[idx % len(self.data_list)]
 
         if h5_path not in self.open_files:
@@ -164,23 +165,25 @@ class HDF5_Dataset(Dataset):
                 
                 p2p = np.array(view['p2p']) 
                 p2f = np.array(view['p2f']) 
-                               
+                            
                 point2face = p2f.flatten()[p2p]
+                mask = point2face < len(mesh_normals)
+                point2face = point2face[mask]
                 
                 coords = np.array(view['pc']).reshape(-1, 3)
-                n_points = len(coords)
-
+                
                 data['images'].append(img)
-                data['coord'].append(coords)
+                data['coord'].append(coords[mask])
                 data['normal'].append(mesh_normals[point2face])
-                data['segment'].append(np.array(view['point_semantic']))
-                data['instance'].append(np.array(view['point_instance']))
+                data['segment'].append(np.array(view['point_semantic'])[mask])
+                data['instance'].append(np.array(view['point_instance'])[mask])
 
-               
+                n_points = mask.sum()
+            
                 src = np.stack([
                     np.full(n_points, i, dtype=np.int32), 
-                    p2p // w,                            
-                    p2p % w                              
+                    p2p[mask] // w,                            
+                    p2p[mask] % w                              
                 ]).T
 
                 tgt = np.arange(point_offset, point_offset + n_points)
@@ -206,6 +209,7 @@ class HDF5_Dataset(Dataset):
         for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src', 'mappings_tgt']:
             if len(data[key]) > 0:
                 data[key] = np.concatenate(data[key], axis=0)
+    
 
         return data     
 

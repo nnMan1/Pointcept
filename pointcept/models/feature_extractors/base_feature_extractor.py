@@ -71,7 +71,11 @@ class BaseFeatureExtractor(nn.Module, ABC):
         self._keep_keys = tuple(keep_keys) if keep_keys is not None else tuple()
         self._freeze_backbone = freeze_backbone
         self._freeze_backbone_bn = freeze_backbone_bn
-        
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def set_return_policy(self, policy_or_names):
         if isinstance(policy_or_names, str):
             groups = getattr(self, "feature_groups", {})

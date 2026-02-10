@@ -6,6 +6,7 @@ Please cite our work if the code is helpful to you.
 """
 
 import os
+os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 import h5py
 import time
 import numpy as np
@@ -148,8 +149,9 @@ class ExtractorBase:
         shard_path = f"{self.base_path}/{self.rank}_shard_{self.current_shard_idx:04d}.h5"
         
         self.h5_file = h5py.File(
-            shard_path, 'w', libver='latest', rdcc_nbytes=1024**2 * 4 
+            shard_path, 'w', libver='latest', rdcc_nbytes=1024**2 * 4, swmr=True
         )
+        print("Creating new shard", shard_path)
 
         self.samples_in_current_shard = 0
         
@@ -205,7 +207,7 @@ class ExtractorBase:
         
         for shard_name in shard_files:
             path = os.path.join(self.base_path, shard_name)
-            with h5py.File(path, 'r') as f:
+            with h5py.File(path, 'r', swmr=True) as f:
                 names = f.keys()
                 for i, name in enumerate(names):
                     index_map.append((path, i, name))
