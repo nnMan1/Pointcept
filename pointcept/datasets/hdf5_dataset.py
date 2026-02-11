@@ -168,6 +168,10 @@ class HDF5_Dataset(Dataset):
                             
                 point2face = p2f.flatten()[p2p]
                 mask = point2face < len(mesh_normals)
+
+                # if self.split == 'train':
+                #     mask[10000:] = False              
+
                 point2face = point2face[mask]
                 
                 coords = np.array(view['pc']).reshape(-1, 3)
@@ -192,6 +196,9 @@ class HDF5_Dataset(Dataset):
 
                 point_offset += n_points
 
+        data['mappings_src'] = np.concatenate(data['mappings_src'], axis=0)
+        data['mappings_tgt'] = np.concatenate(data['mappings_tgt'], axis=0)
+
         for ftk_key in self.load_features:
             h5_path = self.load_features[ftk_key][data['name']]
             
@@ -204,12 +211,26 @@ class HDF5_Dataset(Dataset):
 
             f = self.open_features_files[h5_path]
             data[ftk_key] = np.asarray(f[data['name']]['features'])
+            # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape, data['mappings_src'].shape, np.concatenate(data['coord'], axis=0).shape)
+            data[ftk_key] = data[ftk_key][data['mappings_src'][:, 0], data['mappings_src'][:, 1] // 16, data['mappings_src'][:, 2] // 16] # Map from image pixel to point
+            # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape)
 
-
-        for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src', 'mappings_tgt']:
+        for key in ['coord', 'normal', 'segment', 'instance']:
             if len(data[key]) > 0:
                 data[key] = np.concatenate(data[key], axis=0)
-    
+
+        if len(data['coord']) > 200000:
+            idx = np.random.choice(len(data['coord']), 200000, replace=False)
+            for key in ['coord', 'normal', 'segment', 'instance']:
+                data[key] = data[key][idx]
+            data['mappings_src'] = data['mappings_src'][idx]
+            data['mappings_tgt'] = data['mappings_tgt'][idx]  
+
+            for ftk_key in self.load_features:
+                data[ftk_key] = data[ftk_key][idx]  
+
+        while data['coord'].max() - data['coord'].min() > 1000:
+            data['coord'] /= 2
 
         return data     
 

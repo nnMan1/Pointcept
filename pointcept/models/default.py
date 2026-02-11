@@ -239,3 +239,45 @@ class DefaultClassifier(nn.Module):
             return dict(loss=loss, cls_logits=cls_logits)
         else:
             return dict(cls_logits=cls_logits)
+
+@MODELS.register_module()
+class FeatureDistiller(nn.Module):
+    def __init__(
+        self,
+        backbone_student=None,
+        backbone_teacher=None,
+        student_out_channels=256,
+        teacher_out_channels=256,
+        criteria=None,
+        project_fts=False,
+    ):
+        super().__init__()
+        if backbone_student is not None:
+            self.backbone_student = build_model(backbone_student)
+        if backbone_teacher is not None:
+            self.backbone_teacher = build_model(backbone_teacher)
+            
+        self.criteria = build_criteria(criteria)
+        self.embed_dim = teacher_out_channels
+        if project_fts:
+            self.project_student = nn.Linear(student_out_channels, self.embed_dim)
+        else:
+            self.project_student = nn.Identity()
+
+
+    def forward(self, input_dict):
+        feat_student = self.backbone_student(input_dict)
+        feat_student['feat'] = self.project_student(feat_student['feat'])
+
+        if 'feat_teacher' in input_dict.keys():
+            feat_teacher = {'feat': input_dict['feat_teacher']}
+        else:
+            with torch.no_grad():
+                feat_teacher = self.backbone_teacher(input_dict)
+
+        if self.training:
+            print(feat_student['feat'].shape, feat_teacher['feat'].shape)
+            loss = self.criteria(feat_student['feat'], feat_teacher['feat'].detach())
+            return dict(loss=loss)
+        else:
+            return dict(feat_student=feat_student, feat_teacher=feat_teacher)

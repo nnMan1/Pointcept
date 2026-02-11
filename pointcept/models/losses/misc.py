@@ -100,7 +100,6 @@ class SmoothCELoss(nn.Module):
         loss = loss[torch.isfinite(loss)].mean()
         return loss
 
-
 @LOSSES.register_module()
 class BinaryFocalLoss(nn.Module):
     def __init__(self, gamma=2.0, alpha=0.5, logits=True, reduce=True, loss_weight=1.0):
@@ -136,7 +135,6 @@ class BinaryFocalLoss(nn.Module):
         if self.reduce:
             focal_loss = torch.mean(focal_loss)
         return focal_loss * self.loss_weight
-
 
 @LOSSES.register_module()
 class FocalLoss(nn.Module):
@@ -217,7 +215,6 @@ class FocalLoss(nn.Module):
             loss = loss.total()
         return self.loss_weight * loss
 
-
 @LOSSES.register_module()
 class DiceLoss(nn.Module):
     def __init__(self, smooth=1, exponent=2, loss_weight=1.0, ignore_index=-1):
@@ -246,3 +243,74 @@ class DiceLoss(nn.Module):
         loss = 1 - numerator / denominator
         
         return self.loss_weight * loss.mean()
+
+@LOSSES.register_module()
+class MSELoss(nn.MSELoss):
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(MSELoss, self).__init__(
+            size_average=size_average, reduce=reduce, reduction=reduction
+        )
+        self.loss_weight = loss_weight
+
+    def forward(self, pred, target):
+        return super(MSELoss, self).forward(pred, target) * self.loss_weight
+    
+@LOSSES.register_module()
+class L1Loss(nn.L1Loss):
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(L1Loss, self).__init__(
+            size_average=size_average, reduce=reduce, reduction=reduction
+        )
+        self.loss_weight = loss_weight
+
+    def forward(self, pred, target):
+        return super(L1Loss, self).forward(pred, target) * self.loss_weight
+    
+@LOSSES.register_module()
+class SmoothL1Loss(nn.SmoothL1Loss):
+    def __init__(
+        self,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(SmoothL1Loss, self).__init__(
+            size_average=size_average, reduce=reduce, reduction=reduction
+        )
+        self.loss_weight = loss_weight
+
+    def forward(self, pred, target):
+        return super(SmoothL1Loss, self).forward(pred, target) * self.loss_weight
+
+@LOSSES.register_module() 
+class CosineEmbeddingLoss(nn.CosineEmbeddingLoss):
+    def __init__(
+        self,
+        margin=0.0,
+        size_average=None,
+        reduce=None,
+        reduction="mean",
+        loss_weight=1.0,
+    ):
+        super(CosineEmbeddingLoss, self).__init__(
+            margin=margin, size_average=size_average, reduce=reduce, reduction=reduction
+        )
+        self.loss_weight = loss_weight
+
+    def forward(self, pred1, pred2, target=None):
+        if target is None:
+            target = torch.ones(pred1.size(0)).to(pred1.device)
+        return super(CosineEmbeddingLoss, self).forward(pred1, pred2, target) * self.loss_weight
