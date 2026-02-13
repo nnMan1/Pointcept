@@ -29,6 +29,9 @@ from pointcept.utils.misc import (
     make_dirs,
 )
 
+from pointcept.utils.metric import InstanceAveragePrecision, InstanceMeanIoU
+
+
 try:
     import pointops
 except:
@@ -534,7 +537,6 @@ class InstSegTester(TesterBase):
         self.min_region_sizes = 100
         self.distance_threshes = float("inf")
         self.distance_confs = -float("inf")
-        from pointcept.utils.metrics import InstanceAveragePrecision, InstanceMeanIoU
         self.metrics = [
             InstanceAveragePrecision(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
             InstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda")
