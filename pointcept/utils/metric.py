@@ -162,7 +162,165 @@ class BinaryStatScores(BaseMetric):
             fn = stats[3]
         )
 
-@METRICS.register_module
+class InstanceMatcher:
+    def __init__(
+        self,
+        class_names,
+        valid_class_names=None,
+        segment_ignore_index=[-1],
+        instance_ignore_index=-1,
+        min_region_size=100
+    ):
+        self.class_names = class_names
+        self.valid_class_names = valid_class_names or [
+            name for name in class_names if name not in segment_ignore_index
+        ]
+        self.segment_ignore_index = segment_ignore_index
+        self.instance_ignore_index = instance_ignore_index
+        self.min_region_size = min_region_size
+        
+    def _assign_per_class_instances(self, pred, gt):
+        pred_instances = {cls: [] for cls in self.valid_class_names}
+        gt_instances = {cls: [] for cls in self.valid_class_names}
+
+        instance_ids, idx, counts = np.unique(
+            gt['instance'], return_index=True, return_counts=True
+        )
+        semantic_ids = gt['segment'][idx]
+
+        void_mask = np.in1d(gt['segment'], self.segment_ignore_index)
+
+        # Ground truth instances
+        for i in range(len(instance_ids)):
+            if instance_ids[i] == self.instance_ignore_index:
+                continue
+            if semantic_ids[i] in self.segment_ignore_index:
+                continue
+            if counts[i] < self.min_region_size:
+                continue
+
+            gt_inst = {
+                "instance_id": instance_ids[i],
+                "segment_id": semantic_ids[i],
+                "dist_conf": 0.0,
+                "med_dist": -1.0,
+                "vert_count": counts[i],
+                "mask": gt['instance'] == instance_ids[i]
+            }
+            cls_name = self.class_names[semantic_ids[i]]
+            gt_instances[cls_name].append(gt_inst)
+
+        # Predictions
+        instance_id = 0
+        for i in range(len(pred["pred_classes"])):
+            if pred["pred_classes"][i] in self.segment_ignore_index:
+                continue
+
+            pred_inst = {
+                "instance_id": instance_id,
+                "segment_id": pred["pred_classes"][i],
+                "confidence": pred["pred_scores"][i],
+                "mask": np.not_equal(pred["pred_masks"][i], 0),
+            }
+            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
+            pred_inst["void_intersection"] = np.count_nonzero(
+                np.logical_and(void_mask, pred_inst["mask"])
+            )
+
+            if pred_inst["vert_count"] < self.min_region_size:
+                continue
+
+            cls_name = self.class_names[pred["pred_classes"][i]]
+            pred_instances[cls_name].append(pred_inst)
+            instance_id += 1
+
+        return pred_instances, gt_instances
+
+    def _compute_iou_matrix(self, preds, gts):
+        if not preds or not gts:
+            return np.zeros((len(preds), len(gts)), dtype=np.float32)
+
+        p_masks = np.stack([p['mask'] for p in preds]).astype(np.float32)
+        g_masks = np.stack([g['mask'] for g in gts]).astype(np.float32)
+
+        intersection = np.dot(p_masks, g_masks.T)
+        
+        p_sums = p_masks.sum(axis=1)[:, None]
+        g_sums = g_masks.sum(axis=1)[None, :]
+        
+        union = p_sums + g_sums - intersection
+        return intersection / (union + 1e-6)
+
+    def match_at_threshold(self, pred_instances, gt_instances, ious_per_class, ov_th):
+        matches = {}
+        for cls in self.valid_class_names:
+            preds = pred_instances.get(cls, [])
+            gts = gt_instances.get(cls, [])
+            if not preds and not gts:
+                matches[cls] = {"y_true": np.array([]), "y_score": np.array([])}
+                continue
+
+            y_true = []
+            y_score = []
+            matched_gt = set()
+
+            # Sort descending by confidence
+            pred_indices = np.argsort([p['confidence'] for p in preds])[::-1]
+
+            for p_idx in pred_indices:
+                best_iou = -1
+                best_index = -1
+
+                for g_idx, gt in enumerate(gts):
+                    if gt['instance_id'] in matched_gt:
+                        continue
+                    iou = ious_per_class[cls][p_idx, g_idx]
+                    if iou > best_iou and iou >= ov_th:
+                        best_iou = iou
+                        best_index = g_idx
+
+                if best_index != -1:
+                    y_true.append(1)
+                    matched_gt.add(gts[best_index]['instance_id'])
+                else:
+                    y_true.append(0)
+
+                y_score.append(preds[p_idx]['confidence'])
+
+            # False negatives
+            num_fn = len(gts) - len(matched_gt)
+            y_true.extend([1] * num_fn)
+            y_score.extend([np.float32("-inf")] * num_fn)
+
+            matches[cls] = {
+                "y_true": np.array(y_true),
+                "y_score": np.array(y_score),
+            }
+
+        return matches
+
+    def assign(self, pred, gt):
+        pred_instances, gt_instances = self._assign_per_class_instances(pred, gt)
+        
+        ious = {}
+        for cls in self.valid_class_names:
+            preds = pred_instances.get(cls, [])
+            gts = gt_instances.get(cls, [])
+            ious[cls] = self._compute_iou_matrix(preds, gts)
+
+        return {
+            "pred_instances": pred_instances,
+            "gt_instances": gt_instances,
+            "ious": ious,
+        }
+
+    def get_matches_at_threshold(self, assignments, ov_th):
+        return self.match_at_threshold(
+            assignments["pred_instances"],
+            assignments["gt_instances"],
+            assignments["ious"],
+            ov_th=ov_th
+        )
 
 # @METRICS.register_module
 class InstanceAveragePrecision(BaseMetric):
@@ -175,7 +333,14 @@ class InstanceAveragePrecision(BaseMetric):
         self.overlaps = overlaps if overlaps is not None else np.sort(np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05))))
         self.device = device
         self.valid_class_names = [name for name in class_names if name not in segment_ignore_index] 
-        self.min_region_size = min_region_size
+
+        self.matcher = InstanceMatcher(
+            class_names=class_names,
+            valid_class_names=self.valid_class_names,
+            segment_ignore_index=segment_ignore_index,
+            instance_ignore_index=instance_ignore_index,
+            min_region_size=min_region_size
+        )
         
         self.metrics = torch.nn.ModuleDict()
         for label in class_names:
@@ -184,123 +349,19 @@ class InstanceAveragePrecision(BaseMetric):
             })
         self.metrics.to(device)
 
-    def _assign_per_class_instances(self, pred, gt):
-        pred_instances = {cls: [] for cls in self.valid_class_names}
-        gt_instances = {cls: [] for cls in self.valid_class_names}
-
-        instance_ids, idx, counts = np.unique(
-            gt['instance'], return_index=True, return_counts=True
-        )
-        semantic_ids = gt['segment'][idx]
-
-        void_mask = np.in1d(gt['segment'], self.segment_ignore_index)
-
-        for i in range(len(instance_ids)):
-            if instance_ids[i] == self.instance_ignore_index:
-                continue
-            if semantic_ids[i] in self.segment_ignore_index:
-                continue
-            if counts[i] < self.min_region_size:        
-                continue
-
-            gt_inst = dict()
-            gt_inst["instance_id"] = instance_ids[i]
-            gt_inst["segment_id"] = semantic_ids[i]
-            gt_inst["dist_conf"] = 0.0
-            gt_inst["med_dist"] = -1.0
-            gt_inst["vert_count"] = counts[i]
-            gt_inst["mask"] = gt['instance'] == instance_ids[i]
-            gt_instances[self.class_names[semantic_ids[i]]].append(gt_inst)
-
-        instance_id = 0
-        for i in range(len(pred["pred_classes"])):
-            if pred["pred_classes"][i] in self.segment_ignore_index:
-                continue
-
-            pred_inst = dict()
-            pred_inst["instance_id"] = instance_id
-            pred_inst["segment_id"] = pred["pred_classes"][i]
-            pred_inst["confidence"] = pred["pred_scores"][i]
-            pred_inst["mask"] = np.not_equal(pred["pred_masks"][i], 0)
-            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
-            pred_inst["void_intersection"] = np.count_nonzero(np.logical_and(void_mask, pred_inst["mask"]))
-
-            if pred_inst["vert_count"] < self.min_region_size:   # ← filtriraj male predikcije
-                continue
-
-            instance_id += 1
-            pred_instances[self.class_names[pred["pred_classes"][i]]].append(pred_inst)
-
-        return pred_instances, gt_instances
-
-    def _compute_iou_matrix(self, preds, gts):
-        iou_matrix = np.zeros((len(preds), len(gts)), dtype=np.float32)
-
-        for gt_idx, gt in enumerate(gts):
-            for pred_idx, pred in enumerate(preds):
-                intersections = np.logical_and(pred['mask'], gt['mask']).sum()
-                unions = np.logical_or(pred['mask'], gt['mask']).sum()
-                iou = intersections / unions if unions > 0 else 0
-                iou_matrix[pred_idx, gt_idx] = iou
-
-        return iou_matrix
-
-    def _match_instances(self, pred_instances, gt_instances, ious, ov_th=0.5):
-        matches = {}
-        for cls in self.valid_class_names:
-            preds = pred_instances[cls]
-            gts = gt_instances[cls]
-            y_true = []
-            y_score = []
-            matched_gt = set()
-
-            pred_indices = np.argsort([p['confidence'] for p in preds])[::-1]
-
-            for p_idx in pred_indices:
-                best_iou = -1
-                best_index = -1
-
-                for g_idx, gt in enumerate(gts):
-                    if gt['instance_id'] in matched_gt:
-                        continue
-
-                    iou = ious[cls][p_idx, g_idx]
-                    if iou > best_iou and iou >= ov_th:
-                        best_iou = iou
-                        best_index = g_idx
-
-                if best_index != -1:
-                    y_true.append(1)
-                    matched_gt.add(gts[best_index]['instance_id'])
-                else:
-                    y_true.append(0)
-                    
-                y_score.append(preds[p_idx]['confidence'])
-
-            num_fn = len(gts) - len(matched_gt)
-            for _ in range(num_fn):
-                y_true.append(1)
-                y_score.append(np.float32("-inf"))
-
-            matches[cls] = {
-                "y_true": np.array(y_true),
-                "y_score": np.array(y_score)
-            }
-
-        return matches
-
-    def update(self, pred, gt):
+    def update(self, pred_dict, gt_dict):
 
         for key in 'pred_classes', 'pred_scores', 'pred_masks':
-            if key not in pred:
+            if key not in pred_dict:
                 raise ValueError(f"Missing key '{key}' in predictions")
             
         for key in 'segment', 'instance':
-            if key not in gt:
+            if key not in gt_dict:
                 raise ValueError(f"Missing key '{key}' in ground truth")
 
-        pred_instances, gt_instances = self._assign_per_class_instances(pred, gt)
-        ious = {cls: self._compute_iou_matrix(pred_instances[cls], gt_instances[cls]) for cls in self.valid_class_names}
+        assignments = self.matcher.assign(pred_dict, gt_dict)
+        pred_instances = assignments["pred_instances"]
+        gt_instances = assignments["gt_instances"]
 
         for cls in self.class_names:
             if cls not in pred_instances:
@@ -308,9 +369,8 @@ class InstanceAveragePrecision(BaseMetric):
             if cls not in gt_instances:
                 gt_instances[cls] = []
 
-
         for ov_th in self.overlaps:
-            matches_per_ov = self._match_instances(pred_instances, gt_instances, ious, ov_th=ov_th)
+            matches_per_ov = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
             for cls in self.class_names:
                 matches = matches_per_ov[cls]
                 y_true = matches["y_true"]
@@ -350,6 +410,7 @@ class InstanceAveragePrecision(BaseMetric):
 
         return results
     
+
 METRICS.register_module(module=torchmetrics.Accuracy, name="Accuracy")
 METRICS.register_module(module=torchmetrics.Precision, name="Precision")
 METRICS.register_module(module=torchmetrics.Recall, name="Recall")
