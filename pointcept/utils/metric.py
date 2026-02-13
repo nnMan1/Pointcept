@@ -253,6 +253,9 @@ class InstanceMatcher:
 
     def match_at_threshold(self, pred_instances, gt_instances, ious_per_class, ov_th):
         matches = {}
+        iou_sums = {}
+        tp_counts = {}
+
         for cls in self.valid_class_names:
             preds = pred_instances.get(cls, [])
             gts = gt_instances.get(cls, [])
@@ -282,6 +285,8 @@ class InstanceMatcher:
                 if best_index != -1:
                     y_true.append(1)
                     matched_gt.add(gts[best_index]['instance_id'])
+                    iou_sums[cls] = iou_sums.get(cls, 0.0) + best_iou
+                    tp_counts[cls] = tp_counts.get(cls, 0) + 1
                 else:
                     y_true.append(0)
 
@@ -297,7 +302,7 @@ class InstanceMatcher:
                 "y_score": np.array(y_score),
             }
 
-        return matches
+        return matches, iou_sums, tp_counts
 
     def assign(self, pred, gt):
         pred_instances, gt_instances = self._assign_per_class_instances(pred, gt)
@@ -370,7 +375,7 @@ class InstanceAveragePrecision(BaseMetric):
                 gt_instances[cls] = []
 
         for ov_th in self.overlaps:
-            matches_per_ov = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
+            matches_per_ov, _, _ = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
             for cls in self.class_names:
                 matches = matches_per_ov[cls]
                 y_true = matches["y_true"]
@@ -410,6 +415,100 @@ class InstanceAveragePrecision(BaseMetric):
 
         return results
     
+# @METRICS.register_module()
+class InstanceMeanIoU(BaseMetric):
+
+    def __init__(
+        self,
+        num_classes,
+        class_names,
+        segment_ignore_index=[-1],
+        instance_ignore_index=-1,
+        min_region_size=100,
+        overlaps=None,
+        device="cuda",
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.segment_ignore_index = segment_ignore_index
+        self.instance_ignore_index = instance_ignore_index
+        self.overlaps = overlaps if overlaps is not None else np.sort(
+            np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05)))
+        )
+        self.device = device
+        self.valid_class_names = [
+            name for name in class_names if name not in segment_ignore_index
+        ]
+
+        self.matcher = InstanceMatcher(
+            class_names=class_names,
+            valid_class_names=self.valid_class_names,
+            segment_ignore_index=segment_ignore_index,
+            instance_ignore_index=instance_ignore_index,
+            min_region_size=min_region_size
+        )
+
+        self.iou_sums = {
+            label: torch.zeros(len(self.overlaps), dtype=torch.float64, device=device)
+            for label in class_names
+        }
+        self.tp_counts = {
+            label: torch.zeros(len(self.overlaps), dtype=torch.long, device=device)
+            for label in class_names
+        }
+
+    def update(self, pred_dict, gt_dict):
+        assignments = self.matcher.assign(pred_dict, gt_dict)
+
+        for i, ov_th in enumerate(self.overlaps):
+            matches, iou_sums_ov, tp_counts_ov = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
+
+            for cls in self.class_names:
+                self.iou_sums[cls][i] += iou_sums_ov.get(cls, 0.0)
+                self.tp_counts[cls][i] += tp_counts_ov.get(cls, 0)
+
+    def compute(self):
+        results = {}
+
+        for cls in self.class_names:
+            results[cls] = {}
+            for i, ov in enumerate(self.overlaps):
+                tp = self.tp_counts[cls][i].item()
+                if tp > 0:
+                    mean_iou = self.iou_sums[cls][i].item() / tp
+                    results[cls][f"mIoU@{int(ov*100):02d}"] = mean_iou
+                else:
+                    results[cls][f"mIoU@{int(ov*100):02d}"] = 0.0
+
+            iou_values = [
+                results[cls].get(f"mIoU@{int(ov*100):02d}", 0.0)
+                for ov in self.overlaps
+            ]
+            results[cls]["mIoU"] = np.mean(iou_values) if iou_values else 0.0
+
+        valid_classes = [cls for cls in self.class_names if cls in results]
+        if valid_classes:
+            for i, ov in enumerate(self.overlaps):
+                key = f"mIoU@{int(ov*100):02d}"
+                values = [results[cls].get(key, 0.0) for cls in valid_classes]
+                results[f"m{key}"] = float(np.mean(values))
+
+            all_values = []
+            for cls in valid_classes:
+                for ov in self.overlaps:
+                    key = f"mIoU@{int(ov*100):02d}"
+                    all_values.append(results[cls].get(key, 0.0))
+            results["mIoU"] = float(np.mean(all_values)) if all_values else 0.0
+
+        return results
+
+    def reset(self):
+        """Resetira brojače ako želiš koristiti istu instancu više puta"""
+        for cls in self.class_names:
+            self.iou_sums[cls].zero_()
+            self.tp_counts[cls].zero_()
 
 METRICS.register_module(module=torchmetrics.Accuracy, name="Accuracy")
 METRICS.register_module(module=torchmetrics.Precision, name="Precision")

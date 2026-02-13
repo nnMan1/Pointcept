@@ -534,8 +534,11 @@ class InstSegTester(TesterBase):
         self.min_region_sizes = 100
         self.distance_threshes = float("inf")
         self.distance_confs = -float("inf")
-        from pointcept.utils.metric import InstanceAveragePrecision
-        self.metrics = InstanceAveragePrecision(class_names=self.valid_class_names, overlaps=self.overlaps, device="cuda")
+        from pointcept.utils.metrics import InstanceAveragePrecision, InstanceMeanIoU
+        self.metrics = [
+            InstanceAveragePrecision(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
+            InstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda")
+        ]
 
     def test(self):
         assert self.test_loader.batch_size == 1
@@ -555,8 +558,6 @@ class InstSegTester(TesterBase):
                     data_dict[key] = data_dict[key].cuda(non_blocking=True)
             with torch.no_grad():
                 output_dict = self.model(data_dict)
-                segment = data_dict["origin_segment"]
-                instance = data_dict["origin_instance"]
 
             if "origin_coord" in data_dict.keys():
                 reverse, _ = pointops.knn_query(
@@ -568,14 +569,16 @@ class InstSegTester(TesterBase):
                 )
                 reverse = reverse.cpu().flatten().long()
                 output_dict["pred_masks"] = output_dict["pred_masks"][:, reverse]
-                segment = data_dict["origin_segment"]
-                instance = data_dict["origin_instance"]
+                data_dict['segment'] = data_dict["origin_segment"]
+                data_dict['instance'] = data_dict["origin_instance"]
 
-            gt_instances, pred_instance = self.associate_instances(
-                output_dict, segment, instance
-            )
+    
+            for metric in self.metrics:
+                metric.update(output_dict, {
+                    "segment": data_dict['segment'].cpu(),
+                    "instance": data_dict['instance'].cpu()
+                })
 
-            self.metrics.update(pred_instance, gt_instances)
             batch_time.update(time.time() - start)
             logger.info(
                 "Test: {} [{}/{}] "
@@ -596,27 +599,31 @@ class InstSegTester(TesterBase):
                 )
 
        
-        ap_scores = self.metrics.compute()
+        ap_scores = self.metrics[0].compute()
+        iou_scores = self.metrics[1].compute()
         ap = ap_scores["mAP"]
-        ap_50 = ap_scores["mAP_50"]
-        ap_25 = ap_scores["mAP_25"]
+        ap_50 = ap_scores["mAP50"]
+        ap_25 = ap_scores["mAP25"]
+        mmIoU_50 = iou_scores["mmIoU@50"]
 
 
         logger.info(
-            "Val result: mAP/AP50/AP25 {:.4f}/{:.4f}/{:.4f}.".format(
-                ap, ap_50, ap_25
+            "Val result: mAP/AP50/AP25/mIoU@50 {:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                ap, ap_50, ap_25, mmIoU_50
             )
         )
         
         for i, label_name in enumerate(self.valid_class_names):
             ap = ap_scores[label_name]["AP"]
-            ap_50 = ap_scores[label_name]["AP_50"]
-            ap_25 = ap_scores[label_name]["AP_25"]
+            ap_50 = ap_scores[label_name]["AP50"]
+            ap_25 = ap_scores[label_name]["AP25"]
+            mIoU50 = iou_scores[label_name]["mIoU@50"]
             logger.info(
-                "Class_{idx}-{name} Result: AP/AP50/AP25 {AP:.4f}/{AP50:.4f}/{AP25:.4f}".format(
-                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25
+                "Class_{idx}-{name} Result: AP/AP50/AP25/mIoU@50 {AP:.4f}/{AP50:.4f}/{AP25:.4f}/{mIoU50:.4f}".format(
+                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25, mIoU50=mIoU50
                 )
             )
+
 
         logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
 
