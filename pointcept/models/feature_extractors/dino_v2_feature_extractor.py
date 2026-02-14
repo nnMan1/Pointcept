@@ -91,6 +91,7 @@ class DinoV2FeatureExtractor(BaseFeatureExtractor):
                     mesh_features[bs:be][mappings_tgt] += features[a, b, c]
                     mesh_features_cnt[bs:be][mappings_tgt] += 1
                 elif self.merge_strategy == 'mean':
+                    print(mappings_src.shape)
                     for i in range(ibe - ibs):
                         mask = (mappings_src[:, 0] == i)
                         if torch.sum(mask) == 0:

@@ -926,6 +926,16 @@ class GridSample(object):
             hashed_arr = np.bitwise_xor(hashed_arr, arr[:, j])
         return hashed_arr
 
+@TRANSFORMS.register_module()
+class ClassMapping(object):
+
+    def __init__(self, mapping, key='segment'):
+        self.mapping = np.asarray(mapping)
+        self.key = key
+
+    def __call__(self, input_dict):
+        input_dict[self.key] = self.mapping[input_dict[self.key]]
+        return input_dict
 
 @TRANSFORMS.register_module()
 class SphereCrop(object):

@@ -173,7 +173,7 @@ class HDF5_Dataset(Dataset):
                 point2face = point2face[mask]
                 
                 coords = np.array(view['pc']).reshape(-1, 3)
-                
+        
                 data['images'].append(img)
                 data['coord'].append(coords[mask])
                 data['normal'].append(mesh_normals[point2face])
@@ -194,8 +194,24 @@ class HDF5_Dataset(Dataset):
 
                 point_offset += n_points
 
-        data['mappings_src'] = np.concatenate(data['mappings_src'], axis=0)
-        data['mappings_tgt'] = np.concatenate(data['mappings_tgt'], axis=0)
+        for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src', 'mappings_tgt']:
+            if len(data[key]) > 0:
+                data[key] = np.concatenate(data[key], axis=0)
+        
+        keep_ids = np.arange(len(data['coord']))
+        while len(keep_ids) > 40000:
+            keep_ids = keep_ids[::2]
+
+        for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src']:
+            data[key] = data[key][keep_ids]
+
+        data['mappings_tgt'] = np.arange(len(data['mappings_src']))
+
+        while np.linalg.norm(data['coord'].max(0) - data['coord'].min(0)) < 50:
+            data['coord'] *= 2
+
+        if len(keep_ids) < 1000:
+            return self.get_data(idx + 1)
 
         for ftk_key in self.load_features:
             h5_path = self.load_features[ftk_key][data['name']]
@@ -212,10 +228,7 @@ class HDF5_Dataset(Dataset):
             # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape, data['mappings_src'].shape, np.concatenate(data['coord'], axis=0).shape)
             data[ftk_key] = data[ftk_key][data['mappings_src'][:, 0], data['mappings_src'][:, 1] // 16, data['mappings_src'][:, 2] // 16] # Map from image pixel to point
             # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape)
-
-        for key in ['coord', 'normal', 'segment', 'instance']:
-            if len(data[key]) > 0:
-                data[key] = np.concatenate(data[key], axis=0)
+            data[ftk_key] = data[ftk_key][keep_ids]
 
         return data     
 

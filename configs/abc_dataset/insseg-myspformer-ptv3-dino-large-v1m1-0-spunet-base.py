@@ -138,7 +138,7 @@ model = dict(
 
 # scheduler settings
 epoch = 500
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
+optimizer = dict(type="AdamW", lr=0.001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -172,6 +172,7 @@ data = dict(
         data_root=data_root,
         load_images=True,
         transform=[
+            dict(type="ClassMapping", mapping=[0, 0, 0], key="segment"),
             dict(type="CenterShift", apply_z=True),
             # dict(
             #     type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
@@ -201,7 +202,7 @@ data = dict(
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance"),
+                keys=("coord", "normal", "segment", "instance", "mappings_src", "mappings_tgt"),
             ),
             # dict(type="SphereCrop",  point_max=200000, mode="random"),
             dict(
@@ -245,6 +246,7 @@ data = dict(
         data_root=data_root,
         load_images=True,
         transform=[
+            dict(type="ClassMapping", mapping=[0, 0, 0], key="segment"),
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="Copy",
