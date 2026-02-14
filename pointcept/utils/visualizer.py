@@ -58,7 +58,7 @@ class PointCloudVisuzlizer(BaseVisualizer):
             color = to_numpy(data['color'])
         else:
             if 'label' in data:
-                color = colors[to_numpy(data['labels'])]
+                color = colors[to_numpy(data['label'])]
             else:
                 color = np.ones_like(to_numpy(data['coord'])) * 0.5
 
@@ -137,7 +137,7 @@ class PointCloudFeatureVisualizer(PointCloudVisuzlizer, FeatureVisualizer):
 
         color = self.pca_features(data['feat'])
 
-        return super()({'coord': data['coord'], 'color': color}, sample_id)
+        return super().__call__({'coord': data['coord'], 'color': color}, sample_id)
 
 class TrimeshFeatureBisualizer(TrimeshVisualizer, FeatureVisualizer):
 
@@ -148,7 +148,7 @@ class TrimeshFeatureBisualizer(TrimeshVisualizer, FeatureVisualizer):
 
         color = self.pca_features(data['feat'])
 
-        return super()({'coord': data['coord'], 'faces': data['faces'], 'color': color}, sample_id)
+        return super().__call__({'coord': data['coord'], 'faces': data['faces'], 'color': color}, sample_id)
 
 
 #TODO: Replace PIL with cv2
