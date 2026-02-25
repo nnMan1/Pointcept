@@ -139,10 +139,12 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= 16
-                        c //= 16
 
-                        mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
+                        image_fts = features[i][None, ...].permute(0, 3, 1, 2)
+                        image_fts = nn.Upsample(size=256, mode='bilinear')(image_fts)
+                        image_fts = image_fts.permute(0, 2, 3, 1)
+
+                        mesh_features[bs:be][selected_mappings_tgt] += image_fts[0, b // 2, c //2]
                         mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
                 elif self.merge_strategy == 'max':
                     for i in range(ibe - ibs):
@@ -152,10 +154,12 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= 16
-                        c //= 16
 
-                        mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c]) 
+                        image_fts = features[i][None, ...].permute(0, 3, 1, 2)
+                        image_fts = nn.Upsample(size=256, mode='bilinear')(image_fts)
+                        image_fts = image_fts.permute(0, 2, 3, 1)
+
+                        mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], image_fts[0, b // 2, c //2]) 
                         mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
 
 
