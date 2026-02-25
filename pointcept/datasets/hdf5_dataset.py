@@ -199,7 +199,7 @@ class HDF5_Dataset(Dataset):
                 data[key] = np.concatenate(data[key], axis=0)
         
         keep_ids = np.arange(len(data['coord']))
-        while len(keep_ids) > 40000:
+        while len(keep_ids) > 400000:
             keep_ids = keep_ids[::2]
 
         for key in ['coord', 'normal', 'segment', 'instance', 'mappings_src']:
@@ -207,8 +207,11 @@ class HDF5_Dataset(Dataset):
 
         data['mappings_tgt'] = np.arange(len(data['mappings_src']))
 
-        while np.linalg.norm(data['coord'].max(0) - data['coord'].min(0)) < 50:
+        while np.linalg.norm(data['coord'].max(axis=0) - data['coord'].min(axis=0)) < 80:
             data['coord'] *= 2
+
+        while np.linalg.norm(data['coord'].max(axis=0) - data['coord'].min(axis=0)) > 400:
+            data['coord'] /= 2
 
         if len(keep_ids) < 1000:
             return self.get_data(idx + 1)
@@ -225,10 +228,11 @@ class HDF5_Dataset(Dataset):
 
             f = self.open_features_files[h5_path]
             data[ftk_key] = np.asarray(f[data['name']]['features'])
+
             # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape, data['mappings_src'].shape, np.concatenate(data['coord'], axis=0).shape)
-            data[ftk_key] = data[ftk_key][data['mappings_src'][:, 0], data['mappings_src'][:, 1] // 16, data['mappings_src'][:, 2] // 16] # Map from image pixel to point
+            # data[ftk_key] = data[ftk_key][data['mappings_src'][:, 0], data['mappings_src'][:, 1] // 16, data['mappings_src'][:, 2] // 16] # Map from image pixel to point
             # print("Loaded features for", data['name'], "with shape", data[ftk_key].shape)
-            data[ftk_key] = data[ftk_key][keep_ids]
+            # data[ftk_key] = data[ftk_key][keep_ids]
 
         return data     
 
