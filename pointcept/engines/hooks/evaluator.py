@@ -339,6 +339,9 @@ class InsSegEvaluator(HookBase):
 
     def after_epoch(self):
         if self.trainer.cfg.evaluate:
+            for metric in self.metrics:
+                metric.reset()
+                
             self.eval()
 
     def eval(self):

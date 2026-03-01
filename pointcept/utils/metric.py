@@ -329,6 +329,7 @@ class InstanceMatcher:
 
 # @METRICS.register_module
 class InstanceAveragePrecision(BaseMetric):
+    
     def __init__(self, num_classes, class_names, segment_ignore_index=[-1], instance_ignore_index=-1, min_region_size=100, overlaps=None, device="cuda", **kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
@@ -415,6 +416,10 @@ class InstanceAveragePrecision(BaseMetric):
 
         return results
     
+    def reset(self):
+        for metric in self.metrics.values():
+            metric.reset()
+
 # @METRICS.register_module()
 class InstanceMeanIoU(BaseMetric):
 
