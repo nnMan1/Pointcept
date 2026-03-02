@@ -417,8 +417,9 @@ class InstanceAveragePrecision(BaseMetric):
         return results
     
     def reset(self):
-        for metric in self.metrics.values():
-            metric.reset()
+        for label in self.class_names:
+             for ov in self.overlaps:
+                self.metrics[label][f"ap_{int(ov*100)}"].reset()
 
 # @METRICS.register_module()
 class InstanceMeanIoU(BaseMetric):
