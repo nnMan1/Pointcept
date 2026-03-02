@@ -26,9 +26,11 @@ model = dict(
         backbone=dict(
         type="MergeFeatures",
         model1_config=dict(
-            type="DinoV2FeatureExtractor",
+            type="Image2PointCLoud",
+            model_type="DinoV2",
             fts_dim=384,
-            merge_strategy='random_sample',
+            out_fts_dim=256,
+            merge_strategy='mean',
             return_features=['feat'],
             freeze_backbone=True,
             freeze_backbone_bn=True
@@ -73,7 +75,7 @@ model = dict(
      ),
     decoder=dict(
         in_channels=32,
-        hlevels=6,
+        hlevels=4,
         mask_modules=[
             dict(
                 num_classes=num_classes, 
@@ -83,22 +85,6 @@ model = dict(
             )
         ],
         query_refinement_modules=[
-            dict(
-                in_channels=128,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
-            dict(
-                in_channels=128,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
-            ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
@@ -141,7 +127,8 @@ model = dict(
             dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
         ],
         instance_ignore_index=-1
-    )
+    ),
+    use_superpoint_pooling=False
 )
 
 
@@ -159,7 +146,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
+data_root = "data/segment-assembly-merged-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
