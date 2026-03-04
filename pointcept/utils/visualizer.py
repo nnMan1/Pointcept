@@ -58,13 +58,16 @@ class PointCloudVisuzlizer(BaseVisualizer):
             color = to_numpy(data['color'])
         else:
             if 'label' in data:
-                color = colors[to_numpy(data['label'])]
+                color = colors[to_numpy(data['label']) % len(colors)]
             else:
                 color = np.ones_like(to_numpy(data['coord'])) * 0.5
 
         geom = o3d.geometry.PointCloud()
         geom.points = o3d.utility.Vector3dVector(to_numpy(data['coord']))
         geom.colors = o3d.utility.Vector3dVector(color)
+
+        if 'normal' in data:
+            geom.normals = o3d.utility.Vector3dVector(to_numpy(data['normal']))
 
         if sample_id is not None:
             o3d.io.write_point_cloud(self.name_from_id(sample_id), geom)

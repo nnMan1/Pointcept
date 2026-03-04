@@ -13,7 +13,8 @@ from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 
 
-@DATASETS.register_module()
+
+# @DATASETS.register_module()
 class PartNet(Dataset):
 
     class_ids = {
@@ -303,20 +304,172 @@ class PartNet(Dataset):
     def __len__(self):
         return len(self.data_list) * self.loop
 
-# if __name__ == '__main__':
+# @DATASETS.register_module()
+class PartNetInstance(Dataset):
 
-#     ds = PartNet(categories=['Earphone-1', 'Faucet-1'])
+    class_ids = {
+        "Bag": 0, "Bottle": 1, "Chair": 2, "Dishwasher": 3,
+        "Door": 4, "Faucet": 5, "Keyboard": 6, "Lamp": 7,
+        "Microwave": 8, "Refrigerator": 9, "StorageFurniture": 10,
+        "TrashCan": 11, "Bed": 12, "Bowl": 13, "Clock": 14,
+        "Display": 15, "Earphone": 16, "Hat": 17, "Knife": 18,
+        "Laptop": 19, "Mug": 20, "Scissors": 21, "Table": 22,
+        "Vase": 23
+    }
 
-#     mc, mf, nc, nf = -1, -1, 1000, 1000
+    def __init__(
+        self,
+        split="train",
+        data_root="data/Partnet/data/partnet/ins_seg_h5",
+        categories: Optional[Union[str, List[str]]] = None,
+        transform=None,
+        ignore_index=-1,
+        test_mode=False,
+        cache=False,
+        loop=1,
+    ):
+        super().__init__()
 
-#     for i, t in enumerate(ds):
-#         if t['category'] == 'Earphone-1':
-#             mc = max(mc, t['segment'].max())
-#             nc = min(nc, t['segment'].max())
-#         else:
-#             mf = max(mf, t['segment'].max())
-#             nf = min(nf, t['segment'].max())
+        if categories is None:
+            categories = list(self.class_ids.keys())
+        if isinstance(categories, str):
+            categories = [categories]
 
-#         print(i, mc, nc, nf, mf, len(ds))
+        assert all(c in self.class_ids for c in categories)
 
-    # print(mc, mf)
+        self.categories = categories
+        self.split = split
+        self.data_root = data_root
+        self.transform = transform
+        self.ignore_index = ignore_index
+        self.test_mode = test_mode
+        self.cache = cache
+        self.loop = loop if not test_mode else 1
+
+        self.data_list = self.get_data_list()
+        self.cache_dict = {} if cache else None
+
+        print(f"Loaded {len(self.data_list)} samples x {self.loop} loop")
+
+
+    def get_data_list(self):
+
+        data_list = []
+
+        for category in self.categories:
+            category_dir = os.path.join(self.data_root, category)
+
+            if not os.path.exists(category_dir):
+                continue
+
+            pattern = f"{self.split}-*.h5"
+            files = sorted(glob.glob(os.path.join(category_dir, pattern)))
+
+            for file in files:
+                samples = self.load_h5(file)
+                
+                for i in range(len(samples['coord'])):
+                    data_list.append({
+                        "h5_path": file,
+                        "offset": i,
+                        "category": category,
+                    })
+                
+        return data_list
+
+    def load_h5(self, path):
+        
+        data = {}
+
+        with h5py.File(path, "r") as f:
+            data['coord'] = f["pts"][:]          # (N, num_points, 3)
+            data['instance'] = f["label"][:]    # (N, num_points)
+            data['color'] = f["rgb"][:]
+            data['normal'] = f["nor"][:]
+
+        return data
+
+    def get_data(self, idx):
+
+        idx = idx % len(self.data_list)
+        info = self.data_list[idx]
+        path = info["h5_path"]
+        category = info["category"]
+        sample_id = info["offset"]
+
+        if self.cache and idx in self.cache_dict:
+            file = self.cache_dict[idx]
+        else:
+            file = self.load_h5(path)
+            if self.cache:
+                self.cache_dict[idx] = file
+
+
+        coord = file['coord'][sample_id]              
+        instance =  file['instance'][sample_id]  
+        color = file['color'][sample_id]    
+        normal = file['normal'][sample_id] 
+    
+        data_dict = dict(
+            coord=coord.astype(np.float32),
+            instance=instance.astype(np.int64),
+            category=category,
+            category_id=self.class_ids[category],
+            color=color,
+            normal=normal
+        )
+
+        return data_dict
+
+    def __getitem__(self, idx):
+
+        data_dict = self.get_data(idx)
+
+        if self.transform is not None:
+            data_dict = self.transform(data_dict)
+
+        return data_dict
+
+    def __len__(self):
+        return len(self.data_list) * self.loop
+
+if __name__ == '__main__':
+    from pointcept.utils.visualizer import PointCloudVisuzlizer, ImageVisualizer
+    visualizer = PointCloudVisuzlizer(".", "ply")
+    img_visualizer = ImageVisualizer(save_path='.', extension="png")
+    from common_tools.pointcloud_scanner import MultiviewCamera
+    import trimesh
+
+    dataset = PartNetInstance(
+        split='train',
+        data_root='/home/data/Partnet/data/partnet/ins_seg_h5',
+        categories=['Keyboard']
+    )
+
+    camera = MultiviewCamera(20, point_size=5)
+
+    for i, sample in enumerate(dataset):
+        visualizer({
+            'coord': sample['coord'],
+            'color': sample['color'] / 255,
+            'normal': sample['normal']
+        }, f'sample_{i}')
+
+        mesh = trimesh.PointCloud(vertices=sample['coord'], 
+                               vertex_normals=sample['normal'], 
+                               vertex_colors=sample['color'] / 255, 
+                               process=False)
+        
+        data = camera(mesh)
+        
+        for j, image in enumerate(data['images']):
+            img_visualizer({
+                'image': image
+            }, f'sample_{i}_{j}')
+
+        if i > 10:
+            break
+
+    
+
+    
