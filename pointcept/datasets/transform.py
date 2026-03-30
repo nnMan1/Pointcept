@@ -17,13 +17,19 @@ import numpy as np
 import torch
 import copy
 import open3d as o3d
+import trimesh
 from sklearn.neighbors import NearestNeighbors
-
 from collections.abc import Sequence, Mapping
-
 from pointcept.utils.registry import Registry
-
 from torch_geometric import nn
+import torch.nn.functional as F
+import torchvision.transforms.v2 as transforms
+
+
+try:
+    from common_tools.pointcloud_scanner import MultiviewCamera as PointCloudScanner
+except Exception as e:
+    print(e)
 
 TRANSFORMS = Registry("transforms")
 
@@ -57,7 +63,6 @@ class Collect(object):
             data[name] = torch.cat([data_dict[key].float() for key in keys], dim=1)
         return data
 
-
 @TRANSFORMS.register_module()
 class Copy(object):
     def __init__(self, keys_dict=None):
@@ -74,7 +79,6 @@ class Copy(object):
             else:
                 data_dict[value] = copy.deepcopy(data_dict[key])
         return data_dict
-
 
 @TRANSFORMS.register_module()
 class ToTensor(object):
@@ -103,6 +107,111 @@ class ToTensor(object):
         else:
             raise TypeError(f"type {type(data)} cannot be converted to tensor.")
 
+@TRANSFORMS.register_module()
+class ImgResize(object):
+
+    INTERPOLATIONS = {
+        'bilinear': transforms.InterpolationMode.BILINEAR
+    }
+
+    def __init__(self, target_size, keys, interpolation="bilinear", align_corners=False):
+
+        if isinstance(target_size, int):
+            self.target_size = (target_size, target_size)
+        else:
+            self.target_size = target_size
+        
+        self.resize = transforms.Resize(self.target_size, self.INTERPOLATIONS[interpolation])
+        self.keys = keys
+
+    def __call__(self, data_dict):
+
+        for key in self.keys:
+            img = np.ascontiguousarray(data_dict[key])
+            img = torch.from_numpy(img).float()   
+
+            data_dict[key] = self.resize(img).numpy()                    
+
+        return data_dict
+
+@TRANSFORMS.register_module()
+class ImgNormalize(object):
+    def __init__(self, mean, std, key):
+
+        self.mean = mean
+        self.std = std
+        self.key = key
+        self.normalization = transforms.Normalize(mean, std)
+
+    def __call__(self, data_dict):
+        if data_dict[self.key].max() > 1:
+            data_dict[self.key] = data_dict[self.key] / 225
+        data_dict[self.key] = torch.Tensor(data_dict[self.key]).float()
+        data_dict[self.key] = self.normalization(data_dict[self.key]).numpy()
+        return data_dict
+
+@TRANSFORMS.register_module()
+class Permute(object):
+    def __init__(self, key, permutation):
+        self.key = key
+        self.permutation = permutation
+
+    def __call__(self, data_dict):
+        data_dict[self.key] = np.transpose(data_dict[self.key], self.permutation)
+        return data_dict
+
+@TRANSFORMS.register_module()
+class PointCloudMultiView:
+    def __init__(self, num_views=20, image_size=(512, 512), point_size=5):
+        self.num_views=num_views
+        self.image_size = image_size
+
+        if isinstance(image_size, int):
+            self.image_size = (image_size, image_size)
+
+        self.scanner = PointCloudScanner(num_views, image_size, point_size)
+
+    def __call__(self, data_dict):
+
+        mesh_dict = dict(
+            vertices=data_dict['coord'].copy()
+        )
+
+        if 'nomal' in data_dict.keys():
+            mesh_dict['vertex_normals']=data_dict['normal'].copy()
+
+        if 'color' in data_dict.keys():
+            mesh_dict['vertex_colors'] = data_dict['color'].copy()
+
+            if data_dict['color'].max() >= 1:
+                mesh_dict['vertex_colors'] = mesh_dict['vertex_colors']  / 255
+
+        mesh = trimesh.PointCloud(process=False, **mesh_dict)
+
+        renders = self.scanner(mesh)  
+
+        data_dict['images'] = np.stack(renders['images'])
+        data_dict['mappings_src'] = []
+        data_dict['mappings_tgt'] = []
+
+        for i in range(self.num_views):
+            pixel_ids = renders['pixel_ids'][i]
+            point_ids = renders['point_ids'][i]
+
+            data_dict['mappings_src'].append(
+                np.stack([
+                    np.full(len(pixel_ids), i, dtype=np.int32), 
+                    pixel_ids // self.image_size[1],                            
+                    pixel_ids % self.image_size[1],                          
+                ]).T
+            )
+
+            data_dict['mappings_tgt'].append(point_ids)
+
+        data_dict['mappings_src'] = np.concatenate(data_dict['mappings_src'])
+        data_dict['mappings_tgt'] = np.concatenate(data_dict['mappings_tgt'])
+
+        return data_dict
 
 @TRANSFORMS.register_module()
 class Add(object):
@@ -116,14 +225,12 @@ class Add(object):
             data_dict[key] = value
         return data_dict
 
-
 @TRANSFORMS.register_module()
 class NormalizeColor(object):
     def __call__(self, data_dict):
         if "color" in data_dict.keys():
             data_dict["color"] = data_dict["color"] / 127.5 - 1
         return data_dict
-
 
 @TRANSFORMS.register_module()
 class NormalizeCoord(object):
@@ -136,7 +243,6 @@ class NormalizeCoord(object):
             data_dict["coord"] = data_dict["coord"] / m
         return data_dict
 
-
 @TRANSFORMS.register_module()
 class PositiveShift(object):
     def __call__(self, data_dict):
@@ -144,7 +250,6 @@ class PositiveShift(object):
             coord_min = np.min(data_dict["coord"], 0)
             data_dict["coord"] -= coord_min
         return data_dict
-
 
 @TRANSFORMS.register_module()
 class CenterShift(object):
@@ -162,7 +267,6 @@ class CenterShift(object):
             data_dict["coord"] -= shift
         return data_dict
 
-
 @TRANSFORMS.register_module()
 class RandomShift(object):
     def __init__(self, shift=((-0.2, 0.2), (-0.2, 0.2), (0, 0))):
@@ -175,7 +279,6 @@ class RandomShift(object):
             shift_z = np.random.uniform(self.shift[2][0], self.shift[2][1])
             data_dict["coord"] += [shift_x, shift_y, shift_z]
         return data_dict
-
 
 @TRANSFORMS.register_module()
 class PointClip(object):

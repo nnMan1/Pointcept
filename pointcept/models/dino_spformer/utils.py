@@ -47,6 +47,11 @@ def select_masks(out, superpoints):
         labels = labels[npoint_mask]  # (n_p,)
         mask_pred = mask_pred[npoint_mask]  # (n_p, N)
 
+        nms_idx = nms(mask_pred.T, scores, 0.3)
+        scores = scores[nms_idx]  # (n_p,)
+        labels = labels[nms_idx]  # (n_p,)
+        mask_pred = mask_pred[nms_idx]  # (n_p, N)
+
         cls_pred = labels.cpu().numpy()
         score_pred = scores.cpu().numpy()
         mask_pred = mask_pred.cpu().numpy()
