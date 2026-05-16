@@ -5,7 +5,8 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
-    shm_size: '128gb'
+    shm_size: '178gb'
+    memswap_limit: 121g
     build: 
       context: .
       dockerfile: Dockerfile
@@ -22,9 +23,9 @@ services:
       - ${DATA_PATH}:/home/data
     deploy:
       resources:
-        # limits:
-        #   memory: 10G
-        #   cpus: '0.8'
+        limits:
+          memory: 120G
+        #  cpus: '0.8'
         reservations:
           devices:
             - driver: nvidia

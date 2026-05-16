@@ -20,7 +20,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 	  libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 \
 	  libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 \
 	  libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils \
-      ffmpeg libsm6 libxext6  -y \
+      ffmpeg libsm6 libxext6   -y \
 	&& apt autoremove -y \
 	&& apt clean -y \
 	&& export DEBIAN_FRONTEND=dialog
@@ -63,19 +63,19 @@ ENV TORCH_CUDA_ARCH_LIST="8.0 8.6"
 
 # Build pointops
 RUN git clone https://github.com/Pointcept/Pointcept.git
-RUN TORCH_CUDA_ARCH_LIST="8.0 8.6"  pip install Pointcept/libs/pointops -v --no-cache-dir --no-build-isolation --prefer-binary 
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6"  pip install Pointcept/libs/pointops -v --no-cache-dir --no-build-isolation
 
 # Build pointgroup_ops
-RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install Pointcept/libs/pointgroup_ops -v --no-cache-dir --no-build-isolation --prefer-binary 
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install Pointcept/libs/pointgroup_ops -v --no-cache-dir --no-build-isolation 
 
-RUN TORCH_CUDA_ARCH_LIST="8.0 8.6"  pip install "git+https://github.com/facebookresearch/pytorch3d.git" --no-cache-dir --no-build-isolation --prefer-binary 
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6"  pip install "git+https://github.com/facebookresearch/pytorch3d.git" --no-cache-dir --no-build-isolation 
 
 # Build swin3d
-RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install -U git+https://github.com/microsoft/Swin3D.git -v --no-cache-dir --no-build-isolation --prefer-binary 
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip install -U git+https://github.com/microsoft/Swin3D.git -v --no-cache-dir --no-build-isolation 
 
 WORKDIR /workspace
 RUN git clone https://github.com/Dao-AILab/flash-attention.git && cd flash-attention && git checkout 22c0358f4ba7999a15dbe27989ce163e5edb5693
-RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip3 install ./flash-attention --no-build-isolation --no-cache-dir --no-build-isolation --prefer-binary 
+RUN TORCH_CUDA_ARCH_LIST="8.0 8.6" pip3 install ./flash-attention --no-build-isolation --no-cache-dir --no-build-isolation 
 
 # WORKDIR /tmp
 COPY requirements.txt .
