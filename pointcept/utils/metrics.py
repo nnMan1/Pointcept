@@ -5,9 +5,11 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
 import torch
+import torch.distributed as dist
 import numpy as np
 from torch import nn
 import torchmetrics
+import pointcept.utils.comm as comm
 from pointcept.utils.registry import Registry
 
 
@@ -20,9 +22,13 @@ class BaseMetric(nn.Module):
 
     def compute(self):
         return self.metric.compute()
-    
+
     def reset(self):
         return self.metric.reset()
+
+    def sync(self):
+        """Aggregate local state across DDP ranks. Default is a no-op."""
+        return
 
 @METRICS.register_module
 class AveragePrecision(BaseMetric):
@@ -55,41 +61,40 @@ class BinaryAccuracy(BaseMetric):
         self.metric.update(preds_2_channels, target)
 
 class BestPRBase(BaseMetric):
-    _cache = None
-    _last_update_count = -1
-
     def __init__(self):
         super().__init__()
         self.metric = torchmetrics.classification.BinaryPrecisionRecallCurve()
         self.update_count = 0
+        self._cache = None
+        self._last_update_count = -1
 
     def update(self, pred, target):
         self.update_count += 1
         self.metric.update(pred.detach(), target.long().detach())
 
     def _get_best_results(self):
-        if BestPRBase._last_update_count == self.update_count and BestPRBase._cache is not None:
-            return BestPRBase._cache
+        if self._last_update_count == self.update_count and self._cache is not None:
+            return self._cache
 
         p, r, t = self.metric.compute()
         f1 = (2 * p * r) / (p + r + 1e-8)
         idx = torch.argmax(f1)
         
-        BestPRBase._cache = {
+        self._cache = {
             'precision': p[idx],
             'recall': r[idx],
             'f1': f1[idx],
             'threshold': t[idx] if idx < len(t) else t[-1]
         }
-        BestPRBase._last_update_count = self.update_count
-        return BestPRBase._cache
+        self._last_update_count = self.update_count
+        return self._cache
 
     def reset(self):
         super().reset()
         self.metric.reset()
         self.update_count = 0
-        BestPRBase._cache = None
-        BestPRBase._last_update_count = -1
+        self._cache = None
+        self._last_update_count = -1
 
 @METRICS.register_module
 class PrecisionAtBest(BestPRBase):
@@ -141,10 +146,7 @@ class BestF1Bundle(BaseMetric):
         return results
 
     def reset(self):
-        self.acc_metric.reset()
-        self.per_class_acc.reset()
         self.pr_curve.reset()
-        self.ap_metric.reset()
 
 @METRICS.register_module
 class BinaryStatScores(BaseMetric):
@@ -167,13 +169,15 @@ class InstanceMatcher:
         self,
         class_names,
         valid_class_names=None,
-        segment_ignore_index=[-1],
+        segment_ignore_index=(-1,),
         instance_ignore_index=-1,
         min_region_size=100
     ):
         self.class_names = class_names
         self.valid_class_names = valid_class_names or [
-            name for name in class_names if name not in segment_ignore_index
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
         ]
         self.segment_ignore_index = segment_ignore_index
         self.instance_ignore_index = instance_ignore_index
@@ -222,10 +226,13 @@ class InstanceMatcher:
                 "confidence": pred["pred_scores"][i],
                 "mask": np.not_equal(pred["pred_masks"][i], 0),
             }
-            pred_inst["vert_count"] = np.count_nonzero(pred_inst["mask"])
+            raw_vert_count = np.count_nonzero(pred_inst["mask"])
             pred_inst["void_intersection"] = np.count_nonzero(
                 np.logical_and(void_mask, pred_inst["mask"])
             )
+            # Discount void overlap so predictions on ignored regions don't
+            # get penalized as FPs (ScanNet convention).
+            pred_inst["vert_count"] = raw_vert_count - pred_inst["void_intersection"]
 
             if pred_inst["vert_count"] < self.min_region_size:
                 continue
@@ -244,10 +251,15 @@ class InstanceMatcher:
         g_masks = np.stack([g['mask'] for g in gts]).astype(np.float32)
 
         intersection = np.dot(p_masks, g_masks.T)
-        
-        p_sums = p_masks.sum(axis=1)[:, None]
+
+        # Discount each prediction's void overlap from its mask size so void
+        # points neither inflate the union nor the FP count (ScanNet convention).
+        p_void = np.array(
+            [p.get("void_intersection", 0) for p in preds], dtype=np.float32
+        )
+        p_sums = (p_masks.sum(axis=1) - p_void)[:, None]
         g_sums = g_masks.sum(axis=1)[None, :]
-        
+
         union = p_sums + g_sums - intersection
         return intersection / (union + 1e-6)
 
@@ -259,8 +271,9 @@ class InstanceMatcher:
         for cls in self.valid_class_names:
             preds = pred_instances.get(cls, [])
             gts = gt_instances.get(cls, [])
+
             if not preds and not gts:
-                matches[cls] = {"y_true": np.array([]), "y_score": np.array([])}
+                matches[cls] = {"y_true": np.array([]), "y_score": np.array([]), "num_gt": 0}
                 continue
 
             y_true = []
@@ -292,14 +305,10 @@ class InstanceMatcher:
 
                 y_score.append(preds[p_idx]['confidence'])
 
-            # False negatives
-            num_fn = len(gts) - len(matched_gt)
-            y_true.extend([1] * num_fn)
-            y_score.extend([np.float32("-inf")] * num_fn)
-
             matches[cls] = {
                 "y_true": np.array(y_true),
                 "y_score": np.array(y_score),
+                "num_gt": len(gts),
             }
 
         return matches, iou_sums, tp_counts
@@ -330,7 +339,7 @@ class InstanceMatcher:
 # @METRICS.register_module
 class InstanceAveragePrecision(BaseMetric):
     
-    def __init__(self, num_classes, class_names, segment_ignore_index=[-1], instance_ignore_index=-1, min_region_size=100, overlaps=None, device="cuda", **kwargs):
+    def __init__(self, num_classes, class_names, segment_ignore_index=(-1,), instance_ignore_index=-1, min_region_size=100, overlaps=None, device="cuda", **kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
         self.class_names = class_names
@@ -338,7 +347,11 @@ class InstanceAveragePrecision(BaseMetric):
         self.instance_ignore_index = instance_ignore_index
         self.overlaps = overlaps if overlaps is not None else np.sort(np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05))))
         self.device = device
-        self.valid_class_names = [name for name in class_names if name not in segment_ignore_index] 
+        self.valid_class_names = [
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
+        ]
 
         self.matcher = InstanceMatcher(
             class_names=class_names,
@@ -347,88 +360,131 @@ class InstanceAveragePrecision(BaseMetric):
             instance_ignore_index=instance_ignore_index,
             min_region_size=min_region_size
         )
-        
-        self.metrics = torch.nn.ModuleDict()
-        for label in class_names:
-            self.metrics[label] = torch.nn.ModuleDict({
-                f"ap_{int(ov*100)}": torchmetrics.classification.BinaryAveragePrecision() for ov in self.overlaps
-            })
-        self.metrics.to(device)
+
+        # ScanNet-style AP: akumuliramo y_true/y_score po klasi/pragu, num_gt po klasi.
+        self._reset_buffers()
+
+    def _reset_buffers(self):
+        self.y_true = {cls: {ov: [] for ov in self.overlaps} for cls in self.class_names}
+        self.y_score = {cls: {ov: [] for ov in self.overlaps} for cls in self.class_names}
+        # num_gt po klasi je nezavisan od praga
+        self.num_gt = {cls: 0 for cls in self.class_names}
 
     def update(self, pred_dict, gt_dict):
-
         for key in 'pred_classes', 'pred_scores', 'pred_masks':
             if key not in pred_dict:
                 raise ValueError(f"Missing key '{key}' in predictions")
-            
+
         for key in 'segment', 'instance':
             if key not in gt_dict:
                 raise ValueError(f"Missing key '{key}' in ground truth")
 
         assignments = self.matcher.assign(pred_dict, gt_dict)
-        pred_instances = assignments["pred_instances"]
         gt_instances = assignments["gt_instances"]
 
         for cls in self.class_names:
-            if cls not in pred_instances:
-                pred_instances[cls] = []
-            if cls not in gt_instances:
-                gt_instances[cls] = []
+            self.num_gt[cls] += len(gt_instances.get(cls, []))
 
         for ov_th in self.overlaps:
             matches_per_ov, _, _ = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
             for cls in self.class_names:
-                matches = matches_per_ov[cls]
+                matches = matches_per_ov.get(cls, {"y_true": np.array([]), "y_score": np.array([])})
                 y_true = matches["y_true"]
                 y_score = matches["y_score"]
-
                 if len(y_true) > 0:
-                    self.metrics[cls][f"ap_{int(ov_th*100)}"].update(
-                        torch.tensor(y_score, device=self.device),
-                        torch.tensor(y_true, device=self.device)
-                    )
+                    self.y_true[cls][ov_th].extend(y_true.tolist())
+                    self.y_score[cls][ov_th].extend(y_score.tolist())
+
+    @staticmethod
+    def _voc_ap(y_true, y_score, num_gt):
+        """VOC-style all-point interpolation AP (ScanNet konvencija).
+        Recall se normalizuje sa num_gt, ne sa len(y_true)."""
+        if num_gt == 0:
+            return 0.0
+        if len(y_true) == 0:
+            return 0.0
+
+        y_true = np.asarray(y_true, dtype=np.float64)
+        y_score = np.asarray(y_score, dtype=np.float64)
+
+        order = np.argsort(-y_score, kind="stable")
+        y_true_sorted = y_true[order]
+
+        cum_tp = np.cumsum(y_true_sorted == 1)
+        cum_fp = np.cumsum(y_true_sorted == 0)
+
+        recall = cum_tp / float(num_gt)
+        precision = cum_tp / np.maximum(cum_tp + cum_fp, 1)
+
+        mrec = np.concatenate(([0.0], recall, [1.0]))
+        mpre = np.concatenate(([0.0], precision, [0.0]))
+
+        # Monotono opadajuća precision od desna ka levo
+        for i in range(len(mpre) - 2, -1, -1):
+            mpre[i] = max(mpre[i], mpre[i + 1])
+
+        change = np.where(mrec[1:] != mrec[:-1])[0]
+        ap = float(np.sum((mrec[change + 1] - mrec[change]) * mpre[change + 1]))
+        return ap
+
+    def sync(self):
+        if comm.get_world_size() == 1:
+            return
+        gathered = comm.all_gather(
+            {"y_true": self.y_true, "y_score": self.y_score, "num_gt": self.num_gt}
+        )
+        merged_y_true = {cls: {ov: [] for ov in self.overlaps} for cls in self.class_names}
+        merged_y_score = {cls: {ov: [] for ov in self.overlaps} for cls in self.class_names}
+        merged_num_gt = {cls: 0 for cls in self.class_names}
+        for state in gathered:
+            for cls in self.class_names:
+                merged_num_gt[cls] += state["num_gt"][cls]
+                for ov in self.overlaps:
+                    merged_y_true[cls][ov].extend(state["y_true"][cls][ov])
+                    merged_y_score[cls][ov].extend(state["y_score"][cls][ov])
+        self.y_true = merged_y_true
+        self.y_score = merged_y_score
+        self.num_gt = merged_num_gt
 
     def compute(self):
         results = {}
-        
-        for cls, metric_dict in self.metrics.items():
+
+        for cls in self.class_names:
             results[cls] = {}
             for ov in self.overlaps:
-                key = f"ap_{int(ov*100)}"
-                results[cls][key] = metric_dict[key].compute().item()
+                ap = self._voc_ap(self.y_true[cls][ov], self.y_score[cls][ov], self.num_gt[cls])
+                results[cls][f"ap_{int(ov * 100)}"] = ap
 
             results[cls]["AP25"] = results[cls].get("ap_25", 0.0)
             results[cls]["AP50"] = results[cls].get("ap_50", 0.0)
 
             ap_values = [
-                results[cls][f"ap_{int(ov*100)}"]
+                results[cls][f"ap_{int(ov * 100)}"]
                 for ov in self.overlaps
                 if ov >= 0.5
             ]
-            results[cls]["AP"] = np.mean(ap_values) if ap_values else 0.0
+            results[cls]["AP"] = float(np.mean(ap_values)) if ap_values else 0.0
 
-        valid_classes = [cls for cls in self.class_names if cls in results and results[cls]]
+        valid_classes = [cls for cls in self.valid_class_names if cls in results and results[cls]]
         if valid_classes:
-            metric_keys = ["AP25", "AP50", "AP"] + [f"ap_{int(ov*100)}" for ov in self.overlaps]
+            metric_keys = ["AP25", "AP50", "AP"] + [f"ap_{int(ov * 100)}" for ov in self.overlaps]
             for mkey in metric_keys:
                 values = [results[cls].get(mkey, 0.0) for cls in valid_classes]
                 results[f"m{mkey}"] = float(np.mean(values))
 
         return results
-    
+
     def reset(self):
-        for label in self.class_names:
-             for ov in self.overlaps:
-                self.metrics[label][f"ap_{int(ov*100)}"].reset()
+        self._reset_buffers()
 
 # @METRICS.register_module()
-class InstanceMeanIoU(BaseMetric):
+class MatchedOnlyInstanceMeanIoU(BaseMetric):
 
     def __init__(
         self,
         num_classes,
         class_names,
-        segment_ignore_index=[-1],
+        segment_ignore_index=(-1,),
         instance_ignore_index=-1,
         min_region_size=100,
         overlaps=None,
@@ -445,7 +501,9 @@ class InstanceMeanIoU(BaseMetric):
         )
         self.device = device
         self.valid_class_names = [
-            name for name in class_names if name not in segment_ignore_index
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
         ]
 
         self.matcher = InstanceMatcher(
@@ -474,6 +532,118 @@ class InstanceMeanIoU(BaseMetric):
             for cls in self.class_names:
                 self.iou_sums[cls][i] += iou_sums_ov.get(cls, 0.0)
                 self.tp_counts[cls][i] += tp_counts_ov.get(cls, 0)
+
+    def sync(self):
+        if comm.get_world_size() == 1:
+            return
+        for cls in self.class_names:
+            dist.all_reduce(self.iou_sums[cls], op=dist.ReduceOp.SUM)
+            dist.all_reduce(self.tp_counts[cls], op=dist.ReduceOp.SUM)
+
+    def compute(self):
+        results = {}
+
+        for cls in self.class_names:
+            results[cls] = {}
+            for i, ov in enumerate(self.overlaps):
+                tp = self.tp_counts[cls][i].item()
+                if tp > 0:
+                    mean_iou = self.iou_sums[cls][i].item() / tp
+                    results[cls][f"MmIoU@{int(ov*100):02d}"] = mean_iou
+                else:
+                    results[cls][f"MmIoU@{int(ov*100):02d}"] = 0.0
+
+            iou_values = [
+                results[cls].get(f"MmIoU@{int(ov*100):02d}", 0.0)
+                for ov in self.overlaps
+            ]
+            results[cls]["MmIoU"] = np.mean(iou_values) if iou_values else 0.0
+
+        valid_classes = [cls for cls in self.class_names if cls in results]
+        if valid_classes:
+            for i, ov in enumerate(self.overlaps):
+                key = f"MmIoU@{int(ov*100):02d}"
+                values = [results[cls].get(key, 0.0) for cls in valid_classes]
+                results[f"m{key}"] = float(np.mean(values))
+
+            all_values = []
+            for cls in valid_classes:
+                for ov in self.overlaps:
+                    key = f"MmIoU@{int(ov*100):02d}"
+                    all_values.append(results[cls].get(key, 0.0))
+            results["MmIoU"] = float(np.mean(all_values)) if all_values else 0.0
+
+        return results
+
+    def reset(self):
+        for cls in self.class_names:
+            self.iou_sums[cls].zero_()
+            self.tp_counts[cls].zero_()
+
+# @METRICS.register_module()
+class InstanceMeanIoU(BaseMetric):
+
+    def __init__(
+        self,
+        num_classes,
+        class_names,
+        segment_ignore_index=(-1,),
+        instance_ignore_index=-1,
+        min_region_size=100,
+        overlaps=None,
+        device="cuda",
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.segment_ignore_index = segment_ignore_index
+        self.instance_ignore_index = instance_ignore_index
+        self.overlaps = overlaps if overlaps is not None else np.sort(
+            np.concatenate(([0, 0.25], np.arange(0.5, 0.951, 0.05)))
+        )
+        
+        self.device = device
+        self.valid_class_names = [
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
+        ]
+
+        self.matcher = InstanceMatcher(
+            class_names=class_names,
+            valid_class_names=self.valid_class_names,
+            segment_ignore_index=segment_ignore_index,
+            instance_ignore_index=instance_ignore_index,
+            min_region_size=min_region_size
+        )
+
+        self.iou_sums = {
+            label: torch.zeros(len(self.overlaps), dtype=torch.float64, device=device)
+            for label in class_names
+        }
+        self.tp_counts = {
+            label: torch.zeros(len(self.overlaps), dtype=torch.long, device=device)
+            for label in class_names
+        }
+
+    def update(self, pred_dict, gt_dict):
+        assignments = self.matcher.assign(pred_dict, gt_dict)
+        gt_instances = assignments["gt_instances"]
+        for i, ov_th in enumerate(self.overlaps):
+            _, iou_sums_ov, _ = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
+
+            for cls in self.class_names:
+                self.iou_sums[cls][i] += iou_sums_ov.get(cls, 0.0)
+                # Imenitelj = ukupno GT-ova za klasu (ne TP-only) — odrazava i FN-ove kao 0 doprinos
+                self.tp_counts[cls][i] += len(gt_instances.get(cls, []))
+
+    def sync(self):
+        if comm.get_world_size() == 1:
+            return
+        for cls in self.class_names:
+            dist.all_reduce(self.iou_sums[cls], op=dist.ReduceOp.SUM)
+            dist.all_reduce(self.tp_counts[cls], op=dist.ReduceOp.SUM)
 
     def compute(self):
         results = {}
@@ -511,10 +681,120 @@ class InstanceMeanIoU(BaseMetric):
         return results
 
     def reset(self):
-        """Resetira brojače ako želiš koristiti istu instancu više puta"""
         for cls in self.class_names:
             self.iou_sums[cls].zero_()
             self.tp_counts[cls].zero_()
+
+class GTInstanceIoU(BaseMetric):
+
+    def __init__(
+        self,
+        num_classes,
+        class_names,
+        segment_ignore_index=(-1,),
+        instance_ignore_index=-1,
+        min_region_size=100,
+        device="cuda",
+        **kwargs):
+    
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.segment_ignore_index = segment_ignore_index
+        self.instance_ignore_index = instance_ignore_index
+        self.device = device
+        self.valid_class_names = [
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
+        ]
+
+        self.matcher = InstanceMatcher(
+            class_names=class_names,
+            valid_class_names=self.valid_class_names,
+            segment_ignore_index=segment_ignore_index,
+            instance_ignore_index=instance_ignore_index,
+            min_region_size=min_region_size
+        )
+
+        # Track IoU statistics per class
+        self.iou_stats = {label: [] for label in class_names}
+        
+    def _compute_iou(self, mask1, mask2):
+        """Compute IoU between two binary masks."""
+        intersection = np.logical_and(mask1, mask2).sum()
+        union = np.logical_or(mask1, mask2).sum()
+        
+        if union == 0:
+            return 0.0
+        return float(intersection) / float(union)
+    
+    def update(self, pred_dict, gt_dict):
+        """
+        For each GT instance, find best matching prediction and compute IoU.
+        """
+        assignments = self.matcher.assign(pred_dict, gt_dict)
+        
+        pred_instances = assignments["pred_instances"]
+        gt_instances = assignments["gt_instances"]
+        ious_per_class = assignments["ious"]
+        
+        for cls in self.class_names:
+            preds = pred_instances.get(cls, [])
+            gts = gt_instances.get(cls, [])
+            iou_matrix = ious_per_class.get(cls, np.array([]))
+            
+            # For each GT, find best matching prediction
+            for gt_idx, gt in enumerate(gts):
+                if iou_matrix.size == 0:
+                    # No predictions for this class
+                    best_iou = 0.0
+                else:
+                    # Get best IoU for this GT across all predictions
+                    best_iou = iou_matrix[:, gt_idx].max()
+                
+                self.iou_stats[cls].append(best_iou)
+
+    def sync(self):
+        if comm.get_world_size() == 1:
+            return
+        gathered = comm.all_gather(self.iou_stats)
+        merged = {cls: [] for cls in self.class_names}
+        for state in gathered:
+            for cls in self.class_names:
+                merged[cls].extend(state.get(cls, []))
+        self.iou_stats = merged
+
+    def compute(self):
+        """
+        Compute mean IoU per class and overall mean IoU.
+        """
+        results = {}
+
+        for cls in self.class_names:
+            results[cls] = {}
+            
+            if len(self.iou_stats[cls]) > 0:
+                mean_iou = float(np.mean(self.iou_stats[cls]))
+                results[cls]["mIoU"] = mean_iou
+            else:
+                results[cls]["mIoU"] = 0.0
+
+        # Compute mean IoU across valid classes
+        valid_classes = [cls for cls in self.valid_class_names if cls in results]
+        if valid_classes:
+            mious = [results[cls]["mIoU"] for cls in valid_classes]
+            results["mIoU"] = float(np.mean(mious))
+        else:
+            results["mIoU"] = 0.0
+
+        return results
+
+    def reset(self):
+        """Reset statistics for new evaluation."""
+        for cls in self.class_names:
+            self.iou_stats[cls] = []
+
 
 METRICS.register_module(module=torchmetrics.Accuracy, name="Accuracy")
 METRICS.register_module(module=torchmetrics.Precision, name="Precision")

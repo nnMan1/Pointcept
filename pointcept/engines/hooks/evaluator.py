@@ -17,7 +17,7 @@ from pointcept.utils.misc import intersection_and_union_gpu
 from .default import HookBase
 from .builder import HOOKS
 
-from pointcept.utils.metric import InstanceAveragePrecision, InstanceMeanIoU
+from pointcept.utils.metrics import InstanceAveragePrecision, InstanceMeanIoU
 
 
 @HOOKS.register_module()
@@ -320,7 +320,9 @@ class InsSegEvaluator(HookBase):
         self.instance_ignore_index = instance_ignore_index
 
         self.valid_class_names = None  # update in before train
-        self.overlaps = np.append(np.arange(0.5, 0.95, 0.05), 0.25)
+        self.overlaps = np.sort(
+            np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05)))
+        )
         self.min_region_sizes = 100
         self.distance_threshes = float("inf")
         self.distance_confs = -float("inf")
@@ -388,8 +390,15 @@ class InsSegEvaluator(HookBase):
                 )
             )
 
-        loss_avg = self.trainer.storage.history("val_loss").avg
         comm.synchronize()
+        for metric in self.metrics:
+            metric.sync()
+
+        loss_avg = self.trainer.storage.history("val_loss").avg
+        if comm.get_world_size() > 1:
+            loss_tensor = torch.tensor(loss_avg, device="cuda", dtype=torch.float64)
+            dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+            loss_avg = (loss_tensor / comm.get_world_size()).item()
 
         ap_scores = self.metrics[0].compute()
         iou_scores = self.metrics[1].compute()

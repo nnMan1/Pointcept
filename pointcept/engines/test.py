@@ -29,7 +29,12 @@ from pointcept.utils.misc import (
     make_dirs,
 )
 
-from pointcept.utils.metric import InstanceAveragePrecision, InstanceMeanIoU
+from pointcept.utils.metrics import (
+    InstanceAveragePrecision, 
+    InstanceMeanIoU, 
+    MatchedOnlyInstanceMeanIoU,
+    GTInstanceIoU
+)
 
 
 try:
@@ -533,18 +538,23 @@ class InstSegTester(TesterBase):
             for i in range(self.cfg.data.num_classes)
             if i not in self.segment_ignore_index
         ]
-        self.overlaps = np.append(np.arange(0.5, 0.95, 0.05), 0.25)
+        self.overlaps = np.sort(
+            np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05)))
+        )
         self.min_region_sizes = 100
         self.distance_threshes = float("inf")
         self.distance_confs = -float("inf")
         self.metrics = [
             InstanceAveragePrecision(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
-            InstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda")
+            InstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, device="cuda"),
+            MatchedOnlyInstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
+            GTInstanceIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, device="cuda")
         ]
 
     def test(self):
         assert self.test_loader.batch_size == 1
         logger = get_root_logger()
+
         logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
 
         batch_time = AverageMeter()
@@ -573,13 +583,14 @@ class InstSegTester(TesterBase):
                 output_dict["pred_masks"] = output_dict["pred_masks"][:, reverse]
                 data_dict['segment'] = data_dict["origin_segment"]
                 data_dict['instance'] = data_dict["origin_instance"]
-
     
             for metric in self.metrics:
                 metric.update(output_dict, {
                     "segment": data_dict['segment'].cpu(),
-                    "instance": data_dict['instance'].cpu()
+                    "instance": data_dict['instance'].cpu(),
+                    "coord": data_dict['origin_coord'].cpu()
                 })
+                
 
             batch_time.update(time.time() - start)
             logger.info(
@@ -600,18 +611,23 @@ class InstSegTester(TesterBase):
                     data_name,
                 )
 
-       
+
+        comm.synchronize()
+        for metric in self.metrics:
+            metric.sync()
+
         ap_scores = self.metrics[0].compute()
         iou_scores = self.metrics[1].compute()
         ap = ap_scores["mAP"]
         ap_50 = ap_scores["mAP50"]
         ap_25 = ap_scores["mAP25"]
         mmIoU_50 = iou_scores["mmIoU@50"]
+        mmIoU_00 = iou_scores["mmIoU@00"]
 
 
         logger.info(
-            "Val result: mAP/AP50/AP25/mIoU@50 {:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
-                ap, ap_50, ap_25, mmIoU_50
+            "Val result: mAP/AP50/AP25/mIoU@50/mIoU00 {:.4f}/{:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                ap, ap_50, ap_25, mmIoU_50, mmIoU_00
             )
         )
         
@@ -626,6 +642,25 @@ class InstSegTester(TesterBase):
                 )
             )
 
+        iou_scores = self.metrics[2].compute()
+        MmmIoU_50 = iou_scores["MmIoU"]
+        MmIoU_25 = iou_scores["mMmIoU@25"]
+        MmIoU_50 = iou_scores["mMmIoU@50"]
+
+        logger.info(
+            "Val result: MmIoU@50/MmIoU@25/MmmIoU@50 {:.4f}/{:.4f}/{:.4f}.".format(
+                MmIoU_50, MmIoU_25, MmmIoU_50
+            )
+        )
+
+
+        gt_iou_scores = self.metrics[3].compute()
+        gt_mIoU = gt_iou_scores["mIoU"]
+        logger.info(
+            "Val result: GT mIoU {:.4f}.".format(
+                gt_mIoU
+            )
+        )
 
         logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
 
