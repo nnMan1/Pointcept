@@ -16,3 +16,4 @@ gorilla-core
 opencv-python==4.11.0.86
 einops==0.8.1
 transformers==4.57.1
+torchmetrics==1.8.2
