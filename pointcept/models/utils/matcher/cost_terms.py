@@ -6,6 +6,7 @@ from .builder import COSTS
 from abc import ABC, abstractmethod
 
 class CostTerm(nn.Module, ABC):
+
     def __init__(self, weight=1.0, enabled=True):
         super().__init__()
         self.weight = weight
@@ -56,6 +57,7 @@ class ClassCost(CostTerm):
 
 @COSTS.register_module()
 class MaskBCECost(CostTerm):
+    
     def __init__(self, weight=1.0, enabled=True, sample_points=None, instance_ignore_index=-1):
         super().__init__(weight, enabled)
         self.sample_points = sample_points
@@ -120,6 +122,7 @@ class MaskBCECost(CostTerm):
 
 @COSTS.register_module()
 class MaskDiceCost(CostTerm):
+
     def __init__(self, weight=1.0, enabled=True, sample_points=None, instance_ignore_index=-1):
         super().__init__(weight, enabled)
         self.sample_points = sample_points
@@ -141,7 +144,6 @@ class MaskDiceCost(CostTerm):
         denominator = inputs.sum(-1)[:, None] + targets.sum(-1)[None, :]
         loss = 1 - (numerator + 1) / (denominator + 1)
         return loss 
-
 
     @torch.no_grad()
     def compute_cost(self, outputs, target):

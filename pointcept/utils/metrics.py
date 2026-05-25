@@ -465,7 +465,7 @@ class InstanceAveragePrecision(BaseMetric):
             ]
             results[cls]["AP"] = float(np.mean(ap_values)) if ap_values else 0.0
 
-        valid_classes = [cls for cls in self.valid_class_names if cls in results and results[cls]]
+        valid_classes = [cls for cls in self.valid_class_names if cls in results and self.num_gt.get(cls, 0) > 0]
         if valid_classes:
             metric_keys = ["AP25", "AP50", "AP"] + [f"ap_{int(ov * 100)}" for ov in self.overlaps]
             for mkey in metric_keys:
