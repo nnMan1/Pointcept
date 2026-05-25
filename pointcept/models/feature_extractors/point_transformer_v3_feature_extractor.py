@@ -82,8 +82,11 @@ class PointTransformerV3FeatureExtractor(BaseFeatureExtractor):
             if add_features[0] is not None:
                 valid_fts_mask = add_features[0].abs().sum(dim=1) > 0
                 if valid_fts_mask.sum() > 0:
-                    fts_dist_loss += F.mse_loss(point.feat[valid_fts_mask], add_features[0][valid_fts_mask, :point.feat.shape[1]])
-                    point.feat[valid_fts_mask] = (point.feat[valid_fts_mask] + add_features[0][valid_fts_mask, :point.feat.shape[1]]) / 2.0
+                    fts_dist_loss += F.mse_loss(point.feat[valid_fts_mask], add_features[0][valid_fts_mask, :point.feat.shape[1]].detach())
+                    averaged = (point.feat + add_features[0][:, :point.feat.shape[1]]) / 2.0
+                    new_feat = point.feat.clone()
+                    new_feat[valid_fts_mask] = averaged[valid_fts_mask]
+                    point.feat = new_feat
                     add_features.pop(0)
 
             return_dict[f'dec_{k}'] = point.feat
