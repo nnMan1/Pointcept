@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 2 # bs: total bs in all gpus
+batch_size = 4 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
@@ -21,15 +21,27 @@ segment_ignore_index = (-1, )
 model = dict(
     type="MySPFormer",
     num_query = 100,
+    seg_ce_loss_weight=0.5,
+    mask_ce_loss_weight=1.0,
+    mask_dice_loss_weight=1.0,
+    score_loss_weight=0.5,
+    fts_loss_weight=0.00,
+    triplet_loss_weight=0.0,
+    overlap_loss_weight=0.0,
+    triplet_margin=0.0,
     encoder=dict(
         backbone=dict(
         type="MergeFeatures",
-        model1_config=dict(
-            type="DinoV3FeatureExtractor",
-            merge_strategy='random_sample',
-            return_features=['feat'],
-            freeze_backbone=True,
-            freeze_backbone_bn=True
+       model1_config=dict(
+                type='Image2PointCLoud',
+                model_type='DinoV3',
+                model_name='/home/backbones/dinov3-vith16plus-pretrain-lvd1689m',
+                fts_dim=1280,
+                out_fts_dim=256,
+                merge_strategy='random_sample',
+                return_features=['feat'],
+                freeze_backbone=True,
+                freeze_backbone_bn=True
         ),
         model2_config=dict(
             type="PT-V3FeatureExtractor",
@@ -159,6 +171,7 @@ scheduler = dict(
 dataset_type = "MechanicalAssemblySynth"
 data_root = "data/segment-motor-synthetic/data"
 recompute_clustering=False
+image_size=(512, 512)
 
 classes={"other": 0, 
         "gear": 0, 
@@ -179,6 +192,7 @@ data = dict(
         cache=True,
         data_root=data_root,
         recompute_clustering=recompute_clustering,
+        image_size=image_size,
         transform=[
             dict(type="CenterShift", apply_z=True),
             # dict(
@@ -357,8 +371,9 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords=["module.", "MySPFormer__query.weight"], replacement=["module.", "dummy"]),
-    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
+    
+    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.feature_extractor1.model", "MySPFormer__query.weight"], 
+                                 replacement=["module.", "module.encoder.backbone.feature_extractor1.model.model", "dummy"]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",
