@@ -13,7 +13,7 @@ weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
 
-num_classes = 1
+num_classes = 2
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
@@ -175,11 +175,11 @@ image_size=(512, 512)
 
 classes={"other": 0, 
         "gear": 0, 
-        "nut": 0, 
-        "screw": 0, 
+        "nut": 1, 
+        "screw": 1, 
         "axe": 0}
 
-class_names = ["other"]
+class_names = ["other", "screw"]
 
 
 data = dict(
@@ -372,8 +372,9 @@ data = dict(
 
 hooks = [
     
-    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.feature_extractor1.model", "MySPFormer__query.weight"], 
-                                 replacement=["module.", "module.encoder.backbone.feature_extractor1.model.model", "dummy"]),
+    dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.feature_extractor1.model", "MySPFormer__query.weight",
+                                            "decoder.mask_modules.0.class_embed_head.2", "semantic_ce_loss.weight"], 
+                                 replacement=["module.", "module.encoder.backbone.feature_extractor1.model.model", "dummy", "dummy", "dummy"],),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",
