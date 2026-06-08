@@ -15,6 +15,7 @@ weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
+instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # model settings
@@ -320,14 +321,14 @@ hooks = [
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",
          segment_ignore_index=segment_ignore_index,
-         instance_ignore_index=-1,),
+         instance_ignore_index=instance_ignore_index,),
     dict(type="CheckpointSaver", save_freq=None),
 ]
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
+    instance_ignore_index=instance_ignore_index,
     verbose=False,
 )

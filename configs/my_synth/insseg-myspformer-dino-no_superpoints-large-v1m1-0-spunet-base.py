@@ -15,9 +15,9 @@ weight = '/home/exp/abc_dataset/insseg-myspformer-dino-no_superpoints-large-v1m1
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
+instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
-# model settings
 # model settings
 model = dict(
     type="MySPFormer",
@@ -140,9 +140,6 @@ model = dict(
     instance_ignore_index=-1,
 )
 
-
-
-
 # scheduler settings
 epoch = 500
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
@@ -167,8 +164,6 @@ classes={"other": 0,
         "axe": 0}
 
 class_names = ["other"]
-
-
 
 data = dict(
     num_classes=num_classes,
@@ -343,7 +338,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,
