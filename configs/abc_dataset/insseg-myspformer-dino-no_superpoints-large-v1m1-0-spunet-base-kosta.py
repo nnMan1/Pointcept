@@ -2,7 +2,7 @@ _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
 batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
@@ -15,15 +15,26 @@ find_unused_parameters = True
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
-instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # model settings
+# model settings
 model = dict(
     type="MySPFormer",
-    num_query = 400,
+    num_query = 100,
     encoder=dict(
         backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="DinoV2FeatureExtractor",
+            model_name="facebook/dinov2-large",
+            fts_dim=1024,
+            merge_strategy='random_sample',
+            return_features=['feat'],
+            freeze_backbone=True,
+            freeze_backbone_bn=False
+        ),
+        model2_config=dict(
             type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
@@ -56,6 +67,7 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
             return_features=['feat'],
+            ),
         ),
         backbone_out_channels=64,
         out_channels=32
@@ -126,8 +138,6 @@ model = dict(
     instance_ignore_index=-1,
 )
 
-
-
 # scheduler settings
 epoch = 500
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
@@ -157,7 +167,7 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -216,6 +226,7 @@ data = dict(
                     "mappings_tgt",
                     # "instance_centroid",
                     # "bbox",
+                    "seed_ids",
                     "seg_indices",
                     "path",
                     "name",
@@ -276,6 +287,7 @@ data = dict(
                     'origin_coord', 'origin_segment', 'origin_instance',
                     # "instance_centroid",
                     # "bbox",
+                    "seed_ids",
                     "seg_indices",
                     "path",
                     "name",
@@ -345,7 +357,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InstSegTester",
+    type="InsSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

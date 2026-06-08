@@ -17,8 +17,6 @@ fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
 
-# model settings
-# model settings
 model = dict(
     type="MySPFormer",
     num_query = 100,
@@ -32,7 +30,7 @@ model = dict(
             merge_strategy='random_sample',
             return_features=['feat'],
             freeze_backbone=True,
-            freeze_backbone_bn=False
+            freeze_backbone_bn=True
         ),
         model2_config=dict(
             type="PT-V3FeatureExtractor",
@@ -134,12 +132,16 @@ model = dict(
             )
         ],
     ),
-    use_superpoint_pooling=False,
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    )
 )
-
-
-
 
 # scheduler settings
 epoch = 500

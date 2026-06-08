@@ -1,13 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+batch_size = 12 # bs: total bs in all gpus
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
+sync_bn = True
 # weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
 
@@ -21,7 +22,7 @@ segment_ignore_index = (-1, )
 # model settings
 model = dict(
     type="MySPFormer",
-    num_query = 400,
+    num_query = 100,
     encoder=dict(
         backbone=dict(
             type="PT-V3FeatureExtractor",
@@ -122,10 +123,17 @@ model = dict(
             )
         ],
     ),
-    use_superpoint_pooling=False,
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False
 )
-
 
 
 # scheduler settings
@@ -157,7 +165,7 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -211,6 +219,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -222,7 +231,13 @@ data = dict(
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"
+                ),
             ),
         ],
         test_mode=False,
@@ -270,6 +285,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -279,10 +295,16 @@ data = dict(
                     "seg_indices",
                     "path",
                     "name",
-                    "inverse"
+                    "inverse",
+                    "instance_segment"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
@@ -347,6 +369,6 @@ hooks = [
 test = dict(
     type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
+    instance_ignore_index=instance_ignore_index,
     verbose=False,
 )

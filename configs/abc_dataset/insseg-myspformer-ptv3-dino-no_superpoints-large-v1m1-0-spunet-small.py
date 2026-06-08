@@ -15,15 +15,26 @@ find_unused_parameters = True
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
-instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
     type="MySPFormer",
-    num_query = 400,
+    num_query = 100,
     encoder=dict(
         backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="DinoV2FeatureExtractor",
+            model_name="facebook/dinov2-large",
+            fts_dim=1024,
+            merge_strategy='random_sample',
+            return_features=['feat'],
+            freeze_backbone=True,
+            freeze_backbone_bn=False,
+            local_files_only=True
+        ),
+        model2_config=dict(
             type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
@@ -56,13 +67,14 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
             return_features=['feat'],
+            ),
         ),
         backbone_out_channels=64,
         out_channels=32
-     ),
+    ),
     decoder=dict(
         in_channels=32,
-        hlevels=6,
+        hlevels=5,
         mask_modules=[
             dict(
                 num_classes=num_classes, 
@@ -111,26 +123,25 @@ model = dict(
                 pre_norm=False,
                 num_heads=8, 
                 dropout=0
-            ),
-            dict(
-                in_channels=128,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0
             )
         ],
     ),
-    use_superpoint_pooling=False,
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False
 )
-
 
 
 # scheduler settings
 epoch = 500
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
+optimizer = dict(type="AdamW", lr=0.001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -142,7 +153,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
+data_root = "data/segment-assembly-merged-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
@@ -157,7 +168,7 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -216,13 +227,19 @@ data = dict(
                     "mappings_tgt",
                     # "instance_centroid",
                     # "bbox",
+                    "instance_segment",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
@@ -276,13 +293,19 @@ data = dict(
                     'origin_coord', 'origin_segment', 'origin_instance',
                     # "instance_centroid",
                     # "bbox",
+                    "instance_segment",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
@@ -345,7 +368,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InstSegTester",
+    type="InsSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

@@ -120,8 +120,16 @@ model = dict(
             )
         ],
     ),
-    use_superpoint_pooling=False,
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False
 )
 
 
@@ -139,7 +147,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
+data_root = "data/segment-assembly-merged-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
@@ -213,13 +221,19 @@ data = dict(
                     "mappings_tgt",
                     # "instance_centroid",
                     # "bbox",
+                    "instance_segment",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
@@ -273,13 +287,19 @@ data = dict(
                     'origin_coord', 'origin_segment', 'origin_instance',
                     # "instance_centroid",
                     # "bbox",
+                    "instance_segment",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),    
             ),
         ],
         test_mode=False,
