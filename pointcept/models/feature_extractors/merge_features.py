@@ -25,6 +25,7 @@ class MergeFeatures(BaseFeatureExtractor):
         if 'loss' not in outputs:
             outputs['loss'] = torch.tensor(0.0, device=out1.feat.device)
 
+        # outputs['feat'] = torch.cat([out1.feat, outputs['feat']], dim=-1)
         outputs['loss'] += out1.get('loss', 0.0)
 
         return outputs
