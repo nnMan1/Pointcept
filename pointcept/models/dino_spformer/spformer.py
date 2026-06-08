@@ -1,67 +1,62 @@
-
-import os
 import torch
+import torch.nn.functional as F
 import torch_scatter
 from torch import nn
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 from pointcept.models.builder import MODELS, build_model
 from pointcept.positional_embeddings import build_positional_embedding
-from pointcept.models.utils.matcher.hungarian_matcher import HungarianMatcher
-from pointcept.models.losses import DiceLoss, FocalLoss, BinaryFocalLoss
-from pointcept.models.utils.nn import GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer, SuperpointPooling, SuperpointUnpooling, pad_data
+from pointcept.models.losses import DiceLoss, BinaryFocalLoss
+from pointcept.models.utils.nn import (
+    GenericMLP, SelfAttentionLayer, CrossAttentionLayer, FFNLayer,
+    SuperpointPooling, SuperpointUnpooling, pad_data,
+)
 from .utils import compute_stats, select_masks, db_scan
-from .backbone import PointTransformerV3AddFeatures
-# from pointcept.models.multivew.multiview_feaure_extraction import MeshFeatureExtractor
-from pointcept.utils.visualization import pca_features_visualization
-from pointcept.models.utils.matcher import build_matcher
-from pointcept.models.utils.matcher import MaskSelector
+from pointcept.models.utils.matcher import build_matcher, MaskSelector
+
 
 class Encoder(nn.Module):
 
-    def __init__(self, 
-                 backbone, 
-                 out_channels, 
-                 backbone_out_channels=64):
+    def __init__(self, backbone, out_channels, backbone_out_channels=64):
         super().__init__()
         self.out_channels = out_channels
-
-        self.backbone = build_model(backbone) 
-        
+        self.backbone = build_model(backbone)
         self.mask_features_head = nn.Sequential(
             nn.Linear(backbone_out_channels, out_channels),
             nn.LayerNorm(out_channels),
             nn.ReLU(),
-            nn.Linear(out_channels, out_channels)
+            nn.Linear(out_channels, out_channels),
         )
 
     def forward(self, data_dict):
-
         offset = data_dict['offset']
         values = self.backbone(data_dict)
-
         features = self.mask_features_head(values['feat'])
-        
         return {
-                'features': features, 
-                'offset': offset,
-                'fts_loss': values.get('loss', 0.0)
-            }
+            'features': features,
+            'offset': offset,
+            'fts_loss': values.get('loss', 0.0),
+        }
+
 
 class Decoder(nn.Module):
 
     def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels):
-
         super().__init__()
-
-        self.mask_features_head = nn.Sequential(nn.Linear(in_channels, mask_modules[0]['hidden_dim']), nn.ReLU(), nn.Linear(mask_modules[0]['hidden_dim'], mask_modules[0]['hidden_dim']))
-        self.query_features_head = nn.Sequential(nn.Linear(in_channels, query_refinement_modules[0]['in_channels']), nn.LayerNorm(query_refinement_modules[0]['in_channels']), nn.ReLU())
-        
+        self.mask_features_head = nn.Sequential(
+            nn.Linear(in_channels, mask_modules[0]['hidden_dim']),
+            nn.ReLU(),
+            nn.Linear(mask_modules[0]['hidden_dim'], mask_modules[0]['hidden_dim']),
+        )
+        self.query_features_head = nn.Sequential(
+            nn.Linear(in_channels, query_refinement_modules[0]['in_channels']),
+            nn.LayerNorm(query_refinement_modules[0]['in_channels']),
+            nn.ReLU(),
+        )
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
         self.query_refinements = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
 
     def forward(self, data, query_features):
-        
         offset = data['offset']
         features = data['features']
 
@@ -73,69 +68,64 @@ class Decoder(nn.Module):
         for mask_module in self.mask_modules:
             for _ in range(mask_module.reuse):
                 for query_refinement in self.query_refinements:
-
                     mask_module_data = {
                         'query_feat': query_features,
                         'mask_features': mask_point_features,
-                        'offset': offset
+                        'offset': offset,
                     }
-
                     masks = mask_module(mask_module_data)
-
                     attention_mask = masks['attn_mask']
-
                     query_features = query_refinement(
-                                                    query_point_features,
-                                                    attention_mask,
-                                                    data['offset'],
-                                                    query_features,
-                                                    pos = data['positional_embedding']
-                                                    )
-                    
+                        query_point_features,
+                        attention_mask,
+                        data['offset'],
+                        query_features,
+                        pos=data['positional_embedding'],
+                    )
                     out.append(masks)
 
         mask_module_data = {
-                        'query_feat': query_features,
-                        'mask_features': mask_point_features,
-                        'offset': offset
-                    }
-
+            'query_feat': query_features,
+            'mask_features': mask_point_features,
+            'offset': offset,
+        }
         masks = mask_module(mask_module_data)
-
+        masks['query_feat'] = query_features  # expose for triplet loss
+        masks['query_point_features'] = query_point_features  # expose for prototype building
         out.append(masks)
-                
+
         return out
+
 
 class MaskModule(nn.Module):
 
     def __init__(self, hidden_dim, num_classes, return_attn_masks, reuse=1):
-
         super().__init__()
-
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
         self.reuse = reuse
-
-        self.decoder_norm = nn.LayerNorm(hidden_dim)                
-        self.out_score = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1))
-        self.class_embed_head = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, num_classes))
-
+        self.decoder_norm = nn.LayerNorm(hidden_dim)
+        self.out_score = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1),
+        )
+        self.class_embed_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, num_classes),
+        )
         self.return_attn_masks = return_attn_masks
 
     def forward(self, data):
-
         query_feat, mask_features, offset = data['query_feat'], data['mask_features'], data['offset']
-            
+
         query_feat = self.decoder_norm(query_feat)
         output_class = self.class_embed_head(query_feat)
         outputs_score = self.out_score(query_feat)
 
         output_masks = []
         attn_masks = []
-        
+
         return_dict = {
             'pred_logits': output_class,
-            'pred_score': outputs_score
+            'pred_score': outputs_score,
         }
 
         bs = 0
@@ -147,232 +137,426 @@ class MaskModule(nn.Module):
         return_dict['pred_masks'] = outputs_mask
 
         if self.return_attn_masks:
-            
             bs = 0
             for be in offset:
                 attn_masks.append((outputs_mask[bs:be].sigmoid() < 0.5).bool())
-                attn_masks[-1].permute(1, 0)[torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])] = False
+                attn_masks[-1].permute(1, 0)[
+                    torch.where(attn_masks[-1].sum(0) == attn_masks[-1].shape[0])
+                ] = False
                 bs = be
-
             return_dict['attn_mask'] = torch.cat(attn_masks).detach()
 
         return return_dict
 
+
 class QueryRefinement(nn.Module):
 
     def __init__(self, in_channels, dim_feedforward, mask_dim, pre_norm, num_heads, dropout, sample_size=None):
-
         super().__init__()
-
         self.dim_feed_forward = dim_feedforward
         self.mask_dim = mask_dim
         self.pre_norm = pre_norm
         self.num_heads = num_heads
         self.dropout = dropout
         self.sample_size = sample_size
-        
-        self.cross_attention = CrossAttentionLayer(
-                    d_model=self.mask_dim,
-                    nhead=self.num_heads,
-                    dropout=self.dropout,
-                    normalize_before=self.pre_norm,
-                )
-                    
-        self.self_attention = SelfAttentionLayer(
-                    d_model=self.mask_dim,
-                    nhead=self.num_heads,
-                    dropout=self.dropout,
-                    normalize_before=self.pre_norm,
-                )
-        self.ffn_attention = FFNLayer(
-                    d_model=self.mask_dim,
-                    dim_feedforward=dim_feedforward,
-                    dropout=self.dropout,
-                    normalize_before=self.pre_norm,
-                    activation='gelu'
-                )
-                    
-    def forward(self, point_features, attn_mask, offset, queries, pos):
 
+        self.cross_attention = CrossAttentionLayer(
+            d_model=self.mask_dim,
+            nhead=self.num_heads,
+            dropout=self.dropout,
+            normalize_before=self.pre_norm,
+        )
+        self.self_attention = SelfAttentionLayer(
+            d_model=self.mask_dim,
+            nhead=self.num_heads,
+            dropout=self.dropout,
+            normalize_before=self.pre_norm,
+        )
+        self.ffn_attention = FFNLayer(
+            d_model=self.mask_dim,
+            dim_feedforward=dim_feedforward,
+            dropout=self.dropout,
+            normalize_before=self.pre_norm,
+            activation='gelu',
+        )
+
+    def forward(self, point_features, attn_mask, offset, queries, pos):
         point_features, rand_idx, mask_idx = pad_data(point_features, offset, self.sample_size)
         attn_mask, _, _ = pad_data(attn_mask, offset, self.sample_size, rand_idx, mask_idx)
 
         if pos is not None:
             pos, _, _ = pad_data(pos, offset, self.sample_size, rand_idx, mask_idx)
-                
+
         m = torch.stack(mask_idx)
         attn_mask = torch.logical_or(attn_mask, m[..., None])
-        
         attn_mask = attn_mask.permute((0, 2, 1))
-        
+
         output = self.cross_attention(
-                    query = queries,
-                    key = point_features,
-                    value = point_features,
-                    attn_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
-                    pos=pos
-                )
-                
+            query=queries,
+            key=point_features,
+            value=point_features,
+            attn_mask=attn_mask.repeat_interleave(self.num_heads, dim=0),
+            pos=pos,
+        )
         output = self.self_attention(
-                    output,
-                    tgt_mask=None,
-                    tgt_key_padding_mask=None,
-                )
-                    
-        queries = self.ffn_attention(
-                    output
-                )
+            output,
+            tgt_mask=None,
+            tgt_key_padding_mask=None,
+        )
+        queries = self.ffn_attention(output)
 
         return queries
 
+
 @MODELS.register_module("MySPFormer")
 class MySPFormer(nn.Module):
-    
-    def __init__(self, 
-                 num_query,
-                 encoder, 
-                 decoder,
-                 matcher, 
-                 use_superpoint_pooling=True,
-                 positional_embedding = None,
-                ):
 
+    def __init__(
+        self,
+        num_query,
+        encoder,
+        decoder,
+        matcher,
+        use_superpoint_pooling=True,
+        positional_embedding=None,
+        seg_ce_loss_weight=0.5,
+        mask_ce_loss_weight=1.0,
+        mask_dice_loss_weight=1.0,
+        score_loss_weight=0.5,
+        fts_loss_weight=0.00,
+        triplet_loss_weight=0.0,
+        overlap_loss_weight=0.0,
+        triplet_margin=0.0
+    ):
         super().__init__()
 
-        self.encoder = Encoder(**encoder)   
+        self.num_query = num_query
+        self.encoder = Encoder(**encoder)
 
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
 
+        query_dim = decoder['query_refinement_modules'][0]['mask_dim']
         self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
-        # self.query_mapping_mlp = nn.Sequential(
-        #     nn.Linear(encoder['out_channels'], decoder['query_refinement_modules'][0]['mask_dim']),
-        #     nn.LayerNorm(decoder['query_refinement_modules'][0]['mask_dim']),
+        
+        # MLP to project FPS-sampled features into query space
+        # self.query_proj = nn.Sequential(
+        #     nn.Linear(encoder['out_channels'], query_dim),
+        #     nn.LayerNorm(query_dim),
         #     nn.ReLU(),
-        #     nn.Linear(decoder['query_refinement_modules'][0]['mask_dim'], decoder['query_refinement_modules'][0]['mask_dim'])
+        #     nn.Linear(query_dim, query_dim),
         # )
 
         for i, _ in enumerate(decoder['mask_modules']):
-            decoder['mask_modules'][i]['num_classes'] += 1 #DUMMY CLASS FOR NONUSED PREDICTIONS
+            decoder['mask_modules'][i]['num_classes'] += 1
 
         self.decoder = Decoder(**decoder)
         self.matcher = build_matcher(matcher)
         self.mask_selector = MaskSelector()
-        
+
         weight = torch.ones(decoder['mask_modules'][0]['num_classes'])
         weight[-1] = 0.1
 
         self.semantic_ce_loss = nn.CrossEntropyLoss(weight=weight)
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+        self.seg_ce_loss_weight = seg_ce_loss_weight
+        self.mask_ce_loss_weight = mask_ce_loss_weight
+        self.mask_dice_loss_weight = mask_dice_loss_weight
+        self.score_loss_weight = score_loss_weight
+        self.fts_loss_weight = fts_loss_weight
+        self.triplet_loss_weight = triplet_loss_weight
+        self.overlap_loss_weight = overlap_loss_weight
+        self.triplet_margin = triplet_margin
 
         self.use_superpoint_pooling = use_superpoint_pooling
 
         self.positional_embedding = None
-        
-        if positional_embedding != None:
+        if positional_embedding is not None:
             self.positional_embedding = build_positional_embedding(positional_embedding)
-    
+
     def query_pooling(self, data):
         queries = self.__query.weight[None, ...].repeat(len(data['offset']), 1, 1) 
         return queries
-        # qrs = data['features'][data['seed_ids']].clone().detach()  
-        # qrs = self.query_mapping_mlp(qrs)
-        # return qrs
+        """Permutation-equivariant query init: FPS-sampled features + positional encoding.
+
+        Uses precomputed seed_ids (FPS indices in original point space) and maps
+        them through seg_indices to get superpoint-level indices after pooling.
+        """
+        features = data['features']  # (N_pooled, C) after superpoint pooling
+        offset = data['offset']      # (B,) cumulative counts in pooled space
+        seed_ids = data['seed_ids']  # (B, num_seeds) indices in original point space
+
+        # Map original-space seed indices to superpoint-space indices
+        seg_indices = data['seg_indices']  # (N_original,) mapping original -> superpoint
+        offset_orig = data['offset_orig'] # (B,) cumulative counts in original space
+
+        seed_features_list = []
+        seed_pos_list = []
+        pos_enc = data.get('positional_embedding')  # (N_pooled, D) or None
+
+        bs_orig = 0
+        bs_pool = 0
+        for i, (be_orig, be_pool) in enumerate(zip(offset_orig, offset)):
+            # Map seed_ids from original space to pooled superpoint indices
+            seed_sp = seg_indices[seed_ids[i] + bs_orig]  # superpoint indices (global)
+
+            seed_features_list.append(features[seed_sp])
+            if pos_enc is not None:
+                seed_pos_list.append(pos_enc[seed_sp])
+
+            bs_orig = be_orig
+            bs_pool = be_pool
+
+        seed_features = torch.stack(seed_features_list)          # (B, num_query, C)
+        # L2-normalize to remove magnitude dependency (improves sim-to-real transfer)
+        seed_features = torch.nn.functional.normalize(seed_features, dim=-1)
+        query_features = self.query_proj(seed_features)          # (B, num_query, query_dim)
+
+        # Add positional encoding at seed locations if available
+        if pos_enc is not None:
+            seed_pos = torch.stack(seed_pos_list)                # (B, num_query, D)
+            query_features = query_features + seed_pos
+
+        return query_features
 
     def __compute_loss(self, pred, data):
-        
-        axiliary_losses = {'seg_ce': [],
-                           'mask_ce': [],
-                           'mask_dice': [],
-                           'matched_iou': [],
-                           'score_loss': []}
-        
+        auxiliary_losses = {
+            'seg_ce': [],
+            'mask_ce': [],
+            'mask_dice': [],
+            'matched_iou': [],
+            'score_loss': [],
+        }
 
         intersections = []
         unions = []
-        
+
         for p in pred:
-            # matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.matcher(p, data, data['offset'])
             indices = self.matcher(p, data)
-            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = self.mask_selector(p, data, indices)
+            matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = \
+                self.mask_selector(p, data, indices)
 
-            matched_scores = [p['pred_score'][i][indices[i][0]][...,0] for i in range(len(data['offset'])) if indices[i][0] is not None]
+            matched_scores = [
+                p['pred_score'][i][indices[i][0]][..., 0]
+                for i in range(len(data['offset']))
+                if indices[i][0] is not None
+            ]
 
-            t = {'seg_ce': [],
-                 'mask_ce': [],
-                 'mask_dice': [],
-                 'matched_iou': [],
-                 'score_loss': []}
-            
+            t = {
+                'seg_ce': [],
+                'mask_ce': [],
+                'mask_dice': [],
+                'matched_iou': [],
+                'score_loss': [],
+            }
 
-            for score, mask, target, p_seg, t_seg in zip(matched_scores, matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets):
-                t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
-                t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
-                t['mask_dice'].append(self.mask_dice_loss(mask, target))
+            for score, mask, target, p_seg, t_seg in zip(
+                matched_scores, matched_outputs, matched_targets,
+                matched_seg_outputs, matched_seg_targets,
+            ):
+                if self.seg_ce_loss_weight > 0:
+                    t['seg_ce'].append(self.semantic_ce_loss(p_seg, t_seg))
+                else:
+                    t['seg_ce'].append(p_seg.new_tensor(0.0))
+
+                if self.mask_ce_loss_weight > 0:
+                    t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
+                else:
+                    t['mask_ce'].append(mask.new_tensor(0.0))
+
+                if self.mask_dice_loss_weight > 0:
+                    t['mask_dice'].append(self.mask_dice_loss(mask, target))
+                else:
+                    t['mask_dice'].append(mask.new_tensor(0.0))
 
                 with torch.no_grad():
                     intersections.append(((mask > 0) * target).sum(0))
                     unions.append(((mask > 0).sum(0) + target.sum(0)) - intersections[-1])
-                    
                     ious = intersections[-1] / unions[-1]
                     t['matched_iou'].append(ious.mean())
 
-                filter = ious > 0.5
+                if self.score_loss_weight > 0:
+                    filter = ious > 0.5
+                    if filter.sum() > 0:
+                        t['score_loss'].append(torch.nn.functional.mse_loss(score[filter], ious[filter]))
+                    else:
+                        t['score_loss'].append(score.new_tensor(0.0))
+                else:
+                    t['score_loss'].append(score.new_tensor(0.0))
 
-                if filter.sum() > 0:
-                    t['score_loss'].append(torch.nn.functional.mse_loss(score[filter], ious[filter]))
-                else:  
-                    t['score_loss'].append(torch.tensor(0.0).to(score.device))
-
-            for key, value in axiliary_losses.items():
+            for key in auxiliary_losses:
                 if key in ['mask_dice']:
                     if len(t[key][:-1]) > 0:
-                        axiliary_losses[key].append(torch.stack(t[key][:-1]).mean() + t[key][-1])
+                        auxiliary_losses[key].append(torch.stack(t[key][:-1]).mean() + t[key][-1])
                     else:
-                        axiliary_losses[key].append(t[key][-1])
+                        auxiliary_losses[key].append(t[key][-1])
                 else:
-                    axiliary_losses[key].append(torch.stack(t[key]).mean())
+                    auxiliary_losses[key].append(torch.stack(t[key]).mean())
 
-        for key, value in axiliary_losses.items():
+        for key in auxiliary_losses:
             if key in ['matched_iou']:
-                axiliary_losses[key] = torch.stack(axiliary_losses[key]).mean()
+                auxiliary_losses[key] = torch.stack(auxiliary_losses[key]).mean()
             else:
-                axiliary_losses[key] = torch.stack(axiliary_losses[key]).sum()
+                auxiliary_losses[key] = torch.stack(auxiliary_losses[key]).sum()
+
+        auxiliary_losses['fts_loss'] = data['fts_loss']
+
+        device = data['features'].device
+
+        # Triplet loss: query-to-instance prototype
+        if self.triplet_loss_weight > 0:
+            auxiliary_losses['triplet_loss'] = self.__compute_triplet_loss(
+                pred[-1], data
+            )
+        else:
+            auxiliary_losses['triplet_loss'] = torch.tensor(0.0, device=device)
+
+        # Overlap loss: penalise pairs of queries predicting the same region
+        if self.overlap_loss_weight > 0:
+            auxiliary_losses['overlap_loss'] = self.__compute_overlap_loss(
+                pred[-1], data
+            )
+        else:
+            auxiliary_losses['overlap_loss'] = torch.tensor(0.0, device=device)
+
+        auxiliary_losses['loss'] = (
+            self.seg_ce_loss_weight * auxiliary_losses['seg_ce']
+            + self.mask_ce_loss_weight * auxiliary_losses['mask_ce']
+            + self.mask_dice_loss_weight * auxiliary_losses['mask_dice']
+            + self.score_loss_weight * auxiliary_losses['score_loss']
+            + self.fts_loss_weight * auxiliary_losses['fts_loss']
+            + self.triplet_loss_weight * auxiliary_losses['triplet_loss']
+            + self.overlap_loss_weight * auxiliary_losses['overlap_loss']
+        )
+        return auxiliary_losses
+
+    def __compute_overlap_loss(self, last_pred, data):
+        """Penalise pairs of queries whose predicted masks significantly overlap.
+
+        Uses soft pairwise IoU over sigmoid probabilities so the loss is
+        differentiable and pushes queries toward non-overlapping regions.
+        """
+        masks = last_pred['pred_masks'].sigmoid()  # (N, num_query)
+        offset = data['offset']
+        losses = []
+        bs = 0
+        for be in offset:
+            m = masks[bs:be].T.float()       # (Q, N_i)
+            inter = m @ m.T                  # (Q, Q)  — soft intersection
+            areas = m.sum(dim=1)             # (Q,)
+            union = areas[:, None] + areas[None, :] - inter  # (Q, Q)
+            soft_iou = inter / (union + 1e-6)
+            # mask out diagonal (self-overlap is always 1, not penalised)
+            eye = torch.eye(soft_iou.shape[0], device=soft_iou.device)
+            off_diag_iou = soft_iou * (1.0 - eye)
+            losses.append(off_diag_iou.mean())
+            bs = be
+        return torch.stack(losses).mean()
+
+    def __compute_triplet_loss(self, last_pred, data):
+        """Query-to-instance-prototype triplet loss.
+
+        For each matched query, the anchor is the query embedding,
+        the positive is the mean feature of the matched GT instance,
+        and the negative is the mean feature of the hardest other
+        GT instance (closest prototype to the anchor).
+        """
+        query_feat = last_pred.get('query_feat')  # (B, num_query, D)
+        if query_feat is None:
+            return torch.tensor(0.0, device=data['features'].device)
+
+        # Use projected point features (same dim as queries) for prototypes
+        point_feat = last_pred.get('query_point_features')  # (N_pooled, D)
+        if point_feat is None:
+            return torch.tensor(0.0, device=data['features'].device)
+
+        instances = data['instance']  # (N_pooled,) GT instance labels
+        offset = data['offset']       # (B,)
+
+        # Run matcher on last prediction to get query-to-GT assignment
+        indices = self.matcher(last_pred, data)
+
+        all_losses = []
+        bs = 0
+        for i, be in enumerate(offset):
+            pred_ids, tgt_ids = indices[i]
+            if pred_ids is None or len(pred_ids) == 0:
+                bs = be
+                continue
+
+            inst = instances[bs:be]
+            feat = point_feat[bs:be]  # (N_i, D) same dim as query features
+
+            # Build prototype for each GT instance in this sample
+            unique_inst = inst.unique()
+            unique_inst = unique_inst[unique_inst != -1]
+            if unique_inst.numel() < 2:
+                bs = be
+                continue
+
+            # (K, C) one prototype per GT instance
+            prototypes = torch.stack([
+                feat[inst == uid].mean(dim=0) for uid in unique_inst
+            ])
+            prototypes = F.normalize(prototypes, dim=-1)
+
+            # Map tgt_ids (matched GT instance indices) to unique_inst ordering
+            inst_id_to_idx = {uid.item(): idx for idx, uid in enumerate(unique_inst)}
+
+            for qi, ti in zip(pred_ids, tgt_ids):
+                anchor = F.normalize(query_feat[i, qi].unsqueeze(0), dim=-1)  # (1, D)
+
+                # ti is the GT instance index (0-based after superpoint pooling remapping)
+                if ti.item() not in inst_id_to_idx:
+                    continue
+                pos_idx = inst_id_to_idx[ti.item()]
+                positive = prototypes[pos_idx].unsqueeze(0)  # (1, D)
+
+                # Hard negative: closest prototype that is not the positive
+                neg_mask = torch.ones(prototypes.shape[0], dtype=torch.bool,
+                                      device=prototypes.device)
+                neg_mask[pos_idx] = False
+                neg_protos = prototypes[neg_mask]  # (K-1, D)
+                sims = (anchor @ neg_protos.T).squeeze(0)  # (K-1,)
+                hard_neg_idx = sims.argmax()
+                negative = neg_protos[hard_neg_idx].unsqueeze(0)  # (1, D)
+
+                # Triplet: d(anchor, positive) - d(anchor, negative) + margin
+                d_pos = 1.0 - (anchor * positive).sum()
+                d_neg = 1.0 - (anchor * negative).sum()
+                loss = torch.clamp(d_pos - d_neg + self.triplet_margin, min=0.0)
+                all_losses.append(loss)
+
+            bs = be
+
+        if len(all_losses) == 0:
+            return point_feat.new_tensor(0.0)
         
-        axiliary_losses['loss'] = 0.5 * axiliary_losses['seg_ce'] + \
-                                  1.0 * axiliary_losses['mask_ce'] + \
-                                  1.0 * axiliary_losses['mask_dice']  + \
-                                  0.5 * axiliary_losses['score_loss'] + data['fts_loss']
-        return axiliary_losses
+        return torch.stack(all_losses).mean()
 
     def __get_pos_encs(self, data_dict):
-
-        if self.positional_embedding == None:
+        if self.positional_embedding is None:
             data_dict['positional_embedding'] = None
             return data_dict
 
         pos_encodings_pcd = []
-
         bs = 0
-        for be in data_dict['offset']:
-            coords = data_dict['coord'][bs:be]
-            scene_min = coords.min(dim=0)[0][None, ...]
-            scene_max = coords.max(dim=0)[0][None, ...]
-
-            with autocast(enabled=False):
-                tmp = self.positional_embedding(coords[None, ...].float(), input_range=[scene_min, scene_max])
-
-            pos_encodings_pcd.append(tmp.squeeze(0).permute((1, 0)))
-
-            bs = be
+        with autocast("cuda", enabled=False):
+            for be in data_dict['offset']:
+                coords = data_dict['coord'][bs:be]
+                scene_min = coords.min(dim=0)[0][None, ...]
+                scene_max = coords.max(dim=0)[0][None, ...]
+                tmp = self.positional_embedding(
+                    coords[None, ...].float(), input_range=[scene_min, scene_max],
+                )
+                pos_encodings_pcd.append(tmp.squeeze(0).permute((1, 0)))
+                bs = be
 
         data_dict['positional_embedding'] = torch.cat(pos_encodings_pcd)
-
         return data_dict
 
     def forward(self, data):
-
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
 
@@ -381,12 +565,11 @@ class MySPFormer(nn.Module):
 
         data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
 
-        queries = self.query_pooling(data)    
+        queries = self.query_pooling(data)
 
-        pred = self.decoder(data, queries) 
-        # pred = self.decoder(data['features'], data['offset']) 
+        pred = self.decoder(data, queries)
 
-        return_dict = self.__compute_loss(pred, data)  
+        return_dict = self.__compute_loss(pred, data)
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
