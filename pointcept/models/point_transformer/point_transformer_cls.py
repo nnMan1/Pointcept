@@ -61,17 +61,17 @@ class PointTransformerCls(nn.Module):
             stride=stride[4],
             nsample=nsample[4],
         )  # N/256
-        self.cls = nn.Sequential(
-            nn.Linear(planes[4], 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.5),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.5),
-            nn.Linear(128, num_classes),
-        )
+        # self.cls = nn.Sequential(
+        #     nn.Linear(planes[4], 256),
+        #     nn.BatchNorm1d(256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(p=0.5),
+        #     nn.Linear(256, 128),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(p=0.5),
+        #     nn.Linear(128, num_classes),
+        # )
 
     def _make_enc(self, block, planes, blocks, share_planes=8, stride=1, nsample=16):
         layers = [
@@ -103,7 +103,7 @@ class PointTransformerCls(nn.Module):
             x_b = x5[s_i:e_i, :].sum(0, True) / cnt
             x.append(x_b)
         x = torch.cat(x, 0)
-        x = self.cls(x)
+        # x = self.cls(x)
         return x
 
 

@@ -10,17 +10,14 @@ enable_amp = False
 # model settings
 model = dict(
     type="DefaultClassifier",
-    num_classes=4,
-    backbone_embed_dim=256,
+    num_classes=18,
+    backbone_embed_dim=512,
     backbone=dict(
-        type="SpUNet-v1m1",
+        type="PointTransformer-Cls26",
         in_channels=3,
         num_classes=0,
-        channels=(32, 64, 128, 256, 256, 128, 96, 96),
-        layers=(2, 3, 4, 6, 2, 2, 2, 2),
-        cls_mode=True,
     ),
-    criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1, weight=[0.1, 0.1, 0.1, 0.01]),
+    criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1, weight=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.01]),
               dict(type="FocalLoss", loss_weight=1.0, ignore_index=-1)],
 )
 
@@ -31,22 +28,28 @@ scheduler = dict(type="MultiStepLR", milestones=[0.6, 0.8], gamma=0.1)
 
 # dataset settings
 dataset_type = "MCBDataset"
-data_root = "data/mcb_dataset_a2/data/MCB_B"
+data_root = "data/mcb_dataset"
 cache_data = False
 class_names = [
-    'gear',
-    'nut',
-    'screws_and_bolts',
+    'Eye screws',
+    'Setscrew',
+    'Tapping screws',
+    'Cap nuts',
+    'Castle nuts',
+    'Flange nut',
+    'Hexagonal nuts',
+    'Locknuts',
+    'Rivet nut',
+    'Slotted nuts',
+    'Square nuts',
+    'T-nut',
+    'Wingnuts',
+    'Screws and bolts with countersunk head',
+    'Screws and bolts with cylindrical head',
+    'Screws and bolts with hexagonal head',
+    'Washer bolt',
     'other'
 ]
-
-label_to_id = {
-    'gear': 0,
-    'nut': 1,
-    'pin': 2,
-    'screws_and_bolts': 2,
-    'other': 3,
-}
 
 data = dict(
     num_classes=len(class_names),
@@ -57,7 +60,6 @@ data = dict(
         split="train",
         data_root=data_root,
         class_names=class_names,
-        label_to_id=label_to_id,
         transform=[
             dict(type="NormalizeCoord"),
             # dict(type="CenterShift", apply_z=True),
@@ -94,7 +96,6 @@ data = dict(
         split="test",
         data_root=data_root,
         class_names=class_names,
-        label_to_id=label_to_id,
         transform=[
             dict(type="NormalizeCoord"),
             dict(

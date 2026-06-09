@@ -85,7 +85,29 @@ model.load_state_dict(checkpoint['state_dict'])
 model = model.cuda().float()
 model.eval()
 
-assemblies = glob.glob(osp.join('data/abc_dataset/chunks/*/stl3', '*'))
+# assemblies = glob.glob(osp.join('data/abc_dataset/chunks/*/stl3', '*'))
+assemblies = []
+for dirs in glob.glob('data/my_synth/raw/**/*.stl', recursive=True) + glob.glob('data/my_synth/raw/**/*.obj', recursive=True) + glob.glob('data/my_synth/raw/**/*.ply', recursive=True):
+    print(dirs)
+    dirname = osp.dirname(dirs)
+    if dirname not in assemblies:
+        assemblies.append(dirname)
+
+print(f'Found {len(assemblies)} assemblies.')
+
+# assemblies = [
+#               'data/my_synth/raw/CouplingFalange/flange-coupling-15_struttura.STEP',
+#               'data/my_synth/raw/CouplingFalange/flange-coupling-15.STEP',
+#               'data/my_synth/raw/CouplingFalange/flange-coupling-21.STEP',
+#               'data/my_synth/raw/Differential/stl3/2017-1-DIFFERENTIEL-ACHOU-BENASSON-BENRIDA-343-PARTS.stp',
+#               'data/my_synth/raw/Differential/stl3/2017-1-DIFFERENTIEL-BUREL-BRATULIC-BENZAMIA-153-PARTS.stp',
+#               'data/my_synth/raw/Differential/stl3/2017-1-DIFFERENTIEL-COSTE-ELDACHRI-CHAVIGNOT-209-PARTS.stp',
+#               'data/my_synth/raw/Differential/stl3/2017-1-DIFFERENTIEL-LATETE-MALARD-MARTIN-246-PARTS.stp',
+#               'data/my_synth/raw/Differential/stl3/2017-1-DIFFERENTIEL-LATHUILLE-GIODA-FRANCHETEAU-170-PARTS.stp',
+#               'data/my_synth/raw/electromotors/1-1kw-1-5hp-4-pole-1400rpm-19mm-shaft-three-phase-electric-motor-reduced-80-frame-1.snapshot.1/stl4/1.1KW Reduced 80 Frame 3Ø Motor GL80-B3',
+#               'data/my_synth/raw/electromotors/3PH-0.38 hp 1800RPM - MOTOR.STEP/*/',
+#               'data/my_synth/raw/electromotors/12mt-bus-electric-motor-1.snapshot.2/stl3/12mt bus electric motor',
+#             ]
 
 transform = Compose(
         [

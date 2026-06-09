@@ -1,15 +1,17 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
-num_worker = 8
+batch_size = 4 # bs: total bs in all gpus
+num_worker = 30
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
+# find_unused_parameters = False
 resume=True
-# weight='exp/scannet/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
-# weight = 'exp/abc_dataset/insseg-mask3d-v1m1-0-spunet-base/model/model_last.pth'
+weight='exp/my_synth/insseg-spformer-v1m1-0-spunet-base_cont/model/model_last.pth'
+# weight='backbones/sstnet_pretrain.pth'
+
 
 num_classes = 1
 fts_sizes = 128
@@ -18,52 +20,47 @@ segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
-    type="Mask-3D",
+    type="SPFormer",
+    num_query = 100,
     encoder=dict(
         backbone=dict(
-            type="Res16UNet34C",
-            in_channels = 3,
-            out_channels = 96,
-            out_fpn=True, #return intermidiate features
+            input_channel=3,
+            blocks=5,
+            block_reps=2,
+            media=32,
+            normalize_before=True,
+            return_blocks=True,
+            pool='mean'
         ),
-        out_channels=128,
+        backbone_out_channels=32,
+        out_channels=32,
      ),
+    #  positional_embedding=dict(
+    #     type='PositionEmbeddingCoordsSine',
+    #     pos_type="fourier",
+    #     d_pos=128,
+    #     gauss_scale=1,
+    #     normalize=True,
+    # ),
      decoder=dict(
-        in_channels=128,
-        hlevels=5,
-        positional_embedding=dict(
-            type='PositionEmbeddingCoordsSine',
-            pos_type="fourier",
-            d_pos=128,
-            gauss_scale=1,
-        normalize=True,
-        ),
+        in_channels=32,
+        hlevels=6,
         mask_modules=[
             dict(
                 num_classes=num_classes, 
                 return_attn_masks=True, 
                 hidden_dim=fts_sizes,
-                reuse=3
+                reuse=1
             )
         ],
         query_refinement_modules=[
             dict(
-                in_channels=256,
+                in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0,
-                sample_size=200,
-            ),
-            dict(
-                in_channels=256,
-                mask_dim=fts_sizes,
-                dim_feedforward=dim_feedforward,
-                pre_norm=False,
-                num_heads=8, 
-                dropout=0,
-                sample_size=800,
+                dropout=0
             ),
             dict(
                 in_channels=128,
@@ -71,27 +68,40 @@ model = dict(
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0,
-                sample_size=3200,
+                dropout=0
             ),
             dict(
-                in_channels=96,
+                in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0,
-                sample_size=12800,
+                dropout=0
             ),
             dict(
-                in_channels=96,
+                in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
                 num_heads=8, 
-                dropout=0,
-                sample_size=51200,
+                dropout=0
             ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            ),
+            dict(
+                in_channels=128,
+                mask_dim=fts_sizes,
+                dim_feedforward=dim_feedforward,
+                pre_norm=False,
+                num_heads=8, 
+                dropout=0
+            )
         ],
     ),
     instance_ignore_index=-1,
@@ -99,7 +109,8 @@ model = dict(
 
 
 # scheduler settings
-epoch = 600
+epoch = 100
+eval_epoch = 20
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
 scheduler = dict(
     type="OneCycleLR",
@@ -111,18 +122,29 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "ABCDataset"
-data_root = "data/abc_dataset/old"
-class_names = ['other']
+dataset_type = "MechanicalAssemblySynth"
+data_root = "data/my_synth/electromotors/scanns"
+
+classes=dict({
+            'other': 0,
+            'nut': 0,
+            'screw': 0
+        })
+
+class_names = ["other"]
+
 
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
     names=class_names,
+
     train=dict(
         type=dataset_type,
         split="train",
         data_root=data_root,
+        recompute_clustering=False,
+        cache=False,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -132,7 +154,7 @@ data = dict(
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
-            dict(type="NormalizeCoord"),
+            # dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
@@ -140,13 +162,65 @@ data = dict(
             # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance"),
+                keys=("coord", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", sample_rate=0.8, mode="random"),
+            dict(type="SphereCrop",  point_max=200000, mode="random"),
+            dict(
+                type="InstanceParser",
+                segment_ignore_index=segment_ignore_index,
+                instance_ignore_index=-1,
+            ),
+            dict(type='RandomSeed', n_points = 100),
+            dict(type="ToTensor"),
+            dict(
+                type="Collect",
+                keys=(
+                    "coord",
+                    "grid_coord",
+                    "segment",
+                    "instance",
+                    "instance_centroid",
+                    "bbox",
+                    "seed_ids",
+                    "id",
+                    "path",
+                    "seg_indices"
+                ),
+                feat_keys=("grid_coord"),
+            ),
+        ],
+        test_mode=False,
+        classes=classes,
+    ),
+    val=dict(
+        type='MechanicalAssembly',
+        split='train',
+        data_root='data/mechanical-assemblies',
+        transform=[
+            dict(type="CenterShift", apply_z=True),
+            dict(
+                type="Copy",
+                keys_dict={
+                    "coord": "origin_coord",
+                    "segment": "origin_segment",
+                    "instance": "origin_instance",
+                },
+            ),
+            # dict(type="NormalizeCoord"),
+            dict(
+                type="GridSample",
+                grid_size=1,
+                hash_type="fnv",
+                mode="train",
+                return_grid_coord=True,
+                keys=("coord", "segment", "instance", "seg_indices"),
+            ),
+            # dict(type="SphereCrop", point_max=1000000, mode='center'),
+            dict(type="CenterShift", apply_z=False),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
@@ -161,77 +235,86 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "instance_centroid",
-                    "bbox",
-                    "seed_ids",
-                    "id",
-                    "path"
-                ),
-                feat_keys=("grid_coord"),
-            ),
-        ],
-        test_mode=False,
-    ),
-    val=dict(
-        type=dataset_type,
-        data_root=data_root,
-        split="val",
-        transform=[
-            dict(type="CenterShift", apply_z=True),
-            dict(type="NormalizeCoord"),
-            dict(
-                type="Copy",
-                keys_dict={
-                    "coord": "origin_coord",
-                    "segment": "origin_segment",
-                    "instance": "origin_instance",
-                },
-            ),
-            dict(
-                type="GridSample",
-                grid_size=0.02,
-                hash_type="fnv",
-                mode="train",
-                return_grid_coord=True,
-                keys=("coord", "segment", "instance"),
-            ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
-            dict(type="CenterShift", apply_z=False),
-            dict(
-                type="InstanceParser",
-                segment_ignore_index=segment_ignore_index,
-                instance_ignore_index=-1,
-            ),
-            dict(type='FPSSeed', n_points = 150),
-            dict(type="ToTensor"),
-            dict(
-                type="Collect",
-                keys=(
-                    "coord",
-                    "grid_coord",
-                    "segment",
-                    "instance",
                     "origin_coord",
                     "origin_segment",
                     "origin_instance",
                     "instance_centroid",
                     "bbox",
-                    "seed_ids"
+                    "seed_ids",
+                    "path",
+                    "seg_indices",
                 ),
                 feat_keys=('coord'),
                 offset_keys_dict=dict(offset="coord", origin_offset="origin_coord"),
             ),
         ],
-        test_mode=False
+        test_mode=False,
+        classes={"other": 0, 
+                 "gear": 0, 
+                 "nut": 0, 
+                 "screw": 0, 
+                 "axe": 0},   
     ),
-    test=dict(),  # currently not available
+    test=dict(  
+            type='MechanicalAssembly',
+            split='train',
+            data_root='data/scans',
+            transform=[
+                dict(type='CenterShift', apply_z=True),
+                dict(
+                    type='Copy',
+                    keys_dict=dict(
+                        coord='origin_coord',
+                        segment='origin_segment',
+                        instance='origin_instance')),
+                dict(
+                    type='GridSample',
+                    grid_size=1,
+                    hash_type='fnv',
+                    mode='train',
+                    return_grid_coord=True,
+                    keys=('coord', 'segment', 'instance', 'seg_indices')),
+                dict(type='CenterShift', apply_z=False),
+                dict(
+                    type='InstanceParser',
+                    segment_ignore_index=(-1, ),
+                    instance_ignore_index=-1),
+                dict(type='FPSSeed', n_points=100),
+                dict(type='ToTensor'),
+                dict(
+                    type='Collect',
+                    keys=('coord', 'grid_coord', 'segment', 'instance',
+                        'origin_coord', 'origin_segment', 'origin_instance',
+                        'instance_centroid', 'bbox', 'seed_ids', 'path',
+                        'seg_indices'),
+                    feat_keys='coord',
+                    offset_keys_dict=dict(
+                        offset='coord', origin_offset='origin_coord'))
+            ],
+            test_mode=False,
+            classes={"other": 0, 
+                        "gear": 0, 
+                        "nut": 0, 
+                        "screw": 0, 
+                        "axe": 0})
 )
 
 hooks = [
     dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
-    # dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.conv0p1s1", "encoder.backbone.final", "decoder.mask_modules.0.class_embed_head", "semantic_ce_loss.weight"], replacement=["module.", "dummy", "dummy", "dummy", "dummy"]),
+    # dict(type="CheckpointLoader", keywords=["module.", "module.encoder.backbone.input_conv.0"], replacement=["module.encoder.backbone.", "dummy"]),
+    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(type="InsSegEvaluator",),
+    dict(type="InsSegEvaluator",
+         segment_ignore_index=segment_ignore_index,
+         instance_ignore_index=-1,),
     dict(type="CheckpointSaver", save_freq=None),
 ]
+
+# Tester
+test = dict(
+    type="InsSegTester",
+    segment_ignore_index=segment_ignore_index,
+    instance_ignore_index=-1,
+    verbose=False,
+)

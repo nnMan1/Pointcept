@@ -52,6 +52,7 @@ class MCBDataset(Dataset):
         cache=False,
         loop=1,
         class_names = class_names, 
+        label_to_id=None,
     ):
         super(MCBDataset, self).__init__()
         self.data_root = data_root
@@ -59,7 +60,10 @@ class MCBDataset(Dataset):
 
         self.class_names = class_names
         
-        self.label_to_id = {label: id for id, label in enumerate(class_names)}
+        if label_to_id is not None:
+            self.label_to_id = label_to_id
+        else:
+            self.label_to_id = {label: id for id, label in enumerate(class_names)}
 
         self.transform = Compose(transform)
         self.cache = cache
@@ -97,11 +101,11 @@ class MCBDataset(Dataset):
 
         if isinstance(self.split, str):
             for label in class_names:
-                data_list += glob.glob(osp.join(self.data_root, 'MCB_*/dataset_org_norm/', self.split, label, '*.obj'))
+                data_list += glob.glob(osp.join(self.data_root, self.split, label, '*.obj'))
         elif isinstance(self.split, Sequence):
             for split in self.split:
                 for label in class_names:
-                    data_list += glob.glob(osp.join(self.data_root, 'MCB_*/dataset_org_norm/', split, label, '*.obj'))
+                    data_list += glob.glob(osp.join(self.data_root, split, label, '*.obj'))
         else:
             raise NotImplementedError
         
@@ -174,4 +178,18 @@ class MCBDataset(Dataset):
 
     def __len__(self):
         return len(self.data_list) * self.loop
+    
+    def analyze_dataset(self):
+        """
+        Analyze the dataset to get the distribution of classes.
+        """
+        class_distribution = {label: 0 for label in self.class_names}
+        for data in self.data_list:
+            label = data.split('/')[-2]
+            if label in class_distribution:
+                class_distribution[label] += 1
+            else:
+                class_distribution['other'] += 1
+        
+        return class_distribution   
 
