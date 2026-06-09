@@ -18,7 +18,7 @@ import torch
 import copy
 import open3d as o3d
 import trimesh
-from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import NearestNeighbors, radius_neighbors_graph
 from collections.abc import Sequence, Mapping
 from pointcept.utils.registry import Registry
 from torch_geometric import nn
@@ -1243,6 +1243,81 @@ class InstanceParser(object):
         unique, inverse = np.unique(instance[mask], return_inverse=True)
         data_dict['instance_segment'] = segment[index]
         return data_dict
+
+@TRANSFORMS.register_module()
+class GenerateBoundary(object):
+    """Per-point binary border label derived from instance labels.
+
+    A point is labelled a border (1) when at least one of its spatial
+    neighbours belongs to a *different* instance, otherwise it is a non-border
+    (0). This only depends on ``coord`` and ``instance``, so it is
+    dataset-agnostic and can be dropped into any pipeline.
+
+    Neighbourhood mode (``radius`` is the default and recommended):
+        * radius: a fixed metric ball, so the border has a constant geometric
+          thickness regardless of local point density. Scale-dependent — pick
+          ``radius`` relative to your ``GridSample`` ``grid_size`` (≈1-2x).
+        * k-NN (set ``radius=None``, ``k=...``): unitless, but the metric
+          border width shrinks in dense regions and grows in sparse ones.
+
+    Run this BEFORE ``GridSample`` (so the label is computed at full
+    resolution) and add the output key to the ``GridSample`` and ``Collect``
+    key lists so it survives subsampling and reaches the model.
+
+    Args:
+        radius (float | None): radius of the neighbourhood ball. When None,
+            falls back to k-NN with ``k`` neighbours.
+        k (int): number of nearest neighbours to inspect (used only when
+            ``radius`` is None).
+        instance_ignore_index (int): instance id treated as "no instance";
+            such points are never borders and are ignored as neighbours.
+        key (str): output key written into ``data_dict``.
+    """
+
+    def __init__(self, radius=2.0, k=16, instance_ignore_index=-1, key="border"):
+        self.radius = radius
+        self.k = k
+        self.instance_ignore_index = instance_ignore_index
+        self.key = key
+
+    def __call__(self, data_dict):
+        assert "coord" in data_dict and "instance" in data_dict, \
+            "GenerateBoundary requires 'coord' and 'instance' in data_dict"
+        coord = data_dict["coord"]
+        instance = np.asarray(data_dict["instance"]).reshape(-1)
+        n = coord.shape[0]
+        border = np.zeros(n, dtype=np.int64)
+
+        if n > 1:
+            valid_self = instance != self.instance_ignore_index
+            if self.radius is not None:
+                # Sparse neighbour graph -> compare instances per edge, then
+                # scatter "is border" onto the source point. Fully vectorised,
+                # avoids the ragged per-point Python loop on large clouds.
+                graph = radius_neighbors_graph(
+                    coord, radius=self.radius, mode="connectivity",
+                    include_self=False,
+                ).tocoo()
+                src, dst = graph.row, graph.col
+                cross = (
+                    (instance[src] != instance[dst])
+                    & (instance[dst] != self.instance_ignore_index)
+                )
+                border[src[cross]] = 1
+                border[~valid_self] = 0
+            else:
+                k = min(self.k + 1, n)  # +1: first neighbour is the point itself
+                nn = NearestNeighbors(n_neighbors=k).fit(coord)
+                _, idx = nn.kneighbors(coord)
+                neigh_inst = instance[idx]  # (N, k)
+                diff = (neigh_inst != instance[:, None]) & (
+                    neigh_inst != self.instance_ignore_index
+                )
+                border = (diff.any(axis=1) & valid_self).astype(np.int64)
+
+        data_dict[self.key] = border
+        return data_dict
+
 
 @TRANSFORMS.register_module()
 class RandomSeed(object):

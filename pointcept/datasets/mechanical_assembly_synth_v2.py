@@ -34,6 +34,7 @@ class MechanicalAssemblySynthV2(Dataset):
         test_cfg=None,
         cache=False,
         loop=1,
+        image_size=(448, 448),
         classes = [],
         load_images=True,
         image_transform=None
@@ -79,10 +80,7 @@ class MechanicalAssemblySynthV2(Dataset):
         # self.prepare_clustering()
         self.preloaded_data = [None for _ in self.data_list]
 
-        self.image_size = (448, 448)  # or (518, 518) for ViT-Giant
-
-        assert self.image_size[0] % 14 == 0 and self.image_size[1] % 14 == 0, \
-            "Image size must be divisible by 14 for ViT models."
+        self.image_size = image_size # or (518, 518) for ViT-Giant
 
         self.image_transform = transforms.Compose([
             transforms.Resize(self.image_size),  # or 518 for ViT-Giant
@@ -95,7 +93,7 @@ class MechanicalAssemblySynthV2(Dataset):
 
     def get_mesh_name(self, dir):
 
-        mesh_files = ["visible.ply"]
+        mesh_files = ["assembly.ply"]
         if len(mesh_files) == 0:
             raise FileNotFoundError(f"No mesh file found in {dir}")
         return os.path.basename(mesh_files[0])
@@ -124,16 +122,19 @@ class MechanicalAssemblySynthV2(Dataset):
         if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
             return torch.load(os.path.join(dir, 'cached.pth'))
                 
-        with open(os.path.join( dir, 'visible_annotations.json')) as json_file:
+        with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
         if 'semantic_id' not in annotations:
             annotations['semantic_id'] = np.zeros_like(annotations['instance_id'])
 
-        with open(os.path.join(dir, 'grp_1e-05_100.json')) as json_file:
-            groups = np.asarray(json.load(json_file))
+        try:
+            with open(os.path.join(dir, 'grp_1e-05_100.json')) as json_file:
+                groups = np.asarray(json.load(json_file))
+        except FileNotFoundError:
+            groups = np.array([])
 
-        mesh = trimesh.load(file)
+        mesh = trimesh.load(file, process=False)
 
         if len(mesh.vertices) < 2048:
             del mesh
@@ -151,7 +152,7 @@ class MechanicalAssemblySynthV2(Dataset):
         K_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*K.txt')))
         R_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*R.txt')))
         T_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*T.txt')))
-        mapping_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*mapping.txt')))
+        mapping_paths = sorted(glob.glob(os.path.join(dir,  'poses', '*pix2face_.npy')))
     
         data = {
             'coord':  deepcopy(mesh.vertices),
@@ -176,7 +177,7 @@ class MechanicalAssemblySynthV2(Dataset):
                 R = np.loadtxt(R)
                 T = np.loadtxt(T)
 
-                mapping = np.loadtxt(mapping, dtype=np.int32)
+                mapping = np.load(mapping).astype(np.int32)
                 src = np.stack(np.where(mapping != -1)).T
                 tgt = mapping[src[:, 0], src[:, 1]]            
                 tgt = mesh.faces[tgt].copy().reshape(-1)

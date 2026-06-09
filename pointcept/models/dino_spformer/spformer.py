@@ -226,12 +226,26 @@ class MySPFormer(nn.Module):
         fts_loss_weight=0.00,
         triplet_loss_weight=0.0,
         overlap_loss_weight=0.0,
-        triplet_margin=0.0
+        triplet_margin=0.0,
+        border_loss_weight=0.0,
+        border_focal_alpha=0.5,
     ):
         super().__init__()
 
         self.num_query = num_query
         self.encoder = Encoder(**encoder)
+
+        # Per-point border detection branch (binary: border vs non-border).
+        # Built only when enabled so checkpoints without it still load.
+        self.border_head = None
+        if border_loss_weight > 0:
+            border_in = encoder['out_channels']
+            self.border_head = nn.Sequential(
+                nn.Linear(border_in, border_in),
+                nn.ReLU(),
+                nn.Linear(border_in, 1),
+            )
+            self.border_loss = BinaryFocalLoss(alpha=border_focal_alpha)
 
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
@@ -268,6 +282,7 @@ class MySPFormer(nn.Module):
         self.triplet_loss_weight = triplet_loss_weight
         self.overlap_loss_weight = overlap_loss_weight
         self.triplet_margin = triplet_margin
+        self.border_loss_weight = border_loss_weight
 
         self.use_superpoint_pooling = use_superpoint_pooling
 
@@ -420,6 +435,14 @@ class MySPFormer(nn.Module):
         else:
             auxiliary_losses['overlap_loss'] = torch.tensor(0.0, device=device)
 
+        # Border loss: per-point binary border vs non-border classification
+        if self.border_loss_weight > 0 and 'border_logits' in data:
+            auxiliary_losses['border_loss'] = self.border_loss(
+                data['border_logits'], data['border'].float(),
+            )
+        else:
+            auxiliary_losses['border_loss'] = torch.tensor(0.0, device=device)
+
         auxiliary_losses['loss'] = (
             self.seg_ce_loss_weight * auxiliary_losses['seg_ce']
             + self.mask_ce_loss_weight * auxiliary_losses['mask_ce']
@@ -428,6 +451,7 @@ class MySPFormer(nn.Module):
             + self.fts_loss_weight * auxiliary_losses['fts_loss']
             + self.triplet_loss_weight * auxiliary_losses['triplet_loss']
             + self.overlap_loss_weight * auxiliary_losses['overlap_loss']
+            + self.border_loss_weight * auxiliary_losses['border_loss']
         )
         return auxiliary_losses
 
@@ -560,6 +584,12 @@ class MySPFormer(nn.Module):
         data.update(self.encoder(data))
         data.update(self.__get_pos_encs(data))
 
+        # Border branch: predict on the original-resolution per-point features,
+        # before superpoint pooling collapses them. 'border' GT is not a pooling
+        # key, so both logits and labels stay at original point resolution.
+        if self.border_head is not None:
+            data['border_logits'] = self.border_head(data['features']).squeeze(-1)
+
         if not self.use_superpoint_pooling:
             data.pop('seg_indices', None)
 
@@ -573,6 +603,8 @@ class MySPFormer(nn.Module):
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
+            if self.border_head is not None:
+                return_dict['pred_border'] = data['border_logits'].sigmoid()
             data = self.superpoint_unpooling(data)
 
         return return_dict

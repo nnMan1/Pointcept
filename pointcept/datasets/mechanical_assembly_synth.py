@@ -22,6 +22,16 @@ from PIL import Image
 import torchvision.transforms as transforms
 import re
 
+try:
+    from pytorch3d.structures import Pointclouds
+    from pytorch3d.renderer import (
+        FoVPerspectiveCameras,  
+        PointsRasterizationSettings,
+        PointsRasterizer,
+    )
+except ImportError:
+    print("PyTorch3D is not installed. Please install it to use the pixel-point matching functionality.")
+
 @DATASETS.register_module("MechanicalAssemblySynth")
 class MechanicalAssemblySynth(Dataset):
 
@@ -39,6 +49,7 @@ class MechanicalAssemblySynth(Dataset):
         recompute_clustering=False,
         use_clustering="random",
         image_transform=None,
+        image_size=(448, 448),
         load_images=True,
     ):
         super(MechanicalAssemblySynth, self).__init__()
@@ -46,6 +57,7 @@ class MechanicalAssemblySynth(Dataset):
         self.split = split
         self.transform = Compose(transform)
         self.cache = cache
+
         self.loop = (
             loop if not test_mode else 1
         )  # force make loop = 1 while in test mode
@@ -89,7 +101,7 @@ class MechanicalAssemblySynth(Dataset):
 
 
         self.image_transform = transforms.Compose([
-            transforms.Resize((224, 224)),  # or 518 for ViT-Giant
+            transforms.Resize(image_size),  # or 518 for ViT-Giant
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
@@ -249,8 +261,11 @@ class MechanicalAssemblySynth(Dataset):
 
     def get_data(self, idx):
 
+
         idx = idx % len(self.data_list)
         dir = self.data_list[idx]
+
+        # try:
 
         annotations = sorted(glob.glob(os.path.join(dir, '*.json')))
         # Example usage: check if any annotation filename matches a regex pattern
@@ -260,6 +275,7 @@ class MechanicalAssemblySynth(Dataset):
         if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
             try:
                 data=torch.load(os.path.join(dir, 'cached.pth'))
+                data['segment'] = np.zeros_like(data['instance'])
                 data['seg_indices'] = data[self.get_clustering()]
                 data.pop('seg_indices1')
                 data.pop('seg_indices2')
@@ -344,6 +360,8 @@ class MechanicalAssemblySynth(Dataset):
         if self.load_images:
             images, mappings_src, mappings_tgt = [], [], []
 
+            print(len(image_paths), len(K_paths), len(R_paths), len(T_paths))
+
             for i, (image_path, K, R, T) in enumerate(zip(image_paths, K_paths, R_paths, T_paths)):
                 image = Image.open(image_path).convert('RGB')
                 images.append(image)
@@ -352,6 +370,7 @@ class MechanicalAssemblySynth(Dataset):
                 R = np.loadtxt(R)
                 T = np.loadtxt(T)
 
+                # print(f"Processing {image_path} with K: {K}, R: {R}, T: {T}")
                 src, tgt = self.pixel_point_matches(
                     pts_world=vertices,
                     normals=normals[keep_ids],
@@ -401,6 +420,9 @@ class MechanicalAssemblySynth(Dataset):
     
         
         return data
+        # except Exception as e:
+        #     print(f"Error processing {dir}: {e}")
+        #     raise e
 
     def get_data_name(self, idx):
         data_name = self.data_list[idx]
