@@ -30,10 +30,11 @@ from pointcept.utils.misc import (
 )
 
 from pointcept.utils.metrics import (
-    InstanceAveragePrecision, 
-    InstanceMeanIoU, 
+    InstanceAveragePrecision,
+    InstanceMeanIoU,
     MatchedOnlyInstanceMeanIoU,
-    GTInstanceIoU
+    GTInstanceIoU,
+    ScaleStratifiedInstanceAveragePrecision
 )
 
 
@@ -548,7 +549,8 @@ class InstSegTester(TesterBase):
             InstanceAveragePrecision(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
             InstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, device="cuda"),
             MatchedOnlyInstanceMeanIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda"),
-            GTInstanceIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, device="cuda")
+            GTInstanceIoU(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, device="cuda"),
+            ScaleStratifiedInstanceAveragePrecision(num_classes=self.cfg.data.num_classes, class_names=self.cfg.data.names, overlaps=self.overlaps, device="cuda")
         ]
 
     def test(self):
@@ -659,6 +661,16 @@ class InstSegTester(TesterBase):
         logger.info(
             "Val result: GT mIoU {:.4f}.".format(
                 gt_mIoU
+            )
+        )
+
+        scale_scores = self.metrics[4].compute()
+        logger.info(
+            "Val result: AP_S/AP_M/AP_L {:.4f}/{:.4f}/{:.4f} "
+            "(tau_S={:.0f}, tau_L={:.0f}; n_S/n_M/n_L {}/{}/{}).".format(
+                scale_scores["AP_S"], scale_scores["AP_M"], scale_scores["AP_L"],
+                scale_scores["tau_S"], scale_scores["tau_L"],
+                scale_scores["num_gt_S"], scale_scores["num_gt_M"], scale_scores["num_gt_L"]
             )
         )
 

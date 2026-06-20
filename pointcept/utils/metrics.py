@@ -278,6 +278,10 @@ class InstanceMatcher:
 
             y_true = []
             y_score = []
+            # Point count of the matched GT (TP) or -1 (FP), and of the
+            # prediction itself — used by scale-stratified AP to bin matches.
+            gt_size = []
+            pred_size = []
             matched_gt = set()
 
             # Sort descending by confidence
@@ -300,14 +304,19 @@ class InstanceMatcher:
                     matched_gt.add(gts[best_index]['instance_id'])
                     iou_sums[cls] = iou_sums.get(cls, 0.0) + best_iou
                     tp_counts[cls] = tp_counts.get(cls, 0) + 1
+                    gt_size.append(gts[best_index]['vert_count'])
                 else:
                     y_true.append(0)
+                    gt_size.append(-1)
 
                 y_score.append(preds[p_idx]['confidence'])
+                pred_size.append(preds[p_idx]['vert_count'])
 
             matches[cls] = {
                 "y_true": np.array(y_true),
                 "y_score": np.array(y_score),
+                "gt_size": np.array(gt_size),
+                "pred_size": np.array(pred_size),
                 "num_gt": len(gts),
             }
 
@@ -471,6 +480,193 @@ class InstanceAveragePrecision(BaseMetric):
             for mkey in metric_keys:
                 values = [results[cls].get(mkey, 0.0) for cls in valid_classes]
                 results[f"m{mkey}"] = float(np.mean(values))
+
+        return results
+
+    def reset(self):
+        self._reset_buffers()
+
+# @METRICS.register_module
+class ScaleStratifiedInstanceAveragePrecision(BaseMetric):
+    """Scale-stratified instance AP: AP_S, AP_M and AP_L.
+
+    GT instances are partitioned by point count into Small / Medium / Large:
+        |X_p| <= tau_S            -> S
+        tau_S < |X_p| <= tau_L    -> M
+        |X_p| > tau_L             -> L
+    By default tau_S and tau_L are the 33rd and 66th percentiles of GT
+    instance sizes pooled across the whole evaluation set, computed lazily in
+    ``compute()`` (so the thresholds reflect the full test set rather than any
+    single scene). They can be pinned explicitly via ``size_thresholds``.
+
+    Matching is identical to :class:`InstanceAveragePrecision` (ScanNet-style,
+    greedy, one prediction per GT). Following COCO's area-range convention,
+    each size bin is evaluated independently: true positives are assigned to
+    the bin of their *matched GT*, unmatched predictions (false positives) are
+    assigned to the bin of their *own* point count, and matches falling outside
+    the bin are ignored. AP per bin is the VOC all-point AP averaged over
+    overlaps >= 0.5 and over the valid classes (mean AP).
+    """
+
+    SIZE_BINS = ("S", "M", "L")
+
+    def __init__(self, num_classes, class_names, segment_ignore_index=(-1,),
+                 instance_ignore_index=-1, min_region_size=100, overlaps=None,
+                 size_percentiles=(33, 66), size_thresholds=None,
+                 device="cuda", **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.segment_ignore_index = segment_ignore_index
+        self.instance_ignore_index = instance_ignore_index
+        self.overlaps = overlaps if overlaps is not None else np.sort(
+            np.concatenate(([0.25], np.arange(0.5, 0.951, 0.05)))
+        )
+        self.size_percentiles = size_percentiles
+        # Optional explicit (tau_S, tau_L); overrides the percentile estimate.
+        self.size_thresholds = size_thresholds
+        self.device = device
+        self.valid_class_names = [
+            name
+            for idx, name in enumerate(class_names)
+            if idx not in segment_ignore_index
+        ]
+
+        self.matcher = InstanceMatcher(
+            class_names=class_names,
+            valid_class_names=self.valid_class_names,
+            segment_ignore_index=segment_ignore_index,
+            instance_ignore_index=instance_ignore_index,
+            min_region_size=min_region_size
+        )
+
+        self._reset_buffers()
+
+    def _reset_buffers(self):
+        # Per class / per overlap parallel arrays of matched predictions.
+        self.records = {
+            cls: {
+                ov: {"y_true": [], "y_score": [], "gt_size": [], "pred_size": []}
+                for ov in self.overlaps
+            }
+            for cls in self.class_names
+        }
+        # Point counts of every GT instance, per class (for binning + num_gt).
+        self.gt_sizes = {cls: [] for cls in self.class_names}
+
+    def update(self, pred_dict, gt_dict):
+        for key in 'pred_classes', 'pred_scores', 'pred_masks':
+            if key not in pred_dict:
+                raise ValueError(f"Missing key '{key}' in predictions")
+        for key in 'segment', 'instance':
+            if key not in gt_dict:
+                raise ValueError(f"Missing key '{key}' in ground truth")
+
+        assignments = self.matcher.assign(pred_dict, gt_dict)
+        gt_instances = assignments["gt_instances"]
+
+        for cls in self.class_names:
+            for gt in gt_instances.get(cls, []):
+                self.gt_sizes[cls].append(int(gt["vert_count"]))
+
+        for ov_th in self.overlaps:
+            matches_per_ov, _, _ = self.matcher.get_matches_at_threshold(assignments, ov_th=ov_th)
+            for cls in self.class_names:
+                matches = matches_per_ov.get(cls)
+                if not matches or len(matches["y_true"]) == 0:
+                    continue
+                rec = self.records[cls][ov_th]
+                rec["y_true"].extend(matches["y_true"].tolist())
+                rec["y_score"].extend(matches["y_score"].tolist())
+                rec["gt_size"].extend(matches["gt_size"].tolist())
+                rec["pred_size"].extend(matches["pred_size"].tolist())
+
+    @staticmethod
+    def _bin_mask(sizes, bin_name, tau_s, tau_l):
+        if bin_name == "S":
+            return sizes <= tau_s
+        if bin_name == "M":
+            return (sizes > tau_s) & (sizes <= tau_l)
+        return sizes > tau_l
+
+    def _select_for_bin(self, rec, bin_name, tau_s, tau_l):
+        y_true = np.asarray(rec["y_true"])
+        if y_true.size == 0:
+            return np.array([]), np.array([])
+        y_score = np.asarray(rec["y_score"])
+        gt_size = np.asarray(rec["gt_size"])
+        pred_size = np.asarray(rec["pred_size"])
+        is_tp = y_true == 1
+        # TPs are binned by the GT they matched; FPs by their own size.
+        sizes = np.where(is_tp, gt_size, pred_size)
+        keep = self._bin_mask(sizes, bin_name, tau_s, tau_l)
+        return y_true[keep], y_score[keep]
+
+    def _resolve_thresholds(self):
+        if self.size_thresholds is not None:
+            return float(self.size_thresholds[0]), float(self.size_thresholds[1])
+        pooled = [np.asarray(v, dtype=np.float64) for v in self.gt_sizes.values() if len(v)]
+        if not pooled:
+            return 0.0, 0.0
+        all_sizes = np.concatenate(pooled)
+        tau_s, tau_l = np.percentile(all_sizes, self.size_percentiles)
+        return float(tau_s), float(tau_l)
+
+    def sync(self):
+        if comm.get_world_size() == 1:
+            return
+        gathered = comm.all_gather({"records": self.records, "gt_sizes": self.gt_sizes})
+        self._reset_buffers()
+        for state in gathered:
+            for cls in self.class_names:
+                self.gt_sizes[cls].extend(state["gt_sizes"][cls])
+                for ov in self.overlaps:
+                    src = state["records"][cls][ov]
+                    dst = self.records[cls][ov]
+                    for k in ("y_true", "y_score", "gt_size", "pred_size"):
+                        dst[k].extend(src[k])
+
+    def compute(self):
+        tau_s, tau_l = self._resolve_thresholds()
+        results = {"tau_S": tau_s, "tau_L": tau_l}
+
+        for bin_name in self.SIZE_BINS:
+            # num_gt per class within this size bin.
+            num_gt_bin = {}
+            for cls in self.class_names:
+                sizes = np.asarray(self.gt_sizes[cls], dtype=np.float64)
+                if sizes.size == 0:
+                    num_gt_bin[cls] = 0
+                else:
+                    num_gt_bin[cls] = int(np.count_nonzero(
+                        self._bin_mask(sizes, bin_name, tau_s, tau_l)
+                    ))
+
+            per_class_ap = {}
+            for cls in self.class_names:
+                ap_over_ov = []
+                for ov in self.overlaps:
+                    if ov < 0.5:
+                        continue
+                    y_true, y_score = self._select_for_bin(
+                        self.records[cls][ov], bin_name, tau_s, tau_l
+                    )
+                    ap_over_ov.append(
+                        InstanceAveragePrecision._voc_ap(y_true, y_score, num_gt_bin[cls])
+                    )
+                per_class_ap[cls] = float(np.mean(ap_over_ov)) if ap_over_ov else 0.0
+
+            results[f"per_class_AP_{bin_name}"] = per_class_ap
+            results[f"num_gt_{bin_name}"] = int(sum(
+                num_gt_bin[cls] for cls in self.valid_class_names
+            ))
+
+            valid = [
+                per_class_ap[cls]
+                for cls in self.valid_class_names
+                if cls in per_class_ap
+            ]
+            results[f"AP_{bin_name}"] = float(np.mean(valid)) if valid else 0.0
 
         return results
 
