@@ -1,10 +1,9 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-# Offline DinoV3 patch-feature extraction for the abc_dataset HDF5 shards
+# Offline DinoV3 patch-feature extraction for MechanicalAssemblySynth
 # (train + val splits). Writes fp16 (n_views, 32, 32, 1280) grids per scene
 # into HDF5 shards + feature_index.pkl under {save_path}/features.
-# Mirrors extract-dinov3-features-mech-synth.py, but reads the packed HDF5
-# dataset (HDF5_Dataset) instead of MechanicalAssemblySynth.
+# Run via scripts/start_feature_extraction.sh (needs /leonardo_scratch bound).
 
 # 4 scenes x 20 views = 80 ViT-H forwards per batch
 batch_size = 4
@@ -22,8 +21,8 @@ seed = 0
 epoch = 1
 eval_epoch = 1
 
-# features land on scratch: work quota cannot hold the full grids
-save_path = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/abc_dataset"
+# features land on scratch: work quota cannot hold ~110 GB
+save_path = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/mech_synth"
 shard_size = 50  # scenes per shard (~2.6 GB fp16)
 
 model = dict(
@@ -41,10 +40,10 @@ data = dict(
     ignore_index=-1,
     names=class_names,
     train=dict(
-        type="HDF5_Dataset",
+        type="MechanicalAssemblySynth",
         split=["train", "val"],
-        data_root="data/segment-assembly-synthetic/data/abc_dataset/processed",
-        load_images=True,
+        data_root="data/segment-assembly-merged-synthetic/data",
+        cache=True,
         image_size=(512, 512),
         loop=1,
         transform=[
