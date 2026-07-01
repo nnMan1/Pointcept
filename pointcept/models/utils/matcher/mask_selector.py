@@ -23,20 +23,24 @@ class MaskSelector(nn.Module):
             out_mask = preds['pred_masks'][bs:be]
             out_seg = preds['pred_logits'][i]
             tgt_mask = targets['instance'][bs:be]
-            tgt_segm = targets['segment'][bs:be]
 
             instances_seg = targets['instance_segment'][ibs:ibe]
+            num_instances = ibe - ibs
 
-            filter = tgt_mask != self.instance_ignore_index
-
-            if filter.sum() == 0:
+            # samples without instances have no matches; the loss side skips
+            # them by the same criterion (empty matcher indices)
+            if num_instances == 0:
                 bs, ibs = be, ibe
                 continue
 
-            tgt_mask = F.one_hot(tgt_mask+1)[:, 1:]
+            # ignored points are excluded from mask supervision entirely
+            valid = tgt_mask != self.instance_ignore_index
+            tgt_mask = F.one_hot(
+                tgt_mask[valid].long() + 1, num_classes=num_instances + 1
+            )[:, 1:]
             tgt_mask = tgt_mask[:, tgt_ids]
 
-            out_mask = out_mask[:, pred_ids]
+            out_mask = out_mask[valid][:, pred_ids]
 
             tgt_segm = torch.ones_like(out_seg[:, 0], dtype=torch.int64) * (out_seg.shape[1] - 1)
             tgt_segm[pred_ids] = instances_seg[tgt_ids]

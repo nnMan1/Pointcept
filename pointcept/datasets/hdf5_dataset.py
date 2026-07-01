@@ -67,6 +67,15 @@ class HDF5_Dataset(Dataset):
         categories.reverse()
         self.categories = {v: k for k,v in categories}
 
+        # Int remap table applied to raw point_semantic ids: a shard id i (the
+        # i-th class in the ordered `classes` mapping) -> its target class id.
+        # Mirrors how MechanicalAssemblyV2 does `classes[segment]`, so the
+        # config's `classes` dict actually takes effect (e.g. collapse to one
+        # class). dict insertion order defines the id->class correspondence.
+        self.semantic_remap = np.asarray(
+            list(self.class_mapping.values()), dtype=np.int64
+        )
+
         self.ignore_index = ignore_index
         logger = get_root_logger()
         logger.info(
@@ -111,7 +120,7 @@ class HDF5_Dataset(Dataset):
         elif isinstance(self.split, Sequence):
             data_list = []
             for split in self.split:
-                data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
+                data_list += open(os.path.join(self.data_root, f"{split}_files.txt")).readlines()
         else:
             raise NotImplementedError
 
@@ -206,6 +215,22 @@ class HDF5_Dataset(Dataset):
             data[key] = data[key][keep_ids]
 
         data['mappings_tgt'] = np.arange(len(data['mappings_src']))
+
+        # Each vertex is its own superpoint. With use_superpoint_pooling=False
+        # the model pops seg_indices and rebuilds this identity arange at grid
+        # resolution anyway, so these values are only a placeholder to satisfy
+        # GridSample/Collect (the abc HDF5 shards carry no clustering).
+        data['seg_indices'] = np.arange(len(data['coord']))
+
+        # Apply the config's `classes` mapping to the raw point_semantic ids
+        # (HDF5 stores unmapped ids; without this, ids > num_classes index the
+        # matcher's class head out of bounds -> CUDA device-side assert).
+        # Negative (ignore) labels are preserved as-is.
+        seg = data['segment'].astype(np.int64)
+        valid = seg >= 0
+        remapped = np.full(seg.shape, -1, dtype=np.int64)
+        remapped[valid] = self.semantic_remap[seg[valid]]
+        data['segment'] = remapped
 
         while np.linalg.norm(data['coord'].max(axis=0) - data['coord'].min(axis=0)) < 80:
             data['coord'] *= 2

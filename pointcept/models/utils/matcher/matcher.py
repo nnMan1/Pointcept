@@ -80,6 +80,17 @@ class HungarianMatcher(BaseMatcher):
             indices = []
             for c in C:
                 c = c.numpy()
+                # Under AMP an occasional batch overflows in fp16 and produces
+                # non-finite predictions -> non-finite cost entries, which crash
+                # linear_sum_assignment. Sanitize so matching still runs; the
+                # batch's loss will be non-finite and the GradScaler skips the
+                # optimizer step, effectively dropping the bad batch instead of
+                # killing the whole job.
+                if not np.isfinite(c).all():
+                    print("[HungarianMatcher] non-finite cost matrix "
+                          "(likely AMP fp16 overflow); sanitizing and skipping "
+                          "this batch via the grad scaler.")
+                    c = np.nan_to_num(c, nan=1e6, posinf=1e6, neginf=-1e6)
                 indices.append(linear_sum_assignment(c))
 
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]

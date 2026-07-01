@@ -7,6 +7,7 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
 
+import os
 import random
 import numbers
 import scipy
@@ -18,7 +19,8 @@ import torch
 import copy
 import open3d as o3d
 import trimesh
-from sklearn.neighbors import NearestNeighbors, radius_neighbors_graph
+from sklearn.neighbors import NearestNeighbors
+from scipy.spatial import cKDTree
 from collections.abc import Sequence, Mapping
 from pointcept.utils.registry import Registry
 from torch_geometric import nn
@@ -149,6 +151,131 @@ class ImgNormalize(object):
         data_dict[self.key] = torch.Tensor(data_dict[self.key]).float()
         data_dict[self.key] = self.normalization(data_dict[self.key]).numpy()
         return data_dict
+
+@TRANSFORMS.register_module()
+class LoadImageFeatures(object):
+    """Attach precomputed image-backbone features from HDF5 shards.
+
+    Loads the per-scene ``(n_views, H/p, W/p, C)`` fp16 patch grid written by
+    ``IMG_Extractor`` (``feature_index.pkl`` + ``*.h5`` shards under
+    ``features_root``) and stores it under ``key`` as an fp16 torch tensor.
+    It stays half precision through ToTensor/collate (ToTensor passes torch
+    tensors through); the model upcasts per sample on GPU.
+
+    Dataset-agnostic: only requires ``name_key`` in ``data_dict``, with names
+    matching those used at extraction time ('/' is normalized to '_' on both
+    sides). Pair with a ``Collect`` that lists ``key`` instead of 'images'
+    and maps ``image_offset`` to it.
+
+    The index is built once; shard file handles are opened lazily so each
+    dataloader worker gets its own handles after fork.
+
+    Args:
+        features_root (str): directory containing feature_index.pkl + shards.
+        key (str): output key for the feature tensor.
+        name_key (str): data_dict key holding the scene name.
+        drop_keys (tuple): keys to remove once features are attached
+            (raw images are not needed anymore).
+    """
+
+    def __init__(self, features_root, key="image_features", name_key="name",
+                 drop_keys=("images",)):
+        import pickle
+        self.features_root = features_root
+        self.key = key
+        self.name_key = name_key
+        self.drop_keys = tuple(drop_keys)
+        with open(os.path.join(features_root, "feature_index.pkl"), "rb") as f:
+            index_map = pickle.load(f)
+        self._index = {
+            name: os.path.join(features_root, os.path.basename(shard))
+            for shard, _, name in index_map
+        }
+        # Handles are keyed by PID: HDF5 file handles are not fork-safe, so a
+        # DataLoader worker must never read through a handle opened in another
+        # process. _open_shards is reset whenever the PID changes.
+        self._open_shards = {}
+        self._handle_pid = None
+        self._resolved = {}        # sample name -> actual cache key (suffix-match)
+        self._warned_fallback = False
+
+    def _resolve(self, name):
+        """Map a sample name to a cache key, tolerating data_root prefix
+        differences (relative vs absolute, or a stale name baked into a
+        cached.pth). Cache keys are built from the EXTRACTION data_root, the
+        sample name from THIS run's data_root; they share the same suffix."""
+        if name in self._index:
+            return name
+        if name in self._resolved:
+            return self._resolved[name]
+        cands = [k for k in self._index if k.endswith(name) or name.endswith(k)]
+        if len(cands) == 1:
+            if not self._warned_fallback:
+                print(f"[LoadImageFeatures] name prefix mismatch; matching by "
+                      f"suffix (e.g. '{name}' -> '{cands[0]}'). Likely a "
+                      f"relative data_root or a stale cached.pth name.")
+                self._warned_fallback = True
+            self._resolved[name] = cands[0]
+            return cands[0]
+        return None  # absent, or ambiguous (refuse to guess)
+
+    def _get_handle(self, shard):
+        import h5py
+        pid = os.getpid()
+        if self._handle_pid != pid:
+            # entered a new (forked) process: drop inherited handles
+            self._open_shards = {}
+            self._handle_pid = pid
+        f = self._open_shards.get(shard)
+        if f is None:
+            f = self._open_shards[shard] = h5py.File(shard, "r", swmr=True)
+        return f
+
+    def _missing_name_msg(self, name):
+        keys = list(self._index.keys())
+        example = keys[0] if keys else "(cache empty)"
+        prefix = os.path.commonprefix(keys) if keys else ""
+        return (
+            f"LoadImageFeatures: sample '{name}' is not in the feature cache at "
+            f"{self.features_root} ({len(keys)} entries). Cache keys start with "
+            f"'{prefix}' (e.g. '{example}'). This almost always means the "
+            f"dataset's data_root does not match the path the cache was "
+            f"extracted from -- names are built from data_root, so set it so "
+            f"get_data_name() yields keys with that prefix (e.g. use the same "
+            f"absolute '/home/...' path used at extraction time)."
+        )
+
+    def __call__(self, data_dict):
+        raw = str(data_dict[self.name_key]).replace("/", "_")
+        name = self._resolve(raw)
+        if name is None:
+            raise KeyError(self._missing_name_msg(raw))
+        shard = self._index[name]
+        # Read with a single reopen-and-retry: long-lived HDF5 handles on Lustre
+        # (/leonardo_scratch) can have their storage connection evicted, which
+        # surfaces as OSError errno 108 (ESHUTDOWN) on a later read. Reopening
+        # the shard gets a fresh descriptor.
+        for attempt in range(2):
+            try:
+                f = self._get_handle(shard)
+                feats = f[name]["features"][...]
+                break
+            except (OSError, KeyError) as e:
+                stale = self._open_shards.pop(shard, None)
+                if stale is not None:
+                    try:
+                        stale.close()
+                    except Exception:
+                        pass
+                if attempt == 1:
+                    raise RuntimeError(
+                        f"LoadImageFeatures: failed to read '{name}' from {shard}"
+                    ) from e
+        data_dict[self.key] = torch.from_numpy(feats)
+        for k in self.drop_keys:
+            data_dict.pop(k, None)
+        return data_dict
+
 
 @TRANSFORMS.register_module()
 class Permute(object):
@@ -1204,6 +1331,9 @@ class InstanceParser(object):
         segment = data_dict["segment"]
         instance = data_dict["instance"]
         mask = ~np.in1d(segment, self.segment_ignore_index)
+        # points without an instance label (raw ignore id) stay ignored —
+        # otherwise np.unique would renumber the ignore id into a real instance
+        mask &= instance != self.instance_ignore_index
         # mapping ignored instance to ignore index
         instance[~mask] = self.instance_ignore_index
         # reorder left instance
@@ -1240,8 +1370,9 @@ class InstanceParser(object):
         data_dict["instance_centroid"] = centroid
         data_dict["bbox"] = bbox
 
-        unique, inverse = np.unique(instance[mask], return_inverse=True)
-        data_dict['instance_segment'] = segment[index]
+        # index positions are relative to the masked subset, so the class
+        # lookup must be too
+        data_dict['instance_segment'] = segment[mask][index]
         return data_dict
 
 @TRANSFORMS.register_module()
@@ -1253,68 +1384,73 @@ class GenerateBoundary(object):
     (0). This only depends on ``coord`` and ``instance``, so it is
     dataset-agnostic and can be dropped into any pipeline.
 
-    Neighbourhood mode (``radius`` is the default and recommended):
-        * radius: a fixed metric ball, so the border has a constant geometric
-          thickness regardless of local point density. Scale-dependent — pick
-          ``radius`` relative to your ``GridSample`` ``grid_size`` (≈1-2x).
-        * k-NN (set ``radius=None``, ``k=...``): unitless, but the metric
-          border width shrinks in dense regions and grows in sparse ones.
+    Implementation: a distance-capped k-NN. We query ``max_neighbors`` nearest
+    neighbours into a dense ``(N, k)`` array, then keep only those within
+    ``radius``. We never materialise the full radius neighbour graph (which is
+    O(total edges) and density-sensitive), so memory is bounded at O(N*k) and
+    fully vectorised. Because we only need "is *any* neighbour different", the
+    k cap is safe: the nearest cross-instance point sits right at the boundary,
+    so it is always among the few nearest neighbours.
 
-    Run this BEFORE ``GridSample`` (so the label is computed at full
-    resolution) and add the output key to the ``GridSample`` and ``Collect``
-    key lists so it survives subsampling and reaches the model.
+    Neighbourhood semantics:
+        * radius (default): a fixed metric ball -> constant geometric border
+          thickness regardless of density. Scale-dependent — pick ``radius``
+          relative to your ``GridSample`` ``grid_size``.
+        * pure k-NN (set ``radius=None``): every one of the ``max_neighbors``
+          neighbours counts, no distance cap.
+
+    Recommended placement: AFTER ``GridSample``/``InstanceParser`` (the cloud
+    is then downsampled to ~1 point per voxel, so a small ``max_neighbors``
+    covers the radius ball and the label aligns with the points the model
+    predicts on). Add the output key to the ``Collect`` keys so it reaches the
+    model. If run before ``GridSample`` instead, also add it to the
+    ``GridSample`` keys so it survives subsampling.
 
     Args:
-        radius (float | None): radius of the neighbourhood ball. When None,
-            falls back to k-NN with ``k`` neighbours.
-        k (int): number of nearest neighbours to inspect (used only when
-            ``radius`` is None).
+        radius (float | None): radius of the neighbourhood ball. When None, all
+            ``max_neighbors`` neighbours count (pure k-NN).
+        max_neighbors (int): hard cap on neighbours inspected per point; bounds
+            memory and runtime. Pick > expected point count inside the radius
+            ball (after grid sampling this is small).
         instance_ignore_index (int): instance id treated as "no instance";
-            such points are never borders and are ignored as neighbours.
+            such points get this value as their border label (to be excluded
+            from the loss) and are ignored as neighbours.
         key (str): output key written into ``data_dict``.
     """
 
-    def __init__(self, radius=2.0, k=16, instance_ignore_index=-1, key="border"):
+    def __init__(self, radius=2.0, max_neighbors=48, instance_ignore_index=-1, key="border"):
         self.radius = radius
-        self.k = k
+        self.max_neighbors = max_neighbors
         self.instance_ignore_index = instance_ignore_index
         self.key = key
 
     def __call__(self, data_dict):
         assert "coord" in data_dict and "instance" in data_dict, \
             "GenerateBoundary requires 'coord' and 'instance' in data_dict"
-        coord = data_dict["coord"]
+        coord = np.ascontiguousarray(data_dict["coord"], dtype=np.float32)
         instance = np.asarray(data_dict["instance"]).reshape(-1)
         n = coord.shape[0]
         border = np.zeros(n, dtype=np.int64)
+        valid_self = instance != self.instance_ignore_index
 
         if n > 1:
-            valid_self = instance != self.instance_ignore_index
-            if self.radius is not None:
-                # Sparse neighbour graph -> compare instances per edge, then
-                # scatter "is border" onto the source point. Fully vectorised,
-                # avoids the ragged per-point Python loop on large clouds.
-                graph = radius_neighbors_graph(
-                    coord, radius=self.radius, mode="connectivity",
-                    include_self=False,
-                ).tocoo()
-                src, dst = graph.row, graph.col
-                cross = (
-                    (instance[src] != instance[dst])
-                    & (instance[dst] != self.instance_ignore_index)
-                )
-                border[src[cross]] = 1
-                border[~valid_self] = 0
-            else:
-                k = min(self.k + 1, n)  # +1: first neighbour is the point itself
-                nn = NearestNeighbors(n_neighbors=k).fit(coord)
-                _, idx = nn.kneighbors(coord)
-                neigh_inst = instance[idx]  # (N, k)
-                diff = (neigh_inst != instance[:, None]) & (
-                    neigh_inst != self.instance_ignore_index
-                )
-                border = (diff.any(axis=1) & valid_self).astype(np.int64)
+            k = min(self.max_neighbors + 1, n)  # +1: first neighbour is self
+            tree = cKDTree(coord)
+            # workers=1: stay single-threaded inside dataloader workers to
+            # avoid CPU oversubscription (num_worker processes already fan out).
+            dist, idx = tree.query(coord, k=k, workers=1)
+            neigh_inst = instance[idx]  # (N, k)
 
+            cross = (neigh_inst != instance[:, None]) & (
+                neigh_inst != self.instance_ignore_index
+            )
+            if self.radius is not None:
+                cross &= dist <= self.radius
+            border = (cross.any(axis=1) & valid_self).astype(np.int64)
+
+        # unlabeled points carry no border supervision at all (the loss must
+        # skip them), rather than being trained as non-border
+        border[~valid_self] = self.instance_ignore_index
         data_dict[self.key] = border
         return data_dict
 

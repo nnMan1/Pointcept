@@ -41,7 +41,7 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels):
+    def __init__(self, in_channels, mask_modules, query_refinement_modules, hlevels, pos_dim=None):
         super().__init__()
         self.mask_features_head = nn.Sequential(
             nn.Linear(in_channels, mask_modules[0]['hidden_dim']),
@@ -53,6 +53,12 @@ class Decoder(nn.Module):
             nn.LayerNorm(query_refinement_modules[0]['in_channels']),
             nn.ReLU(),
         )
+        # Project positional encoding into the mask-feature space so the
+        # point<->query mask dot-product becomes position-aware (lets the model
+        # separate identical-appearance instances). Only built when enabled.
+        self.pos_proj = None
+        if pos_dim is not None:
+            self.pos_proj = nn.Linear(pos_dim, mask_modules[0]['hidden_dim'])
         self.mask_modules = nn.ModuleList([MaskModule(**cfg) for cfg in mask_modules])
         self.query_refinements = nn.ModuleList([QueryRefinement(**c) for c in query_refinement_modules])
 
@@ -61,6 +67,8 @@ class Decoder(nn.Module):
         features = data['features']
 
         mask_point_features = self.mask_features_head(features)
+        if self.pos_proj is not None and data.get('positional_embedding') is not None:
+            mask_point_features = mask_point_features + self.pos_proj(data['positional_embedding'])
         query_point_features = self.query_features_head(features)
 
         out = []
@@ -219,6 +227,7 @@ class MySPFormer(nn.Module):
         matcher,
         use_superpoint_pooling=True,
         positional_embedding=None,
+        use_positional_encoding=None,
         seg_ce_loss_weight=0.5,
         mask_ce_loss_weight=1.0,
         mask_dice_loss_weight=1.0,
@@ -229,6 +238,7 @@ class MySPFormer(nn.Module):
         triplet_margin=0.0,
         border_loss_weight=0.0,
         border_focal_alpha=0.5,
+        equal_instance_weight=False,
     ):
         super().__init__()
 
@@ -249,6 +259,18 @@ class MySPFormer(nn.Module):
 
         self.superpoint_pooling = SuperpointPooling()
         self.superpoint_unpooling = SuperpointUnpooling()
+
+        # Whether to use positional encoding. Defaults to "auto": on iff a
+        # positional_embedding config is provided (preserves old behaviour).
+        # Set explicitly in the config to force on/off.
+        if use_positional_encoding is None:
+            use_positional_encoding = positional_embedding is not None
+        self.use_positional_encoding = use_positional_encoding
+        if use_positional_encoding:
+            assert positional_embedding is not None, \
+                "use_positional_encoding=True requires a positional_embedding config"
+            # Enable the position-aware mask head in the decoder.
+            decoder['pos_dim'] = positional_embedding['d_pos']
 
         query_dim = decoder['query_refinement_modules'][0]['mask_dim']
         self.__query = nn.Embedding(num_query, decoder['query_refinement_modules'][0]['mask_dim'])
@@ -283,11 +305,12 @@ class MySPFormer(nn.Module):
         self.overlap_loss_weight = overlap_loss_weight
         self.triplet_margin = triplet_margin
         self.border_loss_weight = border_loss_weight
+        self.equal_instance_weight = equal_instance_weight
 
         self.use_superpoint_pooling = use_superpoint_pooling
 
         self.positional_embedding = None
-        if positional_embedding is not None:
+        if self.use_positional_encoding:
             self.positional_embedding = build_positional_embedding(positional_embedding)
 
     def query_pooling(self, data):
@@ -352,10 +375,12 @@ class MySPFormer(nn.Module):
             matched_outputs, matched_targets, matched_seg_outputs, matched_seg_targets, indices = \
                 self.mask_selector(p, data, indices)
 
+            # skip samples with empty matches — MaskSelector drops them too,
+            # so the zip below stays aligned sample-by-sample
             matched_scores = [
                 p['pred_score'][i][indices[i][0]][..., 0]
                 for i in range(len(data['offset']))
-                if indices[i][0] is not None
+                if indices[i][0] is not None and len(indices[i][0]) > 0
             ]
 
             t = {
@@ -376,12 +401,22 @@ class MySPFormer(nn.Module):
                     t['seg_ce'].append(p_seg.new_tensor(0.0))
 
                 if self.mask_ce_loss_weight > 0:
-                    t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
+                    if self.equal_instance_weight:
+                        # per-instance mean BCE (one value per matched mask),
+                        # so each instance counts the same regardless of size
+                        bce = torch.nn.functional.binary_cross_entropy_with_logits(
+                            mask, target.float(), reduction='none')
+                        t['mask_ce'].append(bce.mean(0))  # (K,)
+                    else:
+                        t['mask_ce'].append(self.mask_bce_loss(mask, target.float()))
                 else:
                     t['mask_ce'].append(mask.new_tensor(0.0))
 
                 if self.mask_dice_loss_weight > 0:
-                    t['mask_dice'].append(self.mask_dice_loss(mask, target))
+                    if self.equal_instance_weight:
+                        t['mask_dice'].append(self.__dice_per_instance(mask, target))  # (K,)
+                    else:
+                        t['mask_dice'].append(self.mask_dice_loss(mask, target))
                 else:
                     t['mask_dice'].append(mask.new_tensor(0.0))
 
@@ -401,17 +436,26 @@ class MySPFormer(nn.Module):
                     t['score_loss'].append(score.new_tensor(0.0))
 
             for key in auxiliary_losses:
-                if key in ['mask_dice']:
-                    if len(t[key][:-1]) > 0:
-                        auxiliary_losses[key].append(torch.stack(t[key][:-1]).mean() + t[key][-1])
+                if len(t[key]) > 0:
+                    if self.equal_instance_weight and key in ('mask_ce', 'mask_dice'):
+                        # flat-average over every instance in the batch so each
+                        # instance contributes equally (not per-sample averaged)
+                        auxiliary_losses[key].append(
+                            torch.cat([v.reshape(-1) for v in t[key]]).mean())
                     else:
-                        auxiliary_losses[key].append(t[key][-1])
-                else:
-                    auxiliary_losses[key].append(torch.stack(t[key]).mean())
+                        auxiliary_losses[key].append(torch.stack(t[key]).mean())
 
         for key in auxiliary_losses:
-            if key in ['matched_iou']:
+            if len(auxiliary_losses[key]) == 0:
+                # whole batch had no valid instances
+                auxiliary_losses[key] = torch.tensor(0.0, device=data['features'].device)
+            elif key in ['matched_iou']:
                 auxiliary_losses[key] = torch.stack(auxiliary_losses[key]).mean()
+            elif key in ['mask_dice']:
+                # Full weight on the final prediction, mean over the
+                # auxiliary (refinement) layers.
+                *aux, final = auxiliary_losses[key]
+                auxiliary_losses[key] = (torch.stack(aux).mean() + final) if aux else final
             else:
                 auxiliary_losses[key] = torch.stack(auxiliary_losses[key]).sum()
 
@@ -435,11 +479,18 @@ class MySPFormer(nn.Module):
         else:
             auxiliary_losses['overlap_loss'] = torch.tensor(0.0, device=device)
 
-        # Border loss: per-point binary border vs non-border classification
+        # Border loss: per-point binary border vs non-border classification.
+        # Points without instance labels carry a negative border label
+        # (GenerateBoundary) and are excluded from supervision.
         if self.border_loss_weight > 0 and 'border_logits' in data:
-            auxiliary_losses['border_loss'] = self.border_loss(
-                data['border_logits'], data['border'].float(),
-            )
+            border_valid = data['border'] >= 0
+            if border_valid.any():
+                auxiliary_losses['border_loss'] = self.border_loss(
+                    data['border_logits'][border_valid],
+                    data['border'][border_valid].float(),
+                )
+            else:
+                auxiliary_losses['border_loss'] = torch.tensor(0.0, device=device)
         else:
             auxiliary_losses['border_loss'] = torch.tensor(0.0, device=device)
 
@@ -453,7 +504,34 @@ class MySPFormer(nn.Module):
             + self.overlap_loss_weight * auxiliary_losses['overlap_loss']
             + self.border_loss_weight * auxiliary_losses['border_loss']
         )
+
+        # Drop disabled (weight 0) loss terms so they don't clutter the logs.
+        # The total 'loss' and the non-weighted 'matched_iou' metric are kept.
+        term_weights = {
+            'seg_ce': self.seg_ce_loss_weight,
+            'mask_ce': self.mask_ce_loss_weight,
+            'mask_dice': self.mask_dice_loss_weight,
+            'score_loss': self.score_loss_weight,
+            'fts_loss': self.fts_loss_weight,
+            'triplet_loss': self.triplet_loss_weight,
+            'overlap_loss': self.overlap_loss_weight,
+            'border_loss': self.border_loss_weight,
+        }
+        for key, weight in term_weights.items():
+            if weight == 0:
+                auxiliary_losses.pop(key, None)
+
         return auxiliary_losses
+
+    def __dice_per_instance(self, mask, target):
+        """Per-instance (per-column) dice loss, matching DiceLoss but without
+        the final mean over instances — returns a (K,) vector so each matched
+        mask can be weighted equally downstream."""
+        smooth = self.mask_dice_loss.smooth
+        pred = mask.sigmoid()
+        numerator = 2 * (pred * target).sum(0) + smooth
+        denominator = pred.sum(0) + target.sum(0) + smooth
+        return self.mask_dice_loss.loss_weight * (1 - numerator / denominator)
 
     def __compute_overlap_loss(self, last_pred, data):
         """Penalise pairs of queries whose predicted masks significantly overlap.
@@ -599,7 +677,21 @@ class MySPFormer(nn.Module):
 
         pred = self.decoder(data, queries)
 
-        return_dict = self.__compute_loss(pred, data)
+        # Loss/matcher must run in fp32 under AMP: the Hungarian matcher's cost
+        # einsums and the mask reductions sum over thousands of points and
+        # overflow to inf/NaN in fp16 (linear_sum_assignment then rejects the
+        # cost matrix). Upcast the prediction tensors and disable autocast for
+        # the whole loss computation. No-op when AMP is off (already fp32); the
+        # original fp16 `pred` is kept for the eval select_masks branch below.
+        with torch.cuda.amp.autocast(enabled=False):
+            pred_fp32 = [
+                {
+                    k: v.float() if torch.is_tensor(v) and v.is_floating_point() else v
+                    for k, v in p.items()
+                }
+                for p in pred
+            ]
+            return_dict = self.__compute_loss(pred_fp32, data)
 
         if not self.training:
             return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
