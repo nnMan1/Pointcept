@@ -229,11 +229,27 @@ class MySPFormer(nn.Module):
         triplet_margin=0.0,
         border_loss_weight=0.0,
         border_focal_alpha=0.5,
+        mask_selection=None,
+        eval_superpoint_voting=True,
     ):
         super().__init__()
 
         self.num_query = num_query
         self.encoder = Encoder(**encoder)
+
+        # eval-time mask filtering (see utils.select_masks); override via config
+        self.mask_selection = dict(
+            score_thr=0.0,
+            n_point_thr=100,
+            topk=100,
+            nms_thr=None,
+            dbscan_eps=5,  # coord is in voxel units (1mm grid): min point distance is 1, so eps must be > 1
+            dbscan_min_samples=1,
+            split_mode='all',   # 'off' | 'largest' | 'all'
+            rescore='size',     # 'size' | 'parent' | 'cluster'
+        )
+        if mask_selection is not None:
+            self.mask_selection.update(mask_selection)
 
         # Per-point border detection branch (binary: border vs non-border).
         # Built only when enabled so checkpoints without it still load.
@@ -285,6 +301,9 @@ class MySPFormer(nn.Module):
         self.border_loss_weight = border_loss_weight
 
         self.use_superpoint_pooling = use_superpoint_pooling
+        # only relevant when use_superpoint_pooling=False: use the dataset's
+        # seg_indices at eval to snap per-point masks to superpoints
+        self.eval_superpoint_voting = eval_superpoint_voting
 
         self.positional_embedding = None
         if positional_embedding is not None:
@@ -590,8 +609,14 @@ class MySPFormer(nn.Module):
         if self.border_head is not None:
             data['border_logits'] = self.border_head(data['features']).squeeze(-1)
 
+        # when superpoint pooling is off, the model must stay per-point, so
+        # seg_indices are removed from data — but we keep them aside so
+        # select_masks can still snap per-point masks to superpoints at eval
+        eval_superpoints = None
         if not self.use_superpoint_pooling:
-            data.pop('seg_indices', None)
+            eval_superpoints = data.pop('seg_indices', None)
+            if not self.eval_superpoint_voting:
+                eval_superpoints = None
 
         data = self.superpoint_pooling(data, ['instance', 'segment', 'features'])
 
@@ -602,7 +627,8 @@ class MySPFormer(nn.Module):
         return_dict = self.__compute_loss(pred, data)
 
         if not self.training:
-            return_dict.update(select_masks(pred[-1], data['seg_indices'].cpu()))
+            superpoints = eval_superpoints if eval_superpoints is not None else data['seg_indices']
+            return_dict.update(select_masks(pred[-1], superpoints.cpu(), coord=data['coord'], **self.mask_selection))
             if self.border_head is not None:
                 return_dict['pred_border'] = data['border_logits'].sigmoid()
             data = self.superpoint_unpooling(data)

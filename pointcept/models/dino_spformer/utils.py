@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from pointcept.utils.misc import batch_iou
 from sklearn.cluster import DBSCAN
 import numpy as np
+import torch_scatter
 
 
 def mask_nms(masks, scores, iou_threshold):
@@ -37,14 +38,96 @@ def mask_nms(masks, scores, iou_threshold):
 
     return order[keep]
 
-def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms_thr=0.5):
+def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_point_thr=100, eps=5, min_samples=1, keep='all', rescore='size'):
+    """Split each mask into spatially connected components via DBSCAN.
+
+    Takes the *final* parent scores (class score x mask confidence) so that the
+    ranking of the strongest component of each mask stays identical to the
+    unsplit pipeline — this preserves AP, while the split geometry improves
+    per-mask IoU.
+
+    Args:
+        keep: 'all'      keep every component as its own prediction
+              'largest'  keep only the biggest component per mask (denoise mode)
+        rescore: how components are scored relative to the parent score
+              'size'     largest component keeps the parent score, smaller ones
+                         are scaled by size relative to the largest component
+              'parent'   every component inherits the parent score unchanged
+              'cluster'  parent score x mean sigmoid over the component's own
+                         points (requires mask_sigmoid; legacy behaviour,
+                         hurts AP by promoting confident-but-wrong fragments)
+
+    Returns new (full_masks, scores, labels) on CPU with disconnected clusters
+    separated and fragments below n_point_thr dropped.
+    """
+    coord_np = coord.cpu().numpy() if isinstance(coord, torch.Tensor) else coord
+    # collect (point indices, score, label) per surviving component; dense
+    # masks are materialized once at the end — building a dense mask per
+    # component OOMs when a small eps shatters masks into many fragments
+    entries = []
+
+    for i, (mask, score, label) in enumerate(zip(full_masks, scores, labels)):
+        active = mask.bool()
+        sig = mask_sigmoid[i] if mask_sigmoid is not None else None
+
+        if active.sum() == 0:
+            continue
+
+        clusters = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(coord_np[active.cpu().numpy()]).labels_
+        active_idx = torch.where(active)[0].cpu()
+        valid = clusters != -1
+        cluster_ids, cluster_sizes = np.unique(clusters[valid], return_counts=True)
+
+        # drop fragments below n_point_thr BEFORE materializing anything
+        big = cluster_sizes > n_point_thr
+        cluster_ids, cluster_sizes = cluster_ids[big], cluster_sizes[big]
+
+        if len(cluster_ids) == 0:
+            continue
+
+        if keep == 'largest':
+            order = [int(np.argmax(cluster_sizes))]
+        else:
+            order = np.argsort(-cluster_sizes)
+
+        largest_size = float(cluster_sizes.max())
+        for ci in order:
+            cid = cluster_ids[ci]
+            cluster_idx = active_idx[torch.from_numpy(clusters == cid)]
+
+            if rescore == 'cluster':
+                assert sig is not None, "rescore='cluster' requires mask_sigmoid"
+                new_score = score * sig.cpu()[cluster_idx].mean()
+            elif rescore == 'size':
+                new_score = score * (float(cluster_sizes[ci]) / largest_size)
+            else:  # 'parent'
+                new_score = score
+
+            entries.append((cluster_idx, new_score, label))
+
+    if len(entries) == 0:
+        empty = full_masks[:0].cpu()
+        return empty, scores[:0].cpu(), labels[:0].cpu()
+
+    out_masks = torch.zeros(len(entries), full_masks.shape[1], dtype=full_masks.dtype)
+    for j, (cluster_idx, _, _) in enumerate(entries):
+        out_masks[j, cluster_idx] = 1
+
+    out_scores = torch.stack([torch.as_tensor(e[1], dtype=torch.float32) for e in entries])
+    out_labels = torch.stack([e[2] for e in entries])
+    return out_masks, out_scores, out_labels
+
+def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms_thr=None, coord=None, dbscan_eps=5, dbscan_min_samples=1, split_mode='all', rescore='size'):
+        # NOTE: coord is expected in voxel/grid units (1mm voxels): the minimum
+        # distance between two points is 1, so dbscan_eps must be > 1 or every
+        # point becomes its own cluster and masks shatter into singletons.
         pred_labels = out['pred_logits'][0]
         mask_logits = out['pred_masks'].T
         pred_scores = out['pred_score'][0]
 
         num_class = pred_labels.shape[1] - 1
         num_query = pred_labels.shape[0]
-        
+
         scores = F.softmax(pred_labels, dim=-1)[:, :-1]
         scores *= pred_scores
         labels = torch.arange(num_class, device=scores.device).unsqueeze(0).repeat(num_query, 1).flatten(0, 1)
@@ -58,14 +141,37 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
         binary_masks = (topk_masks > 0).float()  # [n_p, M]
         mask_scores = (topk_masks_sigmoid * binary_masks).sum(1) / (binary_masks.sum(1) + 1e-6)
         scores = scores * mask_scores
+
+        # sigmoid values are only needed for rescore='cluster'; skip the
+        # (n_p, N) float allocation otherwise
+        need_sigmoid = rescore == 'cluster'
+
         # expand to full points via superpoints
-        full_masks = binary_masks[:, superpoints].int()
+        if superpoints.max() + 1 == mask_logits.shape[1]:
+            # masks are per-superpoint (or identity): expand by indexing
+            full_masks = binary_masks[:, superpoints].int()
+            full_masks_sigmoid = topk_masks_sigmoid[:, superpoints] if need_sigmoid else None
+        else:
+            # masks are per-point: regularize via majority vote inside each superpoint
+            superpoint_mask_percentage = torch_scatter.scatter(
+                binary_masks.cpu().T.float(),
+                superpoints.cpu(),
+                dim=0,
+                dim_size=superpoints.max() + 1,
+                reduce='mean'
+            ).T
+
+            superpoint_mask_percentage = superpoint_mask_percentage.to(binary_masks.device)
+            full_masks = (superpoint_mask_percentage > 0.5).int()[:, superpoints]  # (n_p, N)
+            full_masks_sigmoid = topk_masks_sigmoid if need_sigmoid else None  # already per-point
 
         # score_thr
         score_mask = scores > score_thr
         scores = scores[score_mask]  # (n_p,)
         labels = labels[score_mask]  # (n_p,)
         full_masks = full_masks[score_mask]  # (n_p, N)
+        if full_masks_sigmoid is not None:
+            full_masks_sigmoid = full_masks_sigmoid[score_mask]  # (n_p, N)
 
         # npoint thr
         mask_pointnum = full_masks.sum(1)
@@ -73,6 +179,18 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
         scores = scores[npoint_mask]  # (n_p,)
         labels = labels[npoint_mask]  # (n_p,)
         full_masks = full_masks[npoint_mask]  # (n_p, N)
+        if full_masks_sigmoid is not None:
+            full_masks_sigmoid = full_masks_sigmoid[npoint_mask]  # (n_p, N)
+
+        # everything downstream (DBSCAN split, NMS, numpy conversion) is
+        # CPU-bound; move off the GPU and free the large intermediates so the
+        # per-component masks built during the split don't OOM on large scenes
+        scores = scores.cpu()
+        labels = labels.cpu()
+        full_masks = full_masks.cpu()
+        if full_masks_sigmoid is not None:
+            full_masks_sigmoid = full_masks_sigmoid.cpu()
+        del topk_masks, topk_masks_sigmoid, binary_masks
 
         # early return if nothing survives filtering
         if full_masks.shape[0] == 0:
@@ -82,10 +200,23 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
                 pred_classes=np.empty(0, dtype=np.int64),
             )
 
-        nms_idx = mask_nms(full_masks, scores, nms_thr)
-        scores = scores[nms_idx]  # (n_p,)
-        labels = labels[nms_idx]  # (n_p,)
-        full_masks = full_masks[nms_idx]  # (n_p, N)
+        if coord is not None and split_mode != 'off':
+            # pass the final scores (class x mask confidence): the largest
+            # component of each mask keeps its parent's rank, so the top of the
+            # ranking matches the unsplit pipeline (AP) while the split
+            # geometry improves per-mask IoU (gt mIoU)
+            full_masks, scores, labels = dbscan_mask_split(
+                full_masks, scores, labels, coord,
+                mask_sigmoid=full_masks_sigmoid,
+                n_point_thr=n_point_thr, eps=dbscan_eps, min_samples=dbscan_min_samples,
+                keep=split_mode, rescore=rescore,
+            )
+
+        if nms_thr is not None and full_masks.shape[0] > 0:
+            nms_idx = mask_nms(full_masks, scores, nms_thr)
+            scores = scores[nms_idx]  # (n_p,)
+            labels = labels[nms_idx]  # (n_p,)
+            full_masks = full_masks[nms_idx]  # (n_p, N)
 
         cls_pred = labels.cpu().numpy()
         score_pred = scores.cpu().numpy()
