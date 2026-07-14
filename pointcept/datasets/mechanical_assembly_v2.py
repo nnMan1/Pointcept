@@ -36,6 +36,7 @@ class MechanicalAssemblyV2(Dataset):
         loop=1,
         classes = [],
         load_images=True,
+        load_image_files=True,
         image_size=(448, 448),
         image_transform=None
     ):
@@ -44,6 +45,10 @@ class MechanicalAssemblyV2(Dataset):
         self.split = split
         self.transform = Compose(transform)
         self.cache = cache
+        # load_images gates the whole image/mapping block; load_image_files
+        # additionally gates reading the PNGs themselves — set it False when
+        # precomputed image features are used (mappings are still needed)
+        self.load_image_files = load_image_files
         self.loop = (
             loop if not test_mode else 1
         )  # force make loop = 1 while in test mode
@@ -170,8 +175,9 @@ class MechanicalAssemblyV2(Dataset):
             img_id = 0
 
             for i, (image_path, K, R, T, mapping) in enumerate(zip(image_paths, K_paths, R_paths, T_paths, mapping_paths)):
-                image = Image.open(image_path).convert('RGB')
-                images.append(image)
+                if self.load_image_files:
+                    image = Image.open(image_path).convert('RGB')
+                    images.append(image)
 
                 K = np.loadtxt(K)
                 R = np.loadtxt(R)
@@ -193,11 +199,12 @@ class MechanicalAssemblyV2(Dataset):
             mappings_src = np.concatenate(mappings_src, axis=0)
             mappings_tgt = np.concatenate(mappings_tgt, axis=0)
 
-            data.update({ 
+            data.update({
                 'mappings_src': mappings_src,
                 'mappings_tgt': mappings_tgt,
-                'images': images
             })
+            if self.load_image_files:
+                data['images'] = images
         
 
         for key in ['coord', 'normal', 'instance', 'segment']:

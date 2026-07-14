@@ -146,6 +146,8 @@ class BaseFeatureExtractor(nn.Module, ABC):
     # --- provided by base ---
     def freeze_backbone(self, freeze_bn):
         for m in self.backbone_modules():
+            if m is None:  # backbone-less mode (e.g. precomputed features)
+                continue
             for p in m.parameters():
                 p.requires_grad = False
             if freeze_bn:
@@ -157,6 +159,8 @@ class BaseFeatureExtractor(nn.Module, ABC):
 
     def unfreeze_backbone(self):
         for m in self.backbone_modules():
+            if m is None:
+                continue
             for p in m.parameters():
                 p.requires_grad = True
 

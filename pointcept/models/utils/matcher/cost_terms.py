@@ -16,7 +16,6 @@ class CostTerm(nn.Module, ABC):
     def compute_cost(self, outputs, target):
         pass
 
-#TODO: BE CAREFUL ABOUT IGNORED INDICES IN TARGETS
 @COSTS.register_module()
 class ClassCost(CostTerm):
 
@@ -95,19 +94,24 @@ class MaskBCECost(CostTerm):
 
         C = []
 
-        bs = 0
-        for i, be in enumerate(target['offset']):
-            pred_masks = outputs['pred_masks'][bs:be]  
-            tgt_flat = target['instance'][bs:be]    
+        bs, ibs = 0, 0
+        for be, ibe in zip(target['offset'], target['instance_segment_offset']):
+            pred_masks = outputs['pred_masks'][bs:be]
+            tgt_flat = target['instance'][bs:be]
+            num_instances = ibe - ibs
 
-            tgt_flat[tgt_flat == self.instance_ignore_index] = -1
-            tgt_masks = F.one_hot(tgt_flat + 1)[:, 1:]     
-
-            filter = tgt_masks != self.instance_ignore_index
-            if filter.sum() == 0:
+            if num_instances == 0:
                 C.append(torch.zeros((pred_masks.shape[1], 0), device=pred_masks.device))
-                bs = be
+                bs, ibs = be, ibe
                 continue
+
+            # ignored points contribute to no instance, neither as positives
+            # nor as negatives
+            valid = tgt_flat != self.instance_ignore_index
+            pred_masks = pred_masks[valid]
+            tgt_masks = F.one_hot(
+                tgt_flat[valid].long() + 1, num_classes=num_instances + 1
+            )[:, 1:]
 
             if self.sample_points is not None:
                 D = pred_masks.shape[-1]
@@ -116,7 +120,7 @@ class MaskBCECost(CostTerm):
                 tgt_masks = tgt_masks[:, idx]
 
             C.append(self.batch_sigmoid_ce_loss(pred_masks.T, tgt_masks.float().T) * self.weight)
-            bs = be
+            bs, ibs = be, ibe
 
         return C
 
@@ -150,19 +154,24 @@ class MaskDiceCost(CostTerm):
 
         C = []
 
-        bs = 0
-        for i, be in enumerate(target['offset']):
-            pred_masks = outputs['pred_masks'][bs:be]  
-            tgt_flat = target['instance'][bs:be]    
+        bs, ibs = 0, 0
+        for be, ibe in zip(target['offset'], target['instance_segment_offset']):
+            pred_masks = outputs['pred_masks'][bs:be]
+            tgt_flat = target['instance'][bs:be]
+            num_instances = ibe - ibs
 
-            tgt_flat[tgt_flat == self.instance_ignore_index] = -1
-            tgt_masks = F.one_hot(tgt_flat + 1)[:, 1:]     
-
-            filter = tgt_masks != self.instance_ignore_index
-            if filter.sum() == 0:
+            if num_instances == 0:
                 C.append(torch.zeros((pred_masks.shape[1], 0), device=pred_masks.device))
-                bs = be
+                bs, ibs = be, ibe
                 continue
+
+            # ignored points contribute to no instance, neither as positives
+            # nor as negatives
+            valid = tgt_flat != self.instance_ignore_index
+            pred_masks = pred_masks[valid]
+            tgt_masks = F.one_hot(
+                tgt_flat[valid].long() + 1, num_classes=num_instances + 1
+            )[:, 1:]
 
             if self.sample_points is not None:
                 D = pred_masks.shape[-1]
@@ -171,6 +180,6 @@ class MaskDiceCost(CostTerm):
                 tgt_masks = tgt_masks[:, idx]
 
             C.append(self.batch_dice_loss(pred_masks.T, tgt_masks.float().T) * self.weight)
-            bs = be
+            bs, ibs = be, ibe
 
         return C

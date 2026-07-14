@@ -1,0 +1,1 @@
+sh scripts/train.sh -g 1 -d my_real -c semseg-pt-v3-base -n delete_imed

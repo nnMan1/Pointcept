@@ -1,21 +1,60 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+# NORMALIZED CONCAT-FUSION + AMP variant of the H5-dataset dinocache config.
+# Same as the concat-amp config but normalizes the two fused feature branches
+# so they reach the mask head at controlled, train/test-consistent scales
+# (un-normalized concat let the larger branch dominate and slowed the mask
+# head; it also overfits the synthetic DinoV3 feature scale, hurting real-data
+# transfer). Two normalizations, both added vs concat-amp:
+#   * proj_norm=True on Image2PointCLoud: trailing LayerNorm on the DinoV3
+#     projection -> the DinoV3 branch is scale-controlled at its source.
+#   * concat_norm=True on PT-V3FeatureExtractor: LayerNorm each branch right
+#     before concatenation.
+#
+# Base behaviour (vs insseg-...-VI-dinocache-h5):
+#   * PT-V3 fuses the DinoV3 features by CONCATENATION (fusion='concat') instead
+#     of the default per-level averaging. The decoder stays pure PT-V3 and the
+#     full-dim DinoV3 features (out_fts_dim=256) are concatenated onto the final
+#     64-d decoder output -> backbone_out_channels = 64 + 256 = 320. No channel
+#     truncation, no MSE distillation term (fts_loss stays 0).
+#   * enable_amp=True: mixed-precision to cut PT-V3 activation memory / speed up.
+#
+# H5-DATASET variant of insseg-...-VI-border-dinocache.
+# Same model/training as the dinocache config, but train/val read the PACKED
+# abc_dataset HDF5 shards (HDF5_Dataset) instead of MechanicalAssemblySynth,
+# and the precomputed DinoV3 grids come from the abc_dataset feature cache
+# written by configs/abc_dataset/extract-dino-v3-features.py.
+#
+# NOTE (must resolve before training): HDF5_Dataset.get_data does NOT emit
+# 'seg_indices' (the abc HDF5 shards carry no superpoint clustering), but the
+# GridSample keys and the model's select_masks require it. Either add a
+# seg_indices field to HDF5_Dataset.get_data or compute a clustering from the
+# stored mesh (mesh_vertices/mesh_faces) at pack time. See the chat notes.
+#
+# Requires /leonardo_scratch bound inside the container (see
+# scripts/start_feature_extraction.sh for the --bind flags).
+
 # misc custom setting
 batch_size = 8 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 evaluate = True
 sync_bn = True
 find_unused_parameters = True
-# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
-# resume = True# weight='backbones/sstnet_pretrain.pth'
 
+# large fp16 feature grids are streamed per-sample by the model
+keep_on_cpu = ("image_features",)
+
+# synthetic features now come from the abc_dataset HDF5 extraction
+features_root_synth = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/abc_dataset/features"
+features_root_real = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/cetim_real/features"
 
 num_classes = 1
 fts_sizes = 128
-dim_feedforward=1024
+dim_feedforward = 1024
+instance_ignore_index = -1
 segment_ignore_index = (-1, )
 
 # Border detection branch settings
@@ -29,18 +68,21 @@ model = dict(
         type="MergeFeatures",
         model1_config=dict(
             type="Image2PointCLoud",
-            model_type="DinoV3",
-            model_name="backbones/dinov3-vith16plus-pretrain-lvd1689m",
+            model_type=None,  # precomputed features: no image backbone
+            model_name=None,
             fts_dim=1280,
             out_fts_dim=256,
             merge_strategy='random_sample',
             return_features=['feat'],
-            freeze_backbone=True,
-            freeze_backbone_bn=True
+            freeze_backbone=False,
+            freeze_backbone_bn=False,
+            # trailing LayerNorm on the projection: scale-control the DinoV3
+            # branch at its source (helps fusion balance + synth->real transfer)
+            proj_norm=True,
         ),
         model2_config=dict(
             type="PT-V3FeatureExtractor",
-            in_channels=6,
+            in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
             stride=(2, 2, 2, 2),
             enc_depths=(2, 2, 2, 6, 2),
@@ -70,10 +112,17 @@ model = dict(
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
-            return_features=['feat']
+            return_features=['feat'],
+            # concat the DinoV3 features onto the final decoder output instead
+            # of averaging them in per level (default 'average').
+            fusion='concat',
+            # LayerNorm each branch before the concat so neither dominates the
+            # mask-feature head input.
+            concat_norm=True,
             ),
         ),
-        backbone_out_channels=64,
+        # 64 (PT-V3 decoder output) + 256 (out_fts_dim of the DinoV3 branch)
+        backbone_out_channels=64 + 256,
         out_channels=32
      ),
     decoder=dict(
@@ -148,17 +197,10 @@ model = dict(
         instance_ignore_index=-1
     ),
     use_superpoint_pooling=False,
+    mask_dice_loss_weight=7.0,
     # Border detection branch: per-point binary border vs non-border head.
-    border_loss_weight=1.0,
+    border_loss_weight=0.0,
     border_focal_alpha=0.5,
-    # positional_embedding=dict(
-    #     type='PositionEmbeddingCoordsSine',
-    #     pos_type='fourier',
-    #     d_pos=128,
-    #     d_in=3,
-    #     gauss_scale=1.0,
-    #     normalize=True,
-    #     scale=6.2832)
 )
 
 # scheduler settings
@@ -174,10 +216,10 @@ scheduler = dict(
 )
 
 # dataset settings
-dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-merged-synthetic/data"
-recompute_clustering=False
-image_size=(512, 512)
+# train/val now read the packed abc_dataset HDF5 shards; test stays on the
+# raw cetim real assemblies (MechanicalAssemblyV2).
+hdf5_data_root = "data/segment-assembly-synthetic/data/abc_dataset/processed"
+image_size = (512, 512)
 
 classes={"other": 0,
         "gear": 0,
@@ -191,17 +233,19 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=['class_names'],
+    names=class_names,
     train=dict(
-        type=dataset_type,
+        type="HDF5_Dataset",
         split="train",
-        cache=True,
-        data_root=data_root,
-        recompute_clustering=recompute_clustering,
+        data_root=hdf5_data_root,
+        # load_images builds mappings_src/tgt from the stored views (the model
+        # scatters the cached grids onto points via these mappings); HDF5_Dataset
+        # has no separate "mappings-only" flag, so PNGs are decoded too.
+        load_images=True,
         image_size=image_size,
         transform=[
+            dict(type="LoadImageFeatures", features_root=features_root_synth),
             dict(type="CenterShift", apply_z=True),
-            # dict(type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5),
             dict(
                 type="Copy",
                 keys_dict={
@@ -210,17 +254,12 @@ data = dict(
                     "instance": "origin_instance",
                 },
             ),
-            # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
-            # dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
-            # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
             dict(type="RandomJitter", sigma=0.001, clip=0.02),
-            # dict(type='ElasticDistortion', distortion_params=[[20, 40], [80, 160]]),
-            dict(type="GenerateBoundary", radius=border_radius),
             dict(
                 type="GridSample",
                 grid_size=1,
@@ -228,14 +267,16 @@ data = dict(
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "border", 'seg_indices'),
+                keys=("coord", "normal", "segment", "instance", 'seg_indices'),
             ),
-            # dict(type="SphereCrop",  point_max=200000, mode="random"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            # Border label on the grid-sampled cloud: bounded density -> cheap
+            # radius graph, and aligned with the points the model predicts on.
+            dict(type="GenerateBoundary", radius=border_radius),
             dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
@@ -246,11 +287,9 @@ data = dict(
                     "segment",
                     "instance",
                     "border",
-                    "images",
+                    "image_features",
                     "mappings_src",
                     "mappings_tgt",
-                    # "instance_centroid",
-                    # "bbox",
                     "seed_ids",
                     "seg_indices",
                     "instance_segment",
@@ -258,11 +297,11 @@ data = dict(
                     "name",
                     "inverse"
                 ),
-                feat_keys=("coord", "normal"),
+                feat_keys=("coord",),
                 offset_keys_dict=dict(
                     offset="coord",
                     origin_offset="origin_coord",
-                    image_offset="images",
+                    image_offset="image_features",
                     mappings_offset="mappings_src",
                     instance_segment_offset="instance_segment"),
             ),
@@ -271,13 +310,13 @@ data = dict(
         classes=classes,
     ),
     val=dict(
-        type=dataset_type,
+        type="HDF5_Dataset",
         split="val",
-        data_root=data_root,
-        cache=True,
-        recompute_clustering=recompute_clustering,
+        data_root=hdf5_data_root,
+        load_images=True,
         image_size=image_size,
         transform=[
+            dict(type="LoadImageFeatures", features_root=features_root_synth),
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="Copy",
@@ -287,24 +326,22 @@ data = dict(
                     "instance": "origin_instance",
                 },
             ),
-            # dict(type="NormalizeCoord"),
-            dict(type="GenerateBoundary", radius=border_radius),
             dict(
                 type="GridSample",
-               grid_size=1,
+                grid_size=1,
                 hash_type="fnv",
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "normal", "segment", "instance", "border", "seg_indices"),
+                keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            dict(type="GenerateBoundary", radius=border_radius),
             dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
@@ -315,12 +352,10 @@ data = dict(
                     "segment",
                     "instance",
                     "border",
-                    "images",
+                    "image_features",
                     "mappings_src",
                     "mappings_tgt",
                     'origin_coord', 'origin_segment', 'origin_instance',
-                    # "instance_centroid",
-                    # "bbox",
                     "instance_segment",
                     "seed_ids",
                     "seg_indices",
@@ -328,11 +363,11 @@ data = dict(
                     "name",
                     "inverse"
                 ),
-                feat_keys=("coord", "normal"),
+                feat_keys=("coord",),
                 offset_keys_dict=dict(
                     offset="coord",
                     origin_offset="origin_coord",
-                    image_offset="images",
+                    image_offset="image_features",
                     mappings_offset="mappings_src",
                     instance_segment_offset="instance_segment"),
             ),
@@ -345,7 +380,9 @@ data = dict(
         split='all',
         image_size=image_size,
         data_root='/home/data/cetim_assembly/dataset/downsampled1',
+        load_image_files=False,  # mappings only; features come from the cache
         transform=[
+            dict(type="LoadImageFeatures", features_root=features_root_real),
             dict(type='CenterShift', apply_z=True),
             dict(
                 type='Copy',
@@ -353,7 +390,6 @@ data = dict(
                     coord='origin_coord',
                     segment='origin_segment',
                     instance='origin_instance')),
-            dict(type='GenerateBoundary', radius=border_radius),
             dict(
                 type='GridSample',
                 grid_size=1,
@@ -361,27 +397,27 @@ data = dict(
                 mode='train',
                 return_grid_coord=True,
                 return_inverse=True,
-                keys=('coord', 'normal', 'segment', 'instance', 'border', 'seg_indices')),
+                keys=('coord', 'normal', 'segment', 'instance', 'seg_indices')),
             dict(type='CenterShift', apply_z=False),
             dict(
                 type='InstanceParser',
                 segment_ignore_index=(-1, ),
                 instance_ignore_index=-1),
+            dict(type='GenerateBoundary', radius=border_radius),
             dict(type='FPSSeed', n_points=100),
             dict(type='ToTensor'),
             dict(
                 type='Collect',
-                # [Change: added seed_ids to test Collect keys]
                 keys=('coord', 'face', 'grid_coord', 'segment', 'instance', 'border',
-                      'instance_segment', 'images', 'mappings_src',
+                      'instance_segment', 'image_features', 'mappings_src',
                       'mappings_tgt', 'origin_coord', 'origin_segment',
                       'origin_instance', 'seed_ids', 'seg_indices', 'path',
-                      'name', 'inverse', 'instance_segment'),
-                feat_keys=('coord', 'normal'),
+                      'name', 'inverse'),
+                feat_keys=('coord',),
                 offset_keys_dict=dict(
                     offset='coord',
                     origin_offset='origin_coord',
-                    image_offset='images',
+                    image_offset='image_features',
                     mappings_offset='mappings_src',
                     instance_segment_offset='instance_segment'))
         ],
@@ -390,7 +426,6 @@ data = dict(
 
 hooks = [
     dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
-    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",
@@ -401,8 +436,8 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
+    instance_ignore_index=instance_ignore_index,
     verbose=False,
 )

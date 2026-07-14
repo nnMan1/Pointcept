@@ -39,7 +39,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type='MechanicalAssemblyV2'
-data_root='data/cetim_assembly/downsampled'
+data_root='data/cetim_assembly/dataset/downsampled'
 
 classes={"other": 0, 
         "gear": 0, 

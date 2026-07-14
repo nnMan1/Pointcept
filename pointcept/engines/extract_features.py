@@ -165,7 +165,9 @@ class ExtractorBase:
         try:
             if self.samples_in_current_shard >= self.shard_size:
                 self._get_new_shard()
-            
+
+            # '/' would create nested h5 groups and break create_index_map
+            sample_name = sample_name.replace('/', '_')
             grp = self.h5_file.create_group(sample_name)
             grp.create_dataset(
                 'features', 
@@ -250,8 +252,9 @@ class IMG_Extractor(ExtractorBase):
                 features = self.model(input_dict['images'])
 
             gpu_time = time.time() - start_gpu
-            
-            features = features.cpu().numpy()
+
+            # .float(): bf16 (autocast) has no numpy equivalent; storage is fp16 anyway
+            features = features.float().cpu().numpy()
             names = input_dict["name"]
 
             start_writing_time = time.time()
@@ -270,6 +273,10 @@ class IMG_Extractor(ExtractorBase):
                 self.logger.info(f"Dataload time: {data_load_time}, data_transfer_time: {data_transfer_time}, gpu_time: {gpu_time}, writing_time: {writing_time}")
 
             start_data_load = time.time()
+
+        # drain the async writer before closing the shard, otherwise the last
+        # queued samples race against the file close
+        self.write_queue.join()
 
         if self.h5_file:
             print("Closing h5 file")

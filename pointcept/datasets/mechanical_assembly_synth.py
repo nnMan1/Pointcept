@@ -32,6 +32,43 @@ try:
 except ImportError:
     print("PyTorch3D is not installed. Please install it to use the pixel-point matching functionality.")
 
+
+def estimate_normals(points, k=30):
+    """Per-point normals via local PCA over k nearest neighbors.
+
+    The surface normal at a point is the eigenvector of the local
+    covariance matrix with the smallest eigenvalue (direction of least
+    variance in the neighborhood). Normals are sign-ambiguous here; use
+    ``orient_normals_toward`` to give them a consistent orientation.
+    """
+    points = np.asarray(points, dtype=np.float64)
+    n = len(points)
+    if n < 3:
+        return np.zeros((n, 3), dtype=np.float32)
+
+    k = min(k, n)
+    nbrs = NearestNeighbors(n_neighbors=k).fit(points)
+    _, idx = nbrs.kneighbors(points)                       # (n, k)
+
+    neighbors = points[idx]                                # (n, k, 3)
+    centered = neighbors - neighbors.mean(axis=1, keepdims=True)
+    cov = np.einsum("nki,nkj->nij", centered, centered) / k  # (n, 3, 3)
+
+    # eigh returns eigenvalues ascending -> column 0 is the normal
+    _, eigvecs = np.linalg.eigh(cov)
+    normals = eigvecs[:, :, 0]                             # (n, 3)
+    return normals.astype(np.float32)
+
+
+def orient_normals_toward(normals, points, viewpoint):
+    """Flip normals so they point toward ``viewpoint`` (camera center)."""
+    to_view = np.asarray(viewpoint, dtype=np.float32)[None, :] - points
+    flip = np.sum(normals * to_view, axis=1) < 0
+    normals = normals.copy()
+    normals[flip] = -normals[flip]
+    return normals
+
+
 @DATASETS.register_module("MechanicalAssemblySynth")
 class MechanicalAssemblySynth(Dataset):
 
@@ -208,7 +245,7 @@ class MechanicalAssemblySynth(Dataset):
         elif isinstance(self.split, Sequence):
             data_list = []
             for split in self.split:
-                data_list += torch.load(open(os.path.join(self.data_root, f"{self.split}_files.txt")).readlines())
+                data_list += open(os.path.join(self.data_root, f"{split}_files.txt")).readlines()
         else:
             raise NotImplementedError
         
@@ -286,12 +323,18 @@ class MechanicalAssemblySynth(Dataset):
                 os.remove(os.path.join(dir, 'cached.pth'))
 
         vertices = []
+        normals = []
         semantic_id = []
         instance_id = []
         frame_id = []
         seg_indices1 = []
         seg_indices2 = []
         seg_indices3 = []
+
+        # per-frame poses, used to orient normals toward the camera
+        # (sorted to match the i-th frame, same assumption as the image branch)
+        frame_R_paths = sorted(glob.glob(os.path.join(dir, 'poses', '*R.txt')))
+        frame_T_paths = sorted(glob.glob(os.path.join(dir, 'poses', '*T.txt')))
 
         # try:
         for i, annotation in enumerate(annotations):
@@ -315,9 +358,21 @@ class MechanicalAssemblySynth(Dataset):
             seg_indices3.append(np.asarray(groupings['seg_indices3']))     
 
             pcd = trimesh.load(frame)
-            vertices.append(pcd.vertices.astype(np.float32))  
+            verts = pcd.vertices.astype(np.float32)
+            vertices.append(verts)
+
+            frame_normals = estimate_normals(verts, k=30)
+            if i < len(frame_R_paths) and i < len(frame_T_paths):
+                R = np.loadtxt(frame_R_paths[i])
+                T = np.loadtxt(frame_T_paths[i])
+                # PyTorch3D convention: X_cam = X_world @ R + T
+                # -> camera center in world coords is C = -T @ R^T
+                cam_center = -T @ R.T
+                frame_normals = orient_normals_toward(frame_normals, verts, cam_center)
+            normals.append(frame_normals)
 
         vertices = np.concatenate(vertices, axis=0)
+        normals = np.concatenate(normals, axis=0)
         instance_id = np.concatenate(instance_id, axis=0)
         semantic_id = np.concatenate(semantic_id, axis=0)
         frame_id = np.concatenate(frame_id, axis=0)
@@ -325,11 +380,7 @@ class MechanicalAssemblySynth(Dataset):
         seg_indices2 = np.concatenate(seg_indices2, axis=0)
         seg_indices3 = np.concatenate(seg_indices3, axis=0)
         
-        mesh = trimesh.Trimesh(vertices=vertices, process=False)
-        normals = mesh.vertex_normals.copy()
-        
-        if len(mesh.vertices) < 2048:
-            del mesh
+        if len(vertices) < 2048:
             return self.get_data(idx + 1)
         
         keep_ids = np.arange(len(vertices))
@@ -434,7 +485,7 @@ class MechanicalAssemblySynth(Dataset):
 
     def prepare_train_data(self, idx):
         # load data
-        data_dict = self.get_data(idx)  
+        data_dict = self.get_data(idx)
 
         if self.image_transform is not None:
             if 'images' in data_dict:

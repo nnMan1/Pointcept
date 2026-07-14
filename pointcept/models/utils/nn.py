@@ -176,6 +176,16 @@ class SuperpointPooling(nn.Module):
             cnt = instances.max() + 1
             non_ignore_mask = instances != self.instance_ignor_index
             if non_ignore_mask.sum() == 0:
+                # This sample has no valid (non-ignore) instances. Skipping it
+                # here drops its instance_segment_offset entry, desyncing it from
+                # data['offset'] (later -> IndexError in the loss). Log which
+                # sample so the offending scan can be found/relabeled.
+                nm = data.get('name', None)
+                if isinstance(nm, (list, tuple)):
+                    nm = nm[i] if i < len(nm) else f"<idx {i}>"
+                print(f"[SuperpointPooling] sample '{nm}' has NO non-ignore "
+                      f"instances (all == {self.instance_ignor_index}); skipping "
+                      f"-> instance_segment_offset desync.")
                 continue
 
             vals, new_instance_indices = torch.unique(instances[non_ignore_mask], return_inverse=True)

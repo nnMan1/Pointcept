@@ -67,12 +67,13 @@ class Image2PointCLoud(BaseFeatureExtractor):
                  merge_strategy='mean', 
                  fts_dim=384,
                  out_fts_dim=256,
-                 return_features=None, 
+                 return_features=None,
                  local_files_only=False,
                  project_fts=True,
+                 proj_norm=False,
                  **kwargs,
                  ):
-        
+
         super().__init__(return_features=return_features, **kwargs)
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
@@ -83,59 +84,82 @@ class Image2PointCLoud(BaseFeatureExtractor):
             self.model = ImageFeatureExtractor(model_type, model_name)
         else:
             self.model = None
-        
+
         if self.project_fts:
-            self.proj = nn.Sequential(
+            proj_layers = [
                     nn.Linear(fts_dim, out_fts_dim),
                     nn.LayerNorm(out_fts_dim),
                     nn.ReLU(),
-                    nn.Linear(out_fts_dim, out_fts_dim)
-                )
+                    nn.Linear(out_fts_dim, out_fts_dim),
+                ]
+            if proj_norm:
+                proj_layers.append(nn.LayerNorm(out_fts_dim))
+            self.proj = nn.Sequential(*proj_layers)
 
     def backbone_modules(self):
         return [self.model]
 
     def forward_features(self, batch: Batch) -> Dict[str, Tensor]:
 
-        with torch.no_grad():
-            images = batch.get('images', [])
+        images = batch.get('images', [])
 
-            mesh_features = torch.zeros((len(batch['coord']), self.fts_dim), dtype=torch.float32, device=self.device)
-            mesh_features_cnt = torch.zeros((len(batch['coord'])), dtype=torch.float32, device=self.device)
+        # Project-before-gather (random_sample only): proj is a pointwise MLP,
+        # so gather(proj(grid)) == proj(gather(grid)). Projecting the compact
+        # (V, H/p, W/p, C) grid runs the trainable head on ~20k vectors per
+        # sample instead of one per mapped voxel (~5x less activation memory)
+        # and lets the high-dim grid be freed right after each sample.
+        # 'mean'/'max' must keep the original reduce-then-project order
+        # (proj is nonlinear), so they use the legacy buffer below.
+        project_first = self.project_fts and self.merge_strategy == 'random_sample'
+        out_dim = self.out_fts_dim if project_first else self.fts_dim
 
-            bs, ibs, mbs, obs = 0, 0, 0, 0
-            i=0
+        mesh_features = torch.zeros((len(batch['coord']), out_dim), dtype=torch.float32, device=self.device)
+        mesh_features_cnt = torch.zeros((len(batch['coord'])), dtype=torch.float32, device=self.device)
 
-            for be, ibe, mbe, obe in zip(batch['offset'], batch['image_offset'], batch['mappings_offset'], batch['origin_offset']):
-                if 'image_features' not in batch:
-                    features = self.model(images[ibs:ibe])
-                else:
-                    features = batch['image_features']
+        bs, ibs, mbs, obs = 0, 0, 0, 0
 
-                features = features.to(self.device)
-                
+        for be, ibe, mbe, obe in zip(batch['offset'], batch['image_offset'], batch['mappings_offset'], batch['origin_offset']):
+            if 'image_features' in batch:
+                # precomputed (fp16) per-view patch grids, possibly kept in
+                # pinned host memory (cfg.keep_on_cpu): stream only this
+                # sample's views to GPU and upcast
+                features = batch['image_features'][ibs:ibe].to(self.device, non_blocking=True).float()
+            elif self.model is not None:
+                with torch.no_grad():
+                    features = self.model(images[ibs:ibe]).to(self.device)
+            else:
+                raise KeyError(
+                    "Image2PointCLoud: batch has no 'image_features' and no image "
+                    "backbone is configured (model_type=None)"
+                )
+
+            if project_first:
+                features = self.proj(features)
+
+            with torch.no_grad():
                 mappings_src = batch['mappings_src'][mbs:mbe]
                 mappings_tgt = batch['mappings_tgt'][mbs:mbe]
                 inverse = batch['inverse'][obs:obe]
 
                 mappings_tgt = inverse[mappings_tgt] # Apply inverse mapping from points to voxels
 
-                if self.merge_strategy == 'random_sample':
-                    random_positions = self.one_random_position_per_value(mappings_tgt)
+            if self.merge_strategy == 'random_sample':
+                random_positions = self.one_random_position_per_value(mappings_tgt)
 
-                    mappings_src = mappings_src[random_positions]
-                    mappings_tgt = mappings_tgt[random_positions]
+                mappings_src = mappings_src[random_positions]
+                mappings_tgt = mappings_tgt[random_positions]
 
-                    if mappings_tgt.numel() == 0:
-                        print(f"[image-feat] skip empty mappings for sample={batch['name']}, bs:be={bs}:{be}")
-                    else:
-                        a, b, c = mappings_src.T
-                        b //= 16
-                        c //= 16
+                if mappings_tgt.numel() == 0:
+                    print(f"[image-feat] skip empty mappings for sample={batch['name']}, bs:be={bs}:{be}")
+                else:
+                    a, b, c = mappings_src.T
+                    b //= 16
+                    c //= 16
 
-                        mesh_features[bs:be][mappings_tgt] += features[a, b, c]
-                        mesh_features_cnt[bs:be][mappings_tgt] += 1
-                elif self.merge_strategy == 'mean':
+                    mesh_features[bs:be][mappings_tgt] += features[a, b, c]
+                    mesh_features_cnt[bs:be][mappings_tgt] += 1
+            elif self.merge_strategy == 'mean':
+                with torch.no_grad():
                     for i in range(ibe - ibs):
                         mask = (mappings_src[:, 0] == i)
                         if torch.sum(mask) == 0:
@@ -149,7 +173,8 @@ class Image2PointCLoud(BaseFeatureExtractor):
 
                         mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
                         mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
-                elif self.merge_strategy == 'max':
+            elif self.merge_strategy == 'max':
+                with torch.no_grad():
                     for i in range(ibe - ibs):
                         mask = (mappings_src[:, 0] == i)
                         if torch.sum(mask) == 0:
@@ -163,17 +188,24 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c])
                         mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
 
+            bs = be
+            ibs = ibe
+            mbs = mbe
+            obs = obe
 
-                bs = be
-                ibs = ibe
-                mbs = mbe
-                obs = obe
+        if project_first:
+            # random_sample picks exactly one (view, pixel) per voxel, so
+            # counts are 0/1: no averaging needed, and unmapped rows were
+            # never written (they stay exactly zero).
+            pass
+        else:
+            with torch.no_grad():
+                valid = mesh_features_cnt > 0
+                mesh_features[valid] = mesh_features[valid] / mesh_features_cnt[valid][..., None]
 
-            mesh_features[mesh_features_cnt > 0] = mesh_features[mesh_features_cnt > 0] / mesh_features_cnt[mesh_features_cnt > 0][..., None]
-
-        if self.project_fts:
-            mesh_features = self.proj(mesh_features)
-            mesh_features[mesh_features_cnt == 0] = 0.0
+            if self.project_fts:
+                mesh_features = self.proj(mesh_features)
+                mesh_features[mesh_features_cnt == 0] = 0.0
 
         return {
             "feat": mesh_features

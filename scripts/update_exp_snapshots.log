@@ -1,0 +1,62 @@
+SKIP (not insseg): abc_dataset/copy-eperiment
+UPDATE: abc_dataset/insseg-myspformer-128-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: abc_dataset/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_freze_1
+UPDATE: abc_dataset/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_freze_2
+UPDATE: abc_dataset/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_freze_3
+UPDATE: abc_dataset/insseg-myspformer-dinov3-only-no_superpoints-large-v1m1-0-VI
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-large-v1m1-0-spunet-base_new
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-large-v1m1-0-spunet-small
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-large-v1m1-0_II
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base-c1
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base-c1-testing
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base_att_2
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-small-v1m1-0
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-small-v1m1-0-no-superpoints
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-small-v1m1-0-no-superpoints_random_queries
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dino-small-v1m1-0-no-superpoints_v2
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-large-v1m1-0-spunet-base_sync_bn
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-II
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-III_a6
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-III_a7
+SKIP (no test.py snapshot): abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-V-a1
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-VI-border
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-VI-border-dinocache-a2
+UPDATE: abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn
+UPDATE: abc_dataset/insseg-myspformer_ptv3-no-superpoints-v1m1-0-spunet-base
+UPDATE: abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base
+SKIP (no test.py snapshot): abc_dataset/insseg-spformer-v1m1-0-spunet-base
+SKIP (not insseg): mcb_dataset/cls-dino-v1m1-0-base
+UPDATE: my_real/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: my_real/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_I
+UPDATE: my_real/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_II
+UPDATE: my_real/insseg-myspformer_ptv3-v1m1-0-spunet-base
+UPDATE: my_real/insseg-spformer-v1m1-0-spunet-base
+SKIP (not insseg): my_real/semseg-dino-no_superpoints-large-v1m1-0-spunet-base_II
+SKIP (not insseg): my_real/semseg-dino-no_superpoints-large-v1m1-0-spunet-base_II_grid_size_0.4
+SKIP (not insseg): my_real/semseg-dino-no_superpoints-large-v1m1-0-spunet-base_I_grid_size_0.4
+SKIP (not insseg): my_real/semseg-dino-v2-base
+SKIP (not insseg): my_real/semseg-dino-v2-pt-v3-base
+SKIP (not insseg): my_real/semseg-spunet-v1m1-0-base_hard_rot
+SKIP (not insseg): my_real/semseg-spunet-v1m1-0-base_hard_rot_I
+UPDATE: my_synth/insseg-myspformer-128-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: my_synth/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: my_synth/insseg-myspformer-dino-no_superpoints-large-v1m1-0-spunet-base_att_2
+SKIP (no model): my_synth/insseg-myspformer-ptv3-dino-large-v1m1-0-spunet-base
+UPDATE: my_synth/insseg-myspformer-ptv3-dino-no-superpoints-v1m1-0-spunet-base_1
+UPDATE: my_synth/insseg-myspformer-ptv3-dino-no-superpoints-v1m1-0-spunet-base_2
+UPDATE: my_synth/insseg-myspformer-ptv3-dino-no_superpoints-large-v1m1-0-spunet-base
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-extended2-v1m1-0-spunet-base
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base-test_1
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base-with-screws
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn_100_query
+UPDATE: my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn_100_query_fixed
+SKIP (not insseg): my_synth/semseg-spunet-v1m1-0-base_hard_rot
+SKIP (not insseg): my_synth/semseg-spunet-v1m1-0-base_hard_rot_2
+UPDATE: partnet/insseg-myspformer-ptv3-dino-large-v1m1-0_II_chair
+
+=== SUMMARY ===
+Updated: 43
+Skipped: 14
+Failed : 0

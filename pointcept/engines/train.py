@@ -175,7 +175,13 @@ class Trainer(TrainerBase):
 
     def run_step(self):
         input_dict = self.comm_info["input_dict"]
+        # keys listed in cfg.keep_on_cpu stay in (pinned) host memory; the
+        # model streams per-sample slices to GPU itself (e.g. large
+        # precomputed image-feature grids)
+        keep_on_cpu = self.cfg.get("keep_on_cpu", ()) or ()
         for key in input_dict.keys():
+            if key in keep_on_cpu:
+                continue
             if isinstance(input_dict[key], torch.Tensor):
                 input_dict[key] = input_dict[key].cuda(non_blocking=True)
         with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
