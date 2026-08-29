@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+import uuid
 import trimesh
 import numpy as np
 import torch
@@ -126,9 +127,16 @@ class MechanicalAssemblyV2(Dataset):
         dir = self.data_list[idx]
         file = os.path.join(dir, self.get_mesh_name(dir))
 
-        if self.cache and os.path.exists(os.path.join(dir, 'cached.pth')):
-            return torch.load(os.path.join(dir, 'cached.pth'))
-                
+        cache_path = os.path.join(dir, 'cached.pth')
+        if self.cache and os.path.exists(cache_path):
+            try:
+                return torch.load(cache_path)
+            except Exception as e:
+                # cache may be mid-write by a concurrent worker or truncated
+                # by a killed run — regenerate instead of crashing
+                print(f"Warning: failed to load cache {cache_path} ({e}), regenerating")
+
+
         with open(os.path.join( dir, 'annotations.json')) as json_file:
             annotations = json.load(json_file)
 
@@ -212,8 +220,17 @@ class MechanicalAssemblyV2(Dataset):
                 print(f"Warning: {key} shape mismatch in {file}: {data[key].shape[0]} != {len(mesh.vertices)}")
 
         if self.cache:
-            torch.save(data, os.path.join(dir, 'cached.pth'))
-        
+            # unique temp per writer + atomic rename so concurrent readers
+            # never see a partially written cache
+            tmp_path = f"{cache_path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            try:
+                torch.save(data, tmp_path)
+                os.replace(tmp_path, cache_path)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
+
         return data
 
     def get_data_name(self, idx):

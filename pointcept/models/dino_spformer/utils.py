@@ -3,8 +3,78 @@ from torch import nn
 from torch.nn import functional as F
 from pointcept.utils.misc import batch_iou
 from sklearn.cluster import DBSCAN
+from scipy import sparse
+from scipy.spatial import cKDTree
 import numpy as np
 import torch_scatter
+
+
+class _EpsGraphClusterer:
+    """Connected components of the eps-radius graph, precomputed once per scene.
+
+    Equivalent to DBSCAN(eps, min_samples=1) on any subset of the points: with
+    min_samples=1 every point is a core point, so clusters are exactly the
+    connected components of the eps-graph induced on the subset. The KD-tree
+    and edge list are built once per scene instead of per mask.
+
+    When per-point superpoint ids are given, superpoints are refined into
+    eps-connected fragments and the graph is contracted onto them (~1k nodes
+    instead of ~50k points with ~50 edges each). Masks produced by superpoint
+    voting/expansion are unions of superpoints, so the contraction is exact;
+    a per-mask alignment check falls back to the point-level graph otherwise.
+    """
+
+    def __init__(self, coord_np, eps, superpoints_np=None):
+        self.n = coord_np.shape[0]
+        self.pairs = cKDTree(coord_np).query_pairs(r=eps, output_type="ndarray")
+        self.frag = None
+        if superpoints_np is not None and superpoints_np.shape[0] == self.n:
+            sp = superpoints_np
+            same_sp = sp[self.pairs[:, 0]] == sp[self.pairs[:, 1]]
+            e_in = self.pairs[same_sp]
+            adj = sparse.coo_matrix(
+                (np.ones(e_in.shape[0], dtype=np.int8), (e_in[:, 0], e_in[:, 1])),
+                shape=(self.n, self.n),
+            )
+            # only intra-superpoint edges -> components are the eps-connected
+            # fragments of each superpoint (isolated points = own fragment)
+            _, self.frag = sparse.csgraph.connected_components(adj, directed=False)
+            self.n_frag = int(self.frag.max()) + 1
+            e_out = self.pairs[~same_sp]
+            fe = np.stack([self.frag[e_out[:, 0]], self.frag[e_out[:, 1]]], 1)
+            self.frag_edges = np.unique(np.sort(fe, axis=1), axis=0)
+            # a representative point per fragment, to read mask membership
+            self.frag_first = np.zeros(self.n_frag, dtype=np.int64)
+            self.frag_first[self.frag[::-1]] = np.arange(self.n - 1, -1, -1)
+
+    def labels(self, active_np):
+        """Cluster labels (0..k-1, no noise) for points where active_np is True."""
+        if self.frag is not None:
+            active_frag = active_np[self.frag_first]
+            # exactness requires the mask to be a union of fragments
+            if np.array_equal(active_frag[self.frag], active_np):
+                nodes = np.where(active_frag)[0]
+                remap = np.zeros(self.n_frag, dtype=np.int64)
+                remap[nodes] = np.arange(nodes.shape[0])
+                fe = self.frag_edges
+                e = fe[active_frag[fe[:, 0]] & active_frag[fe[:, 1]]]
+                adj = sparse.coo_matrix(
+                    (np.ones(e.shape[0], dtype=np.int8), (remap[e[:, 0]], remap[e[:, 1]])),
+                    shape=(nodes.shape[0], nodes.shape[0]),
+                )
+                _, frag_lab = sparse.csgraph.connected_components(adj, directed=False)
+                return frag_lab[remap[self.frag[active_np]]]
+
+        n_act = int(active_np.sum())
+        idx_map = np.cumsum(active_np) - 1  # dense reindex of active points
+        sel = active_np[self.pairs[:, 0]] & active_np[self.pairs[:, 1]]
+        e = self.pairs[sel]
+        adj = sparse.coo_matrix(
+            (np.ones(e.shape[0], dtype=np.int8), (idx_map[e[:, 0]], idx_map[e[:, 1]])),
+            shape=(n_act, n_act),
+        )
+        _, lab = sparse.csgraph.connected_components(adj, directed=False)
+        return lab
 
 
 def mask_nms(masks, scores, iou_threshold):
@@ -38,7 +108,7 @@ def mask_nms(masks, scores, iou_threshold):
 
     return order[keep]
 
-def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_point_thr=100, eps=5, min_samples=1, keep='all', rescore='size'):
+def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_point_thr=100, eps=5, min_samples=1, keep='all', rescore='size', superpoints=None):
     """Split each mask into spatially connected components via DBSCAN.
 
     Takes the *final* parent scores (class score x mask confidence) so that the
@@ -61,6 +131,11 @@ def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_po
     separated and fragments below n_point_thr dropped.
     """
     coord_np = coord.cpu().numpy() if isinstance(coord, torch.Tensor) else coord
+    superpoints_np = superpoints.cpu().numpy() if isinstance(superpoints, torch.Tensor) else superpoints
+    # min_samples=1 clustering == connected components of the eps-graph, which
+    # can be precomputed once for the scene instead of per mask; sklearn DBSCAN
+    # stays as the fallback for min_samples > 1 (where core-point logic matters)
+    eps_graph = _EpsGraphClusterer(coord_np, eps, superpoints_np) if min_samples == 1 else None
     # collect (point indices, score, label) per surviving component; dense
     # masks are materialized once at the end — building a dense mask per
     # component OOMs when a small eps shatters masks into many fragments
@@ -73,7 +148,11 @@ def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_po
         if active.sum() == 0:
             continue
 
-        clusters = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(coord_np[active.cpu().numpy()]).labels_
+        active_np = active.cpu().numpy()
+        if eps_graph is not None:
+            clusters = eps_graph.labels(active_np)
+        else:
+            clusters = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(coord_np[active_np]).labels_
         active_idx = torch.where(active)[0].cpu()
         valid = clusters != -1
         cluster_ids, cluster_sizes = np.unique(clusters[valid], return_counts=True)
@@ -209,7 +288,7 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
                 full_masks, scores, labels, coord,
                 mask_sigmoid=full_masks_sigmoid,
                 n_point_thr=n_point_thr, eps=dbscan_eps, min_samples=dbscan_min_samples,
-                keep=split_mode, rescore=rescore,
+                keep=split_mode, rescore=rescore, superpoints=superpoints,
             )
 
         if nms_thr is not None and full_masks.shape[0] > 0:

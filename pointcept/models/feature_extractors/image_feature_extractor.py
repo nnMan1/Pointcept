@@ -17,9 +17,10 @@ Out = Dict[str, Tensor]
 
 @MODELS.register_module("ImageFeatureExtractor")
 class ImageFeatureExtractor(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  model_type="DinoV2",
                  model_name="facebook/dinov2-small",
+                 patch_size=None,
                 ):
         super().__init__()
         self.model_type = model_type
@@ -33,6 +34,11 @@ class ImageFeatureExtractor(nn.Module):
             self.div_factor = 16
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
+
+        # explicit override for models whose patch size differs from the
+        # model_type default (e.g. future backbones); None keeps the default
+        if patch_size is not None:
+            self.div_factor = patch_size
 
     def __call__(self, images: Tensor) -> Tensor:
 
@@ -71,17 +77,23 @@ class Image2PointCLoud(BaseFeatureExtractor):
                  local_files_only=False,
                  project_fts=True,
                  proj_norm=False,
+                 patch_size=None,
+                 k_views=3,
                  **kwargs,
                  ):
 
         super().__init__(return_features=return_features, **kwargs)
+        # pixel->patch divisor; None = derive from the feature grid at merge
+        # time (works for any backbone), an int pins it explicitly
+        self.patch_size = patch_size
+        self.k_views = k_views  # for merge_strategy='ksample_mean'
         self.merge_strategy = merge_strategy
         self.fts_dim = fts_dim
         self.out_fts_dim = out_fts_dim
         self.project_fts = project_fts
 
         if model_type is not None:
-            self.model = ImageFeatureExtractor(model_type, model_name)
+            self.model = ImageFeatureExtractor(model_type, model_name, patch_size=patch_size)
         else:
             self.model = None
 
@@ -110,7 +122,11 @@ class Image2PointCLoud(BaseFeatureExtractor):
         # and lets the high-dim grid be freed right after each sample.
         # 'mean'/'max' must keep the original reduce-then-project order
         # (proj is nonlinear), so they use the legacy buffer below.
-        project_first = self.project_fts and self.merge_strategy == 'random_sample'
+        # 'ksample_mean'/'center_weighted' aggregate PROJECTED features like
+        # random_sample does (proj is applied to the compact grid first);
+        # 'mean'/'max' keep the legacy reduce-then-project order.
+        project_first = self.project_fts and self.merge_strategy in (
+            'random_sample', 'ksample_mean', 'center_weighted')
         out_dim = self.out_fts_dim if project_first else self.fts_dim
 
         mesh_features = torch.zeros((len(batch['coord']), out_dim), dtype=torch.float32, device=self.device)
@@ -133,6 +149,24 @@ class Image2PointCLoud(BaseFeatureExtractor):
                     "backbone is configured (model_type=None)"
                 )
 
+            # Pixel->patch mapping derived from the actual grid: patch models
+            # differ (DinoV3 512/16 -> 32x32, DinoV2 512/14 -> 36x36), so the
+            # divisor cannot be hardcoded. (px * grid) // img, clamped, equals
+            # px // 16 exactly for the 512/32 DinoV3 case (bit-identical), and
+            # covers the full 36x36 grid for DinoV2 instead of reading only
+            # the top-left 32x32 (the old hardcoded //16 bug).
+            grid_h, grid_w = features.shape[1], features.shape[2]
+            img_h, img_w = 512, 512
+
+            def _to_patch(b, c):
+                if self.patch_size is not None:
+                    b = torch.clamp(b // self.patch_size, max=grid_h - 1)
+                    c = torch.clamp(c // self.patch_size, max=grid_w - 1)
+                else:
+                    b = torch.clamp((b * grid_h) // img_h, max=grid_h - 1)
+                    c = torch.clamp((c * grid_w) // img_w, max=grid_w - 1)
+                return b, c
+
             if project_first:
                 features = self.proj(features)
 
@@ -153,11 +187,36 @@ class Image2PointCLoud(BaseFeatureExtractor):
                     print(f"[image-feat] skip empty mappings for sample={batch['name']}, bs:be={bs}:{be}")
                 else:
                     a, b, c = mappings_src.T
-                    b //= 16
-                    c //= 16
+                    b, c = _to_patch(b, c)
 
                     mesh_features[bs:be][mappings_tgt] += features[a, b, c]
                     mesh_features_cnt[bs:be][mappings_tgt] += 1
+            elif self.merge_strategy == 'ksample_mean':
+                # Average over k independent random view draws per voxel: keeps
+                # random_sample's view-diversity regularization but cuts its
+                # variance (k=1 is exactly random_sample, k=inf approaches mean).
+                for _ in range(self.k_views):
+                    rp = self.one_random_position_per_value(mappings_tgt)
+                    if rp.numel() == 0:
+                        continue
+                    a, b, c = mappings_src[rp].T
+                    b, c = _to_patch(b, c)
+                    tgt = mappings_tgt[rp]
+                    mesh_features[bs:be].index_add_(0, tgt, features[a, b, c])
+                    mesh_features_cnt[bs:be].index_add_(
+                        0, tgt, torch.ones_like(tgt, dtype=mesh_features_cnt.dtype))
+            elif self.merge_strategy == 'center_weighted':
+                # Weighted mean over ALL views seeing the voxel, weighting each
+                # observation by how central it is in its image: peripheral
+                # pixels are more distorted / grazing-angle, so their patch
+                # features are less reliable than centered ones.
+                a, b, c = mappings_src.T
+                bq, cq = _to_patch(b, c)
+                dy = (b.float() - img_h / 2.0) / (img_h / 2.0)
+                dx = (c.float() - img_w / 2.0) / (img_w / 2.0)
+                w = torch.clamp(1.0 - torch.sqrt(dy * dy + dx * dx) / 1.4142, min=0.05)
+                mesh_features[bs:be].index_add_(0, mappings_tgt, features[a, bq, cq] * w[:, None])
+                mesh_features_cnt[bs:be].index_add_(0, mappings_tgt, w.to(mesh_features_cnt.dtype))
             elif self.merge_strategy == 'mean':
                 with torch.no_grad():
                     for i in range(ibe - ibs):
@@ -167,9 +226,7 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-
-                        b //= 16
-                        c //= 16
+                        b, c = _to_patch(b, c)
 
                         mesh_features[bs:be][selected_mappings_tgt] += features[a, b, c]
                         mesh_features_cnt[bs:be][selected_mappings_tgt] += 1
@@ -182,8 +239,7 @@ class Image2PointCLoud(BaseFeatureExtractor):
                         selected_mappings_src = mappings_src[mask]
                         selected_mappings_tgt = mappings_tgt[mask]
                         a, b, c = selected_mappings_src.T
-                        b //= 16
-                        c //= 16
+                        b, c = _to_patch(b, c)
 
                         mesh_features[bs:be][selected_mappings_tgt] = torch.maximum(mesh_features[bs:be][selected_mappings_tgt], features[a, b, c])
                         mesh_features_cnt[bs:be][selected_mappings_tgt] = 1
@@ -194,10 +250,13 @@ class Image2PointCLoud(BaseFeatureExtractor):
             obs = obe
 
         if project_first:
-            # random_sample picks exactly one (view, pixel) per voxel, so
-            # counts are 0/1: no averaging needed, and unmapped rows were
-            # never written (they stay exactly zero).
-            pass
+            # random_sample writes exactly one (view, pixel) per voxel (counts
+            # 0/1, nothing to average). ksample_mean/center_weighted accumulate
+            # several (weighted) contributions, so they must be normalized.
+            if self.merge_strategy != 'random_sample':
+                with torch.no_grad():
+                    valid = mesh_features_cnt > 0
+                    mesh_features[valid] = mesh_features[valid] / mesh_features_cnt[valid][..., None]
         else:
             with torch.no_grad():
                 valid = mesh_features_cnt > 0

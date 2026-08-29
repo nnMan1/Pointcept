@@ -3,7 +3,7 @@
 # Pokrene se iz /home (repo root).
 set -e
 
-ROOT=/home
+ROOT=${ROOT:-$(pwd)}
 SRC_METRICS="$ROOT/pointcept/utils/metrics.py"
 SRC_MATCHER_DIR="$ROOT/pointcept/utils/matcher"
 SRC_UTILS_INIT="$ROOT/pointcept/utils/__init__.py"

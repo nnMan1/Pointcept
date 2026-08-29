@@ -1663,3 +1663,72 @@ class Compose(object):
             data_dict = t(data_dict)
         return data_dict
 
+
+
+@TRANSFORMS.register_module()
+class NormalizeScalePow2(object):
+    """Power-of-2 bbox-diagonal normalization into [lo, hi].
+
+    The training datasets (MechanicalAssemblySynth, HDF5_Dataset) apply this
+    exact normalization at load time, but the real-scan test loader
+    (MechanicalAssemblyV2) does not — so models trained in the [80, 400]
+    window are evaluated on unnormalized scans (CETIM diagonals 77-467, 28%
+    outside the window). Adding this to the TEST transform makes train and
+    test scale-consistent.
+
+    Must run BEFORE Copy(coord -> origin_coord): predictions are mapped back
+    to origin_coord by knn, so both must live in the same (scaled) space.
+    GT segment/instance labels are untouched, and metrics are IoU-based, so
+    evaluation numbers stay directly comparable with unscaled runs.
+    """
+
+    def __init__(self, lo=80.0, hi=400.0, keys=("coord",)):
+        self.lo = lo
+        self.hi = hi
+        self.keys = keys
+
+    def __call__(self, data_dict):
+        coord = data_dict["coord"]
+        diag = float(np.linalg.norm(coord.max(0) - coord.min(0)))
+        scale = 1.0
+        while diag * scale < self.lo:
+            scale *= 2.0
+        while diag * scale > self.hi:
+            scale /= 2.0
+        if scale != 1.0:
+            for key in self.keys:
+                if key in data_dict:
+                    data_dict[key] = data_dict[key] * scale
+        return data_dict
+
+
+@TRANSFORMS.register_module()
+class RandomRescaleDiag(object):
+    """Rescale the whole scene so its bbox diagonal hits a random target in
+    [lo, hi] (log-uniform by default). Train-time scale augmentation: the
+    pow2 load-time normalization leaves scenes anywhere in [80, 400] with
+    per-scene arbitrary factors, and real scans peak near 330-460 — sampling
+    the target continuously makes the model robust across that whole range
+    instead of memorizing the training window.
+    """
+
+    def __init__(self, lo=80.0, hi=480.0, log_uniform=True, keys=("coord",)):
+        self.lo = lo
+        self.hi = hi
+        self.log_uniform = log_uniform
+        self.keys = keys
+
+    def __call__(self, data_dict):
+        coord = data_dict["coord"]
+        diag = float(np.linalg.norm(coord.max(0) - coord.min(0)))
+        if diag <= 0:
+            return data_dict
+        if self.log_uniform:
+            target = float(np.exp(np.random.uniform(np.log(self.lo), np.log(self.hi))))
+        else:
+            target = float(np.random.uniform(self.lo, self.hi))
+        scale = target / diag
+        for key in self.keys:
+            if key in data_dict:
+                data_dict[key] = data_dict[key] * scale
+        return data_dict

@@ -525,6 +525,9 @@ class PartSegTester(TesterBase):
     def collate_fn(batch):
         return collate_fn(batch)
 
+# 'InsSegTester' alias: ~30 legacy configs carry this misspelling; the
+# alias keeps their test sections working without editing every file.
+@TESTERS.register_module("InsSegTester")
 @TESTERS.register_module()
 class InstSegTester(TesterBase):
     def __init__(

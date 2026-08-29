@@ -238,12 +238,9 @@ class MySPFormer(nn.Module):
         triplet_margin=0.0,
         border_loss_weight=0.0,
         border_focal_alpha=0.5,
-<<<<<<< HEAD
         mask_selection=None,
         eval_superpoint_voting=True,
-=======
         equal_instance_weight=False,
->>>>>>> 7fe784f6cd6da9304521f014797b9f4a7dd0c8fc
     ):
         super().__init__()
 
