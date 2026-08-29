@@ -1,22 +1,29 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+# PARTNET-PRETRAINED FINETUNE on the merged-synthetic assembly dataset.
+# Identical to insseg-myspformer-ptv3-dino-large-v1m1-0_II (same model, data,
+# schedule) except the init weights: instead of training from scratch, load
+# the best PartNet all-categories model (exp/partnet/..._II_all_a2, AP50
+# 0.6972), which itself was initialized from the original _II abc run.
+# Closes the abc -> partnet -> abc loop to test whether PartNet pretraining
+# transfers. Baseline to beat: original _II run, val AP50 0.4972 @ 100 epochs.
+
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+batch_size = 12 # bs: total bs in all gpus
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
 find_unused_parameters = True
-# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
-# resume = True# weight='backbones/sstnet_pretrain.pth'
+weight = 'exp/partnet/insseg-myspformer-ptv3-dino-large-v1m1-0_II_all_a2/model/model_best.pth'
 
 
 num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
-segment_ignore_index = (-1, )
 instance_ignore_index = -1
+segment_ignore_index = (-1, )
 
 # model settings
 model = dict(
@@ -24,6 +31,19 @@ model = dict(
     num_query = 100,
     encoder=dict(
         backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="Image2PointCLoud",
+            model_type="DinoV2",
+            model_name="facebook/dinov2-large",
+            fts_dim=1024,
+            out_fts_dim=256,
+            merge_strategy='mean',
+            return_features=['feat'],
+            freeze_backbone=True,
+            freeze_backbone_bn=True
+        ),
+        model2_config=dict(
             type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
@@ -56,6 +76,7 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
             return_features=['feat'],
+            ),
         ),
         backbone_out_channels=64,
         out_channels=32
@@ -122,9 +143,17 @@ model = dict(
             )
         ],
     ),
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False
 )
-
 
 
 # scheduler settings
@@ -141,7 +170,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
+data_root = "data/segment-assembly-merged-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
@@ -156,7 +185,7 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
+    names=['class_names'],
     train=dict(
         type=dataset_type,
         split="train",
@@ -210,6 +239,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -221,7 +251,13 @@ data = dict(
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"
+                ),
             ),
         ],
         test_mode=False,
@@ -269,6 +305,7 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
+                    "instance_segment",
                     "images",
                     "mappings_src",
                     "mappings_tgt",
@@ -278,57 +315,69 @@ data = dict(
                     "seg_indices",
                     "path",
                     "name",
-                    "inverse"
+                    "inverse",
+                    "instance_segment"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord", 
+                    origin_offset="origin_coord", 
+                    image_offset="images", 
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
         classes=classes,   
     ),
-    test=dict(  
-            type='MechanicalAssembly',
-            split='train',
-            data_root='data/scans',
-            transform=[
-                dict(type='CenterShift', apply_z=True),
-                dict(
-                    type='Copy',
-                    keys_dict=dict(
-                        coord='origin_coord',
-                        segment='origin_segment',
-                        instance='origin_instance')),
-                dict(
-                    type='GridSample',
-                    grid_size=1,
-                    hash_type='fnv',
-                    mode='train',
-                    return_grid_coord=True,
-                    keys=('coord', 'segment', 'instance', 'seg_indices')),
-                dict(type='CenterShift', apply_z=False),
-                dict(
-                    type='InstanceParser',
-                    segment_ignore_index=(-1, ),
-                    instance_ignore_index=-1),
-                dict(type='FPSSeed', n_points=100),
-                dict(type='ToTensor'),
-                dict(
-                    type='Collect',
-                    keys=('coord', 'grid_coord', 'segment', 'instance',
-                        'origin_coord', 'origin_segment', 'origin_instance',
-                        'instance_centroid', 'bbox', 'seed_ids', 'path',
-                        'seg_indices'),
-                    feat_keys='coord',
-                    offset_keys_dict=dict(
-                        offset='coord', origin_offset='origin_coord'))
-            ],
-            test_mode=False,
-            classes={"other": 0, 
-                        "gear": 1, 
-                        "nut": 2, 
-                        "screw": 3, 
-                        "axe": 4})
+    # Real-data test: CETIM assembly scans, same plumbing as the VI configs
+    # (MechanicalAssemblyV2 with online images + mappings for DinoV2), but
+    # feat_keys=('coord',) to match this model's in_channels=3.
+    test=dict(
+        type='MechanicalAssemblyV2',
+        split='all',
+        image_size=(512, 512),
+        data_root='/home/data/cetim_assembly/dataset/downsampled1',
+        transform=[
+            dict(type='CenterShift', apply_z=True),
+            dict(
+                type='Copy',
+                keys_dict=dict(
+                    coord='origin_coord',
+                    segment='origin_segment',
+                    instance='origin_instance')),
+            dict(
+                type='GridSample',
+                grid_size=1,
+                hash_type='fnv',
+                mode='train',
+                return_grid_coord=True,
+                return_inverse=True,
+                keys=('coord', 'normal', 'segment', 'instance', 'seg_indices')),
+            dict(type='CenterShift', apply_z=False),
+            dict(
+                type='InstanceParser',
+                segment_ignore_index=(-1, ),
+                instance_ignore_index=-1),
+            dict(type='FPSSeed', n_points=100),
+            dict(type='ToTensor'),
+            dict(
+                type='Collect',
+                keys=('coord', 'face', 'grid_coord', 'segment', 'instance',
+                      'instance_segment', 'images', 'mappings_src',
+                      'mappings_tgt', 'origin_coord', 'origin_segment',
+                      'origin_instance', 'seed_ids', 'seg_indices', 'path',
+                      'name', 'inverse'),
+                feat_keys=('coord',),
+                offset_keys_dict=dict(
+                    offset='coord',
+                    origin_offset='origin_coord',
+                    image_offset='images',
+                    mappings_offset='mappings_src',
+                    instance_segment_offset='instance_segment'))
+        ],
+        test_mode=False,
+        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0))
 )
 
 hooks = [
@@ -346,6 +395,6 @@ hooks = [
 test = dict(
     type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
-    instance_ignore_index=-1,
+    instance_ignore_index=instance_ignore_index,
     verbose=False,
 )

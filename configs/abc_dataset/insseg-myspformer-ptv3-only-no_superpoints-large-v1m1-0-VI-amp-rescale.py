@@ -1,28 +1,39 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+# PTV3-ONLY + RANDOM RESCALE, from scratch (no pretrained init).
+# No-DINO counterpart of concat-amp-norm-rescale: same merged data, same
+# RandomRescaleDiag(80..480) scale augmentation, bare PT-V3 encoder.
+# Question: does the DINO branch still buy transfer once the model is
+# scale-robust? Compare vs rescale H+ (real AP50 0.2768) and vs
+# scannetpre (ptv3-only + ScanNet init, no rescale, ep61: real 0.1654).
+
 # misc custom setting
 batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+num_worker = 32
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 evaluate = True
+sync_bn = True
 find_unused_parameters = True
-# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
-# resume = True# weight='backbones/sstnet_pretrain.pth'
 
+# ScanNet-pretrained PT-V3 (converted, see header)
+weight = None
 
 num_classes = 1
 fts_sizes = 128
-dim_feedforward=1024
+dim_feedforward = 1024
 segment_ignore_index = (-1, )
 instance_ignore_index = -1
 
-# model settings
+# Border detection branch settings
+border_radius = 4.0  # metric radius for boundary generation (~4x grid_size)
+
 model = dict(
     type="MySPFormer",
     num_query = 100,
     encoder=dict(
+        # PT-V3-only backbone: no image branch.
         backbone=dict(
             type="PT-V3FeatureExtractor",
             in_channels=3,
@@ -65,8 +76,8 @@ model = dict(
         hlevels=6,
         mask_modules=[
             dict(
-                num_classes=num_classes, 
-                return_attn_masks=True, 
+                num_classes=num_classes,
+                return_attn_masks=True,
                 hidden_dim=fts_sizes,
                 reuse=1
             )
@@ -77,59 +88,72 @@ model = dict(
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             ),
             dict(
                 in_channels=128,
                 mask_dim=fts_sizes,
                 dim_feedforward=dim_feedforward,
                 pre_norm=False,
-                num_heads=8, 
-                dropout=0
+                num_heads=8,
+                dropout=0.005
             )
         ],
     ),
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False,
+    mask_dice_loss_weight=7.0,
+    # Border detection branch: per-point binary border vs non-border head.
+    # Off (matches the dinocache-amp model); border labels still computed by
+    # GenerateBoundary but unused at weight 0.
+    border_loss_weight=0.0,
+    border_focal_alpha=0.5,
 )
-
-
 
 # scheduler settings
 epoch = 500
-optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.002)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.005)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=optimizer["lr"],
@@ -141,13 +165,14 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
-recompute_clustering=False
+data_root = "data/segment-assembly-merged-synthetic/data"
+recompute_clustering = False
+image_size = (512, 512)
 
-classes={"other": 0, 
-        "gear": 0, 
-        "nut": 0, 
-        "screw": 0, 
+classes={"other": 0,
+        "gear": 0,
+        "nut": 0,
+        "screw": 0,
         "axe": 0}
 
 class_names = ["other"]
@@ -163,11 +188,10 @@ data = dict(
         cache=True,
         data_root=data_root,
         recompute_clustering=recompute_clustering,
+        image_size=image_size,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            # dict(
-            #     type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
-            # ),
+            dict(type="RandomRescaleDiag", lo=80, hi=480),
             dict(
                 type="Copy",
                 keys_dict={
@@ -176,16 +200,12 @@ data = dict(
                     "instance": "origin_instance",
                 },
             ),
-            # dict(type="RandomRotateTargetAngle", angle=(1/2, 1, 3/2), center=[0, 0, 0], axis='z', p=0.75),
             dict(type="RandomRotate", angle=[-1, 1], axis="z", center=[0, 0, 0], p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="x", p=0.5),
             dict(type="RandomRotate", angle=[-1, 1], axis="y", p=0.5),
-            # dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.9, 1.1]),
-            # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.8),
             dict(type="RandomJitter", sigma=0.001, clip=0.02),
-            # dict(type="ElasticDistortion", distortion_params=[[2, 4], [8, 16]]),
             dict(
                 type="GridSample",
                 grid_size=1,
@@ -195,12 +215,14 @@ data = dict(
                 return_grid_coord=True,
                 keys=("coord", "normal", "segment", "instance", 'seg_indices'),
             ),
-            # dict(type="SphereCrop",  point_max=200000, mode="random"),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            # Border label on the grid-sampled cloud: bounded density -> cheap
+            # radius graph, and aligned with the points the model predicts on.
+            dict(type="GenerateBoundary", radius=border_radius),
             dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
@@ -210,18 +232,19 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "images",
-                    "mappings_src",
-                    "mappings_tgt",
-                    # "instance_centroid",
-                    # "bbox",
+                    "border",
+                    "seed_ids",
                     "seg_indices",
+                    "instance_segment",
                     "path",
                     "name",
                     "inverse"
                 ),
-                feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                feat_keys=("coord",),
+                offset_keys_dict=dict(
+                    offset="coord",
+                    origin_offset="origin_coord",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
@@ -233,6 +256,7 @@ data = dict(
         data_root=data_root,
         cache=True,
         recompute_clustering=recompute_clustering,
+        image_size=image_size,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -243,7 +267,6 @@ data = dict(
                     "instance": "origin_instance",
                 },
             ),
-            # dict(type="NormalizeCoord"),
             dict(
                 type="GridSample",
                 grid_size=1,
@@ -251,15 +274,15 @@ data = dict(
                 mode="train",
                 return_inverse=True,
                 return_grid_coord=True,
-                keys=("coord", "segment", "instance", "seg_indices"),
+                keys=("coord", "normal", "segment", "instance", "seg_indices"),
             ),
-            # dict(type="SphereCrop", point_max=1000000, mode='center'),
             dict(type="CenterShift", apply_z=False),
             dict(
                 type="InstanceParser",
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
+            dict(type="GenerateBoundary", radius=border_radius),
             dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
@@ -269,71 +292,72 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "images",
-                    "mappings_src",
-                    "mappings_tgt",
+                    "border",
                     'origin_coord', 'origin_segment', 'origin_instance',
-                    # "instance_centroid",
-                    # "bbox",
+                    "instance_segment",
+                    "seed_ids",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
-                feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                feat_keys=("coord",),
+                offset_keys_dict=dict(
+                    offset="coord",
+                    origin_offset="origin_coord",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
-        classes=classes,   
+        classes=classes,
     ),
-    test=dict(  
-            type='MechanicalAssembly',
-            split='train',
-            data_root='data/scans',
-            transform=[
-                dict(type='CenterShift', apply_z=True),
-                dict(
-                    type='Copy',
-                    keys_dict=dict(
-                        coord='origin_coord',
-                        segment='origin_segment',
-                        instance='origin_instance')),
-                dict(
-                    type='GridSample',
-                    grid_size=1,
-                    hash_type='fnv',
-                    mode='train',
-                    return_grid_coord=True,
-                    keys=('coord', 'segment', 'instance', 'seg_indices')),
-                dict(type='CenterShift', apply_z=False),
-                dict(
-                    type='InstanceParser',
-                    segment_ignore_index=(-1, ),
-                    instance_ignore_index=-1),
-                dict(type='FPSSeed', n_points=100),
-                dict(type='ToTensor'),
-                dict(
-                    type='Collect',
-                    keys=('coord', 'grid_coord', 'segment', 'instance',
-                        'origin_coord', 'origin_segment', 'origin_instance',
-                        'instance_centroid', 'bbox', 'seed_ids', 'path',
-                        'seg_indices'),
-                    feat_keys='coord',
-                    offset_keys_dict=dict(
-                        offset='coord', origin_offset='origin_coord'))
-            ],
-            test_mode=False,
-            classes={"other": 0, 
-                        "gear": 1, 
-                        "nut": 2, 
-                        "screw": 3, 
-                        "axe": 4})
-)
+        test=dict(
+        type='MechanicalAssemblyV2',
+        split='all',
+        image_size=image_size,
+        data_root='/home/data/cetim_assembly/dataset/downsampled1',
+        load_image_files=False,
+        transform=[
+            dict(type='CenterShift', apply_z=True),
+            dict(
+                type='Copy',
+                keys_dict=dict(
+                    coord='origin_coord',
+                    segment='origin_segment',
+                    instance='origin_instance')),
+            dict(
+                type='GridSample',
+                grid_size=1,
+                hash_type='fnv',
+                mode='train',
+                return_grid_coord=True,
+                return_inverse=True,
+                keys=('coord', 'normal', 'segment', 'instance', 'seg_indices')),
+            dict(type='CenterShift', apply_z=False),
+            dict(
+                type='InstanceParser',
+                segment_ignore_index=(-1, ),
+                instance_ignore_index=-1),
+            dict(type='GenerateBoundary', radius=border_radius),
+            dict(type='FPSSeed', n_points=100),
+            dict(type='ToTensor'),
+            dict(
+                type='Collect',
+                keys=('coord', 'face', 'grid_coord', 'segment', 'instance', 'border',
+                      'instance_segment', 'origin_coord', 'origin_segment',
+                      'origin_instance', 'seed_ids', 'seg_indices', 'path',
+                      'name', 'inverse'),
+                feat_keys=('coord',),
+                offset_keys_dict=dict(
+                    offset='coord',
+                    origin_offset='origin_coord',
+                    instance_segment_offset='instance_segment'))
+        ],
+        test_mode=False,
+        classes=dict(other=0, gear=0, nut=0, screw=0, axe=0)))
 
 hooks = [
     dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
-    # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
     dict(type="InsSegEvaluator",

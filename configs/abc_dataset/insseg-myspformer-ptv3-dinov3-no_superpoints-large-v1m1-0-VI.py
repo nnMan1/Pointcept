@@ -17,6 +17,7 @@ num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
+instance_ignore_index = -1
 
 model = dict(
     type="MySPFormer",
@@ -390,7 +391,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

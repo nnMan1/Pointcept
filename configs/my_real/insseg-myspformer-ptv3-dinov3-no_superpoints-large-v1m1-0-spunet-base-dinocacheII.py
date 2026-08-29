@@ -1,15 +1,36 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+# DINO-CACHE variant of insseg-...-spunet-base (my_real).
+# Identical model/training, but uses PRECOMPUTED DinoV3 features (no ViT at
+# train time) + dataset caching:
+#   * model1 is Image2PointCLoud with model_type=None (the stale
+#     DinoV3FeatureExtractor type is not registered); per-view patch grids come
+#     from HDF5 shards written by the feature-extraction config (run it first!).
+#   * LoadImageFeatures attaches the fp16 grids; Collect ships 'image_features'
+#     instead of 'images'. keep_on_cpu streams them per-sample.
+#   * cache=True on train/val so the prebuilt cached.pth is reused.
+# Requires /leonardo_scratch bound inside the container.
+
 # misc custom setting
-batch_size = 8 # bs: total bs in all gpus
-num_worker = 16
+batch_size = 4 # bs: total bs in all gpus
+num_worker = 32
 mix_prob = 0
 empty_cache = True
 enable_amp = False
 evaluate = True
+sync_bn = True
 find_unused_parameters = True
-# weight = 'exp/abc_dataset/insseg-myspformer_ptv3-v1m1-0-spunet-base/model/model_last.pth'
+# weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn/model/model_best.pth'
+weight = 'exp/my_synth/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-spunet-base_sync_bn/model/model_best.pth'
 # resume = True# weight='backbones/sstnet_pretrain.pth'
+
+# large fp16 feature grids are streamed per-sample by the model
+keep_on_cpu = ("image_features",)
+
+# NOTE: the motor-synthetic cache must be extracted first (no motor_synth cache
+# exists yet; only abc_dataset/cetim_real/mech_synth do). Point this at it.
+features_root_synth = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/motor_synth/features"
+features_root_real = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/cetim_real/features"
 
 
 num_classes = 1
@@ -18,12 +39,24 @@ dim_feedforward=1024
 segment_ignore_index = (-1, )
 instance_ignore_index = -1
 
-# model settings
 model = dict(
     type="MySPFormer",
     num_query = 100,
     encoder=dict(
         backbone=dict(
+        type="MergeFeatures",
+        model1_config=dict(
+            type="Image2PointCLoud",
+            model_type=None,  # precomputed features: no image backbone
+            model_name=None,
+            fts_dim=1280,
+            out_fts_dim=256,
+            merge_strategy='random_sample',
+            return_features=['feat'],
+            freeze_backbone=False,
+            freeze_backbone_bn=False
+        ),
+        model2_config=dict(
             type="PT-V3FeatureExtractor",
             in_channels=3,
             order=["z", "z-trans", "hilbert", "hilbert-trans"],
@@ -56,6 +89,7 @@ model = dict(
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
             return_features=['feat'],
+            ),
         ),
         backbone_out_channels=64,
         out_channels=32
@@ -122,10 +156,17 @@ model = dict(
             )
         ],
     ),
-    instance_ignore_index=-1,
+    matcher=dict(
+        type='HungarianMatcher',
+        cost_terms=[
+            dict(type='ClassCost', weight=0.5, enabled=True, use_logits=False),
+            dict(type='MaskBCECost', weight=1.0, enabled=True, instance_ignore_index=-1),
+            dict(type='MaskDiceCost', weight=1.0, enabled=True, instance_ignore_index=-1)
+        ],
+        instance_ignore_index=-1
+    ),
+    use_superpoint_pooling=False,
 )
-
-
 
 # scheduler settings
 epoch = 500
@@ -141,7 +182,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "MechanicalAssemblySynth"
-data_root = "data/segment-assembly-synthetic/data"
+data_root = "data/segment-motor-synthetic/data"
 recompute_clustering=False
 
 classes={"other": 0, 
@@ -156,14 +197,16 @@ class_names = ["other"]
 data = dict(
     num_classes=num_classes,
     ignore_index=-1,
-    names=class_names,
-    train=dict(
-        type=dataset_type,
-        split="train",
+    names=['class_names'],
+    train= dict(
+        type='MechanicalAssemblyV2',
+        split='trainII',
+        data_root='/home/data/cetim_assembly/dataset/downsampled1',
         cache=True,
-        data_root=data_root,
-        recompute_clustering=recompute_clustering,
+        load_image_files=False,  # mappings only; features come from the cache
+        image_size=(512, 512),
         transform=[
+            dict(type="LoadImageFeatures", features_root=features_root_real),
             dict(type="CenterShift", apply_z=True),
             # dict(
             #     type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.5
@@ -201,7 +244,6 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='RandomSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -210,30 +252,38 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "images",
+                    "image_features",
                     "mappings_src",
                     "mappings_tgt",
                     # "instance_centroid",
                     # "bbox",
                     "seg_indices",
+                    "instance_segment",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=("coord"),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord",
+                    origin_offset="origin_coord",
+                    image_offset="image_features",
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
         classes=classes,
     ),
     val=dict(
-        type=dataset_type,
-        split="val",
-        data_root=data_root,
+        type='MechanicalAssemblyV2',
+        split='valII',
+        data_root='/home/data/cetim_assembly/dataset/downsampled1',
         cache=True,
-        recompute_clustering=recompute_clustering,
+        load_image_files=False,  # mappings only; features come from the cache
+        image_size=(512, 512),
         transform=[
+            dict(type="LoadImageFeatures", features_root=features_root_real),
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="Copy",
@@ -260,7 +310,6 @@ data = dict(
                 segment_ignore_index=segment_ignore_index,
                 instance_ignore_index=-1,
             ),
-            dict(type='FPSSeed', n_points = 100),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
@@ -269,25 +318,36 @@ data = dict(
                     "grid_coord",
                     "segment",
                     "instance",
-                    "images",
+                    "image_features",
                     "mappings_src",
                     "mappings_tgt",
                     'origin_coord', 'origin_segment', 'origin_instance',
                     # "instance_centroid",
                     # "bbox",
+                    "instance_segment",
                     "seg_indices",
                     "path",
                     "name",
                     "inverse"
                 ),
                 feat_keys=('coord'),
-                offset_keys_dict=dict(offset="coord", origin_offset="origin_coord", image_offset="images", mappings_offset="mappings_src"),
+                offset_keys_dict=dict(
+                    offset="coord",
+                    origin_offset="origin_coord",
+                    image_offset="image_features",
+                    mappings_offset="mappings_src",
+                    instance_segment_offset="instance_segment"),
             ),
         ],
         test_mode=False,
-        classes=classes,   
+        classes=classes,
     ),
-    test=dict(  
+    # NOTE: this test split is point-only (no images/mappings/features), so it
+    # is INCOMPATIBLE with the cached DinoV3 branch -- the model expects
+    # 'image_features'. Only train/val are wired for dino-cache. To run test.py,
+    # switch this to a MechanicalAssemblyV2 split with LoadImageFeatures +
+    # mappings (see the abc_dataset dinocache configs).
+    test=dict(
             type='MechanicalAssembly',
             split='train',
             data_root='data/scans',
@@ -311,13 +371,12 @@ data = dict(
                     type='InstanceParser',
                     segment_ignore_index=(-1, ),
                     instance_ignore_index=-1),
-                dict(type='FPSSeed', n_points=100),
                 dict(type='ToTensor'),
                 dict(
                     type='Collect',
                     keys=('coord', 'grid_coord', 'segment', 'instance',
                         'origin_coord', 'origin_segment', 'origin_instance',
-                        'instance_centroid', 'bbox', 'seed_ids', 'path',
+                        'instance_centroid', 'bbox', 'path',
                         'seg_indices'),
                     feat_keys='coord',
                     offset_keys_dict=dict(
@@ -332,7 +391,7 @@ data = dict(
 )
 
 hooks = [
-    dict(type="CheckpointLoader", keywords=["module."], replacement=["module."]),
+    dict(type="CheckpointLoader", keywords=["module.", "MySPFormer__query.weight"], replacement=["module.", "dummy"]),
     # dict(type="CheckpointLoader", keywords=["module.", "decoder.mask_modules.0.class_embed_head"], replacement=["module.", "dummy."]),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),

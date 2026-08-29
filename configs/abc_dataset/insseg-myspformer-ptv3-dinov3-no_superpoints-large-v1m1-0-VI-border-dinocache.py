@@ -32,6 +32,7 @@ num_classes = 1
 fts_sizes = 128
 dim_feedforward = 1024
 segment_ignore_index = (-1, )
+instance_ignore_index = -1
 
 # Border detection branch settings
 border_radius = 4.0  # metric radius for boundary generation (~4x grid_size)
@@ -401,7 +402,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

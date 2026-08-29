@@ -34,6 +34,7 @@ num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
+instance_ignore_index = -1
 
 # DinoV3 image feature dim projected onto points (Image2PointCLoud.out_fts_dim)
 dinov3_out_dim = 256
@@ -383,7 +384,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,

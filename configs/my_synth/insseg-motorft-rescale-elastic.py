@@ -1,26 +1,36 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-# H5-DATASET variant of insseg-...-VI-border-dinocache.
-# Same model/training as the dinocache config, but train/val read the PACKED
-# abc_dataset HDF5 shards (HDF5_Dataset) instead of MechanicalAssemblySynth,
-# and the precomputed DinoV3 grids come from the abc_dataset feature cache
-# written by configs/abc_dataset/extract-dino-v3-features.py.
+# SCALE-ROBUST variant of concat-amp-norm: identical config (same merged
+# data, model, schedule, from scratch — NO pretrained init) plus
+# RandomRescaleDiag(80..480) in the train transform. Isolates the effect of
+# scale-robust training: the load-time pow2 hack leaves scenes at arbitrary
+# power-of-2 scales in [80,400] while CETIM test scans are unnormalized
+# (diag 77-467); rescaling each scene to a random diagonal per epoch makes
+# the model robust across that whole range. Compare directly against
+# insseg-...-VI-dinocache-concat-amp-norm (real AP50 0.2388 / mIoU 0.3812).
+
 #
-# NOTE (must resolve before training): HDF5_Dataset.get_data does NOT emit
-# 'seg_indices' (the abc HDF5 shards carry no superpoint clustering), but the
-# GridSample keys and the model's select_masks require it. Either add a
-# seg_indices field to HDF5_Dataset.get_data or compute a clustering from the
-# stored mesh (mesh_vertices/mesh_faces) at pack time. See the chat notes.
-#
-# Requires /leonardo_scratch bound inside the container (see
-# scripts/start_feature_extraction.sh for the --bind flags).
+# ELASTIC variant: adds ElasticDistortion([[4, 8], [16, 32]]) on top of the
+# rescale recipe — smooth local geometric warping as scan-realism
+# augmentation (real scans deviate from CAD-perfect surfaces at ~mm scales).
+# Placed AFTER RandomRescaleDiag so magnitudes live in the rescaled units,
+# with the other geometric augs. Params are [granularity, magnitude] in
+# coordinate units (~mm): gentle 4mm- and 16mm-scale warps.
+
+# MOTOR FINETUNE of insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-VI-dinocache-concat-amp-norm-rescale-elastic.
+# Init: exp/abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-VI-dinocache-concat-amp-norm-rescale-elastic/model/model_best.pth (merged pretrain, ep100).
+# Finetunes on the 47 motor-synthetic scenes (ftrain=43/fval=5),
+# keeping the source recipe (incl. RandomRescaleDiag). Same protocol
+# as the original motor-ft (real AP50 0.3163) but from a stronger base.
+
+weight = 'exp/abc_dataset/insseg-myspformer-ptv3-dinov3-no_superpoints-large-v1m1-0-VI-dinocache-concat-amp-norm-rescale-elastic/model/model_best.pth'
 
 # misc custom setting
 batch_size = 8 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
-enable_amp = False
+enable_amp = True
 evaluate = True
 sync_bn = True
 find_unused_parameters = True
@@ -28,8 +38,7 @@ find_unused_parameters = True
 # large fp16 feature grids are streamed per-sample by the model
 keep_on_cpu = ("image_features",)
 
-# synthetic features now come from the abc_dataset HDF5 extraction
-features_root_synth = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/abc_dataset/features"
+features_root_synth = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/motor_synth/features"
 features_root_real = "/leonardo_scratch/large/userexternal/vdosljak/dino_features/cetim_real/features"
 
 num_classes = 1
@@ -56,7 +65,10 @@ model = dict(
             merge_strategy='random_sample',
             return_features=['feat'],
             freeze_backbone=False,
-            freeze_backbone_bn=False
+            freeze_backbone_bn=False,
+            # trailing LayerNorm on the projection: scale-control the DinoV3
+            # branch at its source (helps fusion balance + synth->real transfer)
+            proj_norm=True,
         ),
         model2_config=dict(
             type="PT-V3FeatureExtractor",
@@ -90,10 +102,17 @@ model = dict(
             pdnorm_adaptive=False,
             pdnorm_affine=True,
             pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
-            return_features=['feat']
+            return_features=['feat'],
+            # concat the DinoV3 features onto the final decoder output instead
+            # of averaging them in per level (default 'average').
+            fusion='concat',
+            # LayerNorm each branch before the concat so neither dominates the
+            # mask-feature head input.
+            concat_norm=True,
             ),
         ),
-        backbone_out_channels=64,
+        # 64 (PT-V3 decoder output) + 256 (out_fts_dim of the DinoV3 branch)
+        backbone_out_channels=64 + 256,
         out_channels=32
      ),
     decoder=dict(
@@ -170,12 +189,14 @@ model = dict(
     use_superpoint_pooling=False,
     mask_dice_loss_weight=7.0,
     # Border detection branch: per-point binary border vs non-border head.
-    border_loss_weight=1.0,
+    # Off (matches the concat-amp-norm model); border labels still computed by
+    # GenerateBoundary but unused at weight 0.
+    border_loss_weight=0.0,
     border_focal_alpha=0.5,
 )
 
 # scheduler settings
-epoch = 500
+epoch = 100
 optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.005)
 scheduler = dict(
     type="OneCycleLR",
@@ -187,9 +208,9 @@ scheduler = dict(
 )
 
 # dataset settings
-# train/val now read the packed abc_dataset HDF5 shards; test stays on the
-# raw cetim real assemblies (MechanicalAssemblyV2).
-hdf5_data_root = "data/segment-assembly-synthetic/data/abc_dataset/processed"
+dataset_type = "MechanicalAssemblySynth"
+data_root = "data/segment-motor-synthetic/data"
+recompute_clustering = False
 image_size = (512, 512)
 
 classes={"other": 0,
@@ -206,17 +227,17 @@ data = dict(
     ignore_index=-1,
     names=class_names,
     train=dict(
-        type="HDF5_Dataset",
-        split="train",
-        data_root=hdf5_data_root,
-        # load_images builds mappings_src/tgt from the stored views (the model
-        # scatters the cached grids onto points via these mappings); HDF5_Dataset
-        # has no separate "mappings-only" flag, so PNGs are decoded too.
-        load_images=True,
+        type=dataset_type,
+        split="ftrain",
+        loop=20,
+        cache=True,
+        data_root=data_root,
+        recompute_clustering=recompute_clustering,
         image_size=image_size,
         transform=[
             dict(type="LoadImageFeatures", features_root=features_root_synth),
             dict(type="CenterShift", apply_z=True),
+            dict(type="RandomRescaleDiag", lo=80, hi=480),
             dict(
                 type="Copy",
                 keys_dict={
@@ -231,6 +252,7 @@ data = dict(
             dict(type="RandomScale", scale=[0.9, 1.1]),
             dict(type="RandomFlip", p=0.8),
             dict(type="RandomJitter", sigma=0.001, clip=0.02),
+            dict(type="ElasticDistortion", distortion_params=[[4, 8], [16, 32]]),
             dict(
                 type="GridSample",
                 grid_size=1,
@@ -281,10 +303,11 @@ data = dict(
         classes=classes,
     ),
     val=dict(
-        type="HDF5_Dataset",
-        split="val",
-        data_root=hdf5_data_root,
-        load_images=True,
+        type=dataset_type,
+        split="fval",
+        data_root=data_root,
+        cache=True,
+        recompute_clustering=recompute_clustering,
         image_size=image_size,
         transform=[
             dict(type="LoadImageFeatures", features_root=features_root_synth),

@@ -12,7 +12,7 @@ _base_ = ["../_base_/default_runtime.py"]
 # Requires /leonardo_scratch bound inside the container.
 
 # misc custom setting
-batch_size = 2 # bs: total bs in all gpus
+batch_size = 4 # bs: total bs in all gpus
 num_worker = 32
 mix_prob = 0
 empty_cache = True
@@ -36,6 +36,7 @@ num_classes = 1
 fts_sizes = 128
 dim_feedforward=1024
 segment_ignore_index = (-1, )
+instance_ignore_index = -1
 
 model = dict(
     type="MySPFormer",
@@ -198,7 +199,7 @@ data = dict(
     names=['class_names'],
     train= dict(
         type='MechanicalAssemblyV2',
-        split='train',
+        split='trainII',
         data_root='/home/data/cetim_assembly/dataset/downsampled1',
         cache=True,
         load_image_files=False,  # mappings only; features come from the cache
@@ -275,7 +276,7 @@ data = dict(
     ),
     val=dict(
         type='MechanicalAssemblyV2',
-        split='train',
+        split='valII',
         data_root='/home/data/cetim_assembly/dataset/downsampled1',
         cache=True,
         load_image_files=False,  # mappings only; features come from the cache
@@ -401,7 +402,7 @@ hooks = [
 
 # Tester
 test = dict(
-    type="InsSegTester",
+    type="InstSegTester",
     segment_ignore_index=segment_ignore_index,
     instance_ignore_index=-1,
     verbose=False,
