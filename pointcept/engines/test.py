@@ -608,6 +608,22 @@ class InstSegTester(TesterBase):
                 )
             )
 
+            # Optional prediction dump: lets fusion / post-processing ideas be
+            # iterated offline (no GPU) instead of re-running inference each
+            # time. Masks are bit-packed along the point axis, so a 200-scan
+            # test set costs ~1 GB instead of ~30 GB.
+            if getattr(self.cfg.test, "save_predictions", False):
+                pred_dir = os.path.join(self.cfg.save_path, "predictions")
+                os.makedirs(pred_dir, exist_ok=True)
+                pm = np.asarray(output_dict["pred_masks"])
+                np.savez_compressed(
+                    os.path.join(pred_dir, f"{data_name}.npz"),
+                    masks=np.packbits(pm.astype(bool), axis=1),
+                    n_points=np.int64(pm.shape[1] if pm.ndim == 2 else 0),
+                    scores=np.asarray(output_dict["pred_scores"]),
+                    classes=np.asarray(output_dict["pred_classes"]),
+                )
+
             if self.cfg.data.test.type == "ScanNetPPDataset":
                 self.write_scannetpp_results(
                     output_dict["pred_scores"],

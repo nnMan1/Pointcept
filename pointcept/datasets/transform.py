@@ -1732,3 +1732,280 @@ class RandomRescaleDiag(object):
             if key in data_dict:
                 data_dict[key] = data_dict[key] * scale
         return data_dict
+
+
+@TRANSFORMS.register_module()
+class ComputeSuperpoints(object):
+    """(Re)compute `seg_indices` with a configurable algorithm.
+
+    Superpoints normally come baked into the dataset (mesh segmentation stored
+    in cached.pth / grp_*.json), which makes trying a different segmentation
+    a data-preparation job. As a transform they become a config knob, so new
+    superpoint algorithms can be A/B-tested at inference without touching the
+    dataset or the model — pair it with the voting scheme in
+    `mask_selection=dict(voting=...)` (see dino_spformer/utils.SUPERPOINT_VOTERS).
+
+    Place it AFTER GridSample so the ids align with the points the model
+    predicts on (and so the graph is built on ~50k voxels, not ~350k points).
+
+    Methods:
+        dataset    keep whatever the dataset provided (no-op; the default)
+        eps_cc     connected components of the eps-radius graph — geometry-only
+                   segmentation, granularity controlled by `eps`
+        normal_cc  same, but two points are only connected when their normals
+                   agree (|cos| >= normal_thresh): splits touching parts that a
+                   pure distance graph would merge. Normals are estimated on the
+                   fly when the data has none (the synthetic caches store an
+                   all-zero 'normal' field).
+        grid       coarse voxel grid ids (cheap, algorithm-agnostic baseline)
+        mesh_fh    Felzenszwalb-Huttenlocher on the mesh dual graph via
+                   libs/dl_integration (`mesh_superpoints`) — the same family as
+                   the ScanNet segmentator, area-normalised so one `k` transfers
+                   across tessellation densities. Needs the container overlay
+                   (see libs/dl_integration/INSTALL_LEONARDO.md). With
+                   `randomize=True` the granularity is drawn log-uniformly from
+                   `k_range` per sample, which is what makes the model invariant
+                   to superpoint granularity instead of tied to the synthetic
+                   distribution (that distribution's tail cannot be matched to
+                   real scans anyway).
+
+    Args:
+        method (str): one of the above.
+        eps (float): neighbourhood radius in coordinate units (grid units).
+        normal_thresh (float): cosine threshold for 'normal_cc'.
+        abs_normal (bool): compare |cos| (default) — normals here are oriented
+            per rendering frame, so raw signs are not comparable across views.
+        grid_size (float): cell size for 'grid'.
+        min_points (int): superpoints smaller than this are merged into their
+            nearest neighbour superpoint (0 disables).
+        key (str): output key, default 'seg_indices'.
+    """
+
+    def __init__(self, method="dataset", eps=5.0, normal_thresh=0.9,
+                 grid_size=10.0, min_points=0, key="seg_indices",
+                 abs_normal=True, k=0.01, k_range=(0.005, 0.03),
+                 randomize=False, weight_noise=0.1, mesh_glob="visible*.ply",
+                 ref_diag=464.0, data_root=None):
+        self.method = method
+        self.eps = eps
+        self.normal_thresh = normal_thresh
+        self.grid_size = grid_size
+        self.min_points = min_points
+        self.key = key
+        self.abs_normal = abs_normal
+        self.k = k
+        self.k_range = tuple(k_range)
+        self.randomize = randomize
+        self.weight_noise = weight_noise
+        self.mesh_glob = mesh_glob
+        # `k` is in mesh units squared and the raw meshes differ in scale by up
+        # to ~100x, so every mesh is normalised to this bbox diagonal first
+        # (the k band was calibrated on a motor scan of diag ~464). None = off.
+        self.ref_diag = ref_diag
+        # data_dict['path'] comes out of cached.pth and can be stale (it is
+        # baked in at cache-creation time, so it still points at the dataset's
+        # old location); data_root lets the scene be re-resolved by basename.
+        self.data_root = data_root
+
+    def _components(self, edges, n):
+        from scipy import sparse
+        adj = sparse.coo_matrix(
+            (np.ones(edges.shape[0], dtype=np.int8), (edges[:, 0], edges[:, 1])),
+            shape=(n, n),
+        )
+        _, lab = sparse.csgraph.connected_components(adj, directed=False)
+        return lab
+
+    def _merge_small(self, labels, coord):
+        if self.min_points <= 0:
+            return labels
+        from scipy.spatial import cKDTree
+        ids, counts = np.unique(labels, return_counts=True)
+        small = set(ids[counts < self.min_points].tolist())
+        if not small or len(small) == len(ids):
+            return labels
+        big_mask = ~np.isin(labels, list(small))
+        tree = cKDTree(coord[big_mask])
+        big_labels = labels[big_mask]
+        idx = tree.query(coord[~big_mask])[1]
+        labels = labels.copy()
+        labels[~big_mask] = big_labels[idx]
+        return labels
+
+
+    def _mesh_fh(self, data_dict, coord):
+        """FH superpoints on the sample's mesh, transferred to `coord` by NN.
+
+        The mesh comes from data_dict['face'] when the dataset ships one
+        (real scans), otherwise from `mesh_glob` inside data_dict['path'].
+        """
+        import glob as _glob
+        from mesh_superpoints import compute as _sp_compute
+
+        verts = faces = None
+        coord_is_mesh = data_dict.get("face", None) is not None
+        if coord_is_mesh:
+            # real scans ship the mesh itself: coord ARE the mesh vertices
+            faces = data_dict["face"]
+            faces = faces.numpy() if hasattr(faces, "numpy") else np.asarray(faces)
+            verts = coord
+        else:
+            path = str(data_dict.get("path", ""))
+            hits = sorted(_glob.glob(os.path.join(path, self.mesh_glob)))
+            if not hits and self.data_root:
+                alt = os.path.join(self.data_root, "files", os.path.basename(path.rstrip("/")))
+                hits = sorted(_glob.glob(os.path.join(alt, self.mesh_glob)))
+                path = alt
+            assert hits, (f"ComputeSuperpoints(mesh_fh): no {self.mesh_glob} under "
+                          f"'{path}' (data_root={self.data_root}); the cached "
+                          f"'path' may be stale — pass data_root in the config)")
+            import trimesh
+            mesh = trimesh.load(hits[0], process=False)
+            verts = np.asarray(mesh.vertices, dtype=np.float64)
+            faces = np.asarray(mesh.faces, dtype=np.int64)
+
+        verts = np.asarray(verts, dtype=np.float64)
+        # normalise scale so `k` (units^2) means the same thing on every sample
+        scale = 1.0
+        if self.ref_diag:
+            diag = float(np.linalg.norm(verts.max(0) - verts.min(0)))
+            if diag > 0:
+                scale = self.ref_diag / diag
+        k = self.k
+        if self.randomize:
+            lo, hi = np.log(self.k_range[0]), np.log(self.k_range[1])
+            k = float(np.exp(np.random.uniform(lo, hi)))
+        sp = _sp_compute(
+            verts * scale, faces, k=k,
+            weight_noise=self.weight_noise if self.randomize else 0.0,
+            seed=int(np.random.randint(2 ** 31)) if self.randomize else 0,
+        )
+
+        if coord_is_mesh:
+            return sp  # labels are already per-point
+
+        # transfer mesh-vertex labels to the sampled cloud; both are the same
+        # surface but may sit at different scales (the loaders rescale points),
+        # so match in a per-cloud normalised frame
+        from scipy.spatial import cKDTree
+        def _norm(a):
+            a = np.asarray(a, dtype=np.float64)
+            c = (a.max(0) + a.min(0)) / 2.0
+            d = float(np.linalg.norm(a.max(0) - a.min(0))) or 1.0
+            return (a - c) / d
+        idx = cKDTree(_norm(verts)).query(_norm(coord))[1]
+        return sp[idx]
+
+    def __call__(self, data_dict):
+        if self.method == "dataset":
+            return data_dict
+        coord = data_dict["coord"]
+        coord = coord.numpy() if hasattr(coord, "numpy") else np.asarray(coord)
+        n = coord.shape[0]
+
+        if self.method == "grid":
+            g = np.floor(coord / self.grid_size).astype(np.int64)
+            g -= g.min(0)
+            key = (g[:, 0] * 2 ** 40 + g[:, 1] * 2 ** 20 + g[:, 2])
+            labels = np.unique(key, return_inverse=True)[1]
+        elif self.method in ("eps_cc", "normal_cc"):
+            from scipy.spatial import cKDTree
+            pairs = cKDTree(coord).query_pairs(r=self.eps, output_type="ndarray")
+            if self.method == "normal_cc":
+                normal = data_dict.get("normal", None)
+                if normal is not None:
+                    normal = normal.numpy() if hasattr(normal, "numpy") else np.asarray(normal)
+                    if np.linalg.norm(normal, axis=1).max() < 1e-6:
+                        normal = None  # the cached 'normal' field is all zeros
+                if normal is None:
+                    # estimate on the fly: the synthetic caches ship a zeroed
+                    # 'normal' field, so relying on it silently disables the
+                    # normal test (every edge rejected -> singleton superpoints)
+                    import open3d as o3d
+                    pc = o3d.geometry.PointCloud()
+                    pc.points = o3d.utility.Vector3dVector(coord.astype(np.float64))
+                    pc.estimate_normals(
+                        search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                            radius=self.eps * 2.0, max_nn=30))
+                    normal = np.asarray(pc.normals)
+                nrm = normal / (np.linalg.norm(normal, axis=1, keepdims=True) + 1e-8)
+                dot = (nrm[pairs[:, 0]] * nrm[pairs[:, 1]]).sum(1)
+                # normals in this data are oriented per rendering frame (towards
+                # each camera), so two samples of the same surface can carry
+                # opposite signs; compare orientation-invariantly by default
+                agree = (np.abs(dot) if self.abs_normal else dot) >= self.normal_thresh
+                pairs = pairs[agree]
+            labels = self._components(pairs, n)
+        elif self.method == "mesh_fh":
+            labels = self._mesh_fh(data_dict, coord)
+        else:
+            raise NotImplementedError(f"unknown ComputeSuperpoints method '{self.method}'")
+
+        labels = self._merge_small(labels, coord)
+        # make ids dense (0..k-1): voting scatters over max+1 buckets
+        labels = np.unique(labels, return_inverse=True)[1]
+        data_dict[self.key] = torch.from_numpy(labels).long() if torch.is_tensor(data_dict.get(self.key)) else labels
+        return data_dict
+
+
+@TRANSFORMS.register_module()
+class KeepViews(object):
+    """Keep only the points visible from a subset of the rendering views.
+
+    The synthetic clouds are built from ~20 views placed around the object, so
+    they are almost fully covered; the real scans are partial captures
+    (back_view / front_view / ...) whose instances are frequently split into
+    disconnected pieces by occlusion. This transform simulates that partiality
+    on synthetic data, which turns "is coverage the domain gap?" into a
+    measurable question instead of an assumption.
+
+    Point membership comes from the pixel->point mappings (`mappings_src[:, 0]`
+    is the view index, `mappings_tgt` the point index), so it reflects actual
+    visibility rather than a geometric guess. Image features are left untouched:
+    view indices keep their meaning, dropped views simply stop contributing.
+
+    Args:
+        n_views (int): how many views to keep (<=0 or >= available keeps all).
+        contiguous (bool): pick a contiguous block of view indices (mimics a
+            scanner sweeping one side) instead of a random subset.
+        seed (int | None): fixed seed for reproducible evaluation.
+    """
+
+    def __init__(self, n_views=3, contiguous=True, seed=0):
+        self.n_views = n_views
+        self.contiguous = contiguous
+        self.seed = seed
+
+    def __call__(self, data_dict):
+        src = data_dict.get("mappings_src", None)
+        tgt = data_dict.get("mappings_tgt", None)
+        if src is None or tgt is None:
+            return data_dict
+        src = np.asarray(src)
+        tgt = np.asarray(tgt)
+        views = np.unique(src[:, 0])
+        if self.n_views <= 0 or self.n_views >= len(views):
+            return data_dict
+
+        rng = np.random.default_rng(self.seed)
+        if self.contiguous:
+            start = int(rng.integers(0, len(views)))
+            keep_v = np.take(views, (np.arange(self.n_views) + start) % len(views))
+        else:
+            keep_v = rng.choice(views, size=self.n_views, replace=False)
+
+        sel = np.isin(src[:, 0], keep_v)
+        keep_pts = np.unique(tgt[sel])
+        n_old = len(data_dict["coord"])
+        remap = -np.ones(n_old, dtype=np.int64)
+        remap[keep_pts] = np.arange(len(keep_pts))
+
+        for key, val in list(data_dict.items()):
+            if key in ("mappings_src", "mappings_tgt", "image_features", "images"):
+                continue
+            if hasattr(val, "__len__") and not isinstance(val, str) and len(val) == n_old:
+                data_dict[key] = val[keep_pts]
+
+        data_dict["mappings_src"] = src[sel]
+        data_dict["mappings_tgt"] = remap[tgt[sel]]
+        return data_dict

@@ -196,7 +196,69 @@ def dbscan_mask_split(full_masks, scores, labels, coord, mask_sigmoid=None, n_po
     out_labels = torch.stack([e[2] for e in entries])
     return out_masks, out_scores, out_labels
 
-def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms_thr=None, coord=None, dbscan_eps=5, dbscan_min_samples=1, split_mode='all', rescore='size'):
+# ---------------------------------------------------------------------------
+# Superpoint voting: how per-point mask predictions are snapped to superpoints
+# at inference. Registered by name so new schemes can be A/B-tested from the
+# config (mask_selection=dict(voting=dict(type='...', ...))) without touching
+# the model. Every function takes per-point predictions and returns per-point
+# binary masks that are unions of superpoints.
+# ---------------------------------------------------------------------------
+SUPERPOINT_VOTERS = {}
+
+
+def register_voter(name):
+    def deco(fn):
+        SUPERPOINT_VOTERS[name] = fn
+        return fn
+    return deco
+
+
+def _scatter_mean(values, superpoints, n_sp):
+    """values: (n_masks, n_points) -> (n_masks, n_superpoints) mean per group."""
+    return torch_scatter.scatter(
+        values.cpu().T.float(), superpoints.cpu(), dim=0, dim_size=n_sp, reduce='mean'
+    ).T
+
+
+@register_voter('majority')
+def _vote_majority(binary, sigmoid, superpoints, n_sp, threshold=0.5, **kw):
+    """Historic default: a superpoint joins a mask if >threshold of its points voted."""
+    frac = _scatter_mean(binary, superpoints, n_sp).to(binary.device)
+    return (frac > threshold).int()[:, superpoints]
+
+
+@register_voter('soft')
+def _vote_soft(binary, sigmoid, superpoints, n_sp, threshold=0.5, **kw):
+    """Average the mask PROBABILITIES inside each superpoint instead of the hard
+    votes: a superpoint of uniformly borderline points is treated differently
+    from one mixing confident yes/no points."""
+    assert sigmoid is not None, "voting='soft' needs mask probabilities"
+    prob = _scatter_mean(sigmoid, superpoints, n_sp).to(binary.device)
+    return (prob > threshold).int()[:, superpoints]
+
+
+@register_voter('argmax')
+def _vote_argmax(binary, sigmoid, superpoints, n_sp, threshold=0.5, **kw):
+    """Competitive assignment: every superpoint goes to at most ONE mask (the
+    one with the highest mean probability, if it clears threshold), so the
+    returned masks never overlap."""
+    assert sigmoid is not None, "voting='argmax' needs mask probabilities"
+    prob = _scatter_mean(sigmoid, superpoints, n_sp).to(binary.device)  # (n_masks, n_sp)
+    best = prob.argmax(dim=0)                                           # (n_sp,)
+    keep = prob.max(dim=0).values > threshold
+    sp_masks = torch.zeros_like(prob, dtype=torch.int32)
+    idx = torch.nonzero(keep).flatten()
+    sp_masks[best[idx], idx] = 1
+    return sp_masks[:, superpoints]
+
+
+@register_voter('off')
+def _vote_off(binary, sigmoid, superpoints, n_sp, **kw):
+    """No snapping: keep the raw per-point masks."""
+    return binary.int()
+
+
+def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms_thr=None, coord=None, dbscan_eps=5, dbscan_min_samples=1, split_mode='all', rescore='size', voting='majority'):
         # NOTE: coord is expected in voxel/grid units (1mm voxels): the minimum
         # distance between two points is 1, so dbscan_eps must be > 1 or every
         # point becomes its own cluster and masks shatter into singletons.
@@ -223,7 +285,11 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
 
         # sigmoid values are only needed for rescore='cluster'; skip the
         # (n_p, N) float allocation otherwise
-        need_sigmoid = rescore == 'cluster'
+        voting_cfg = dict(type=voting) if isinstance(voting, str) else dict(voting)
+        voting_type = voting_cfg.pop('type', 'majority')
+        if voting_type not in SUPERPOINT_VOTERS:
+            raise KeyError(f"unknown voting '{voting_type}'; have {sorted(SUPERPOINT_VOTERS)}")
+        need_sigmoid = rescore == 'cluster' or voting_type in ('soft', 'argmax')
 
         # expand to full points via superpoints
         if superpoints.max() + 1 == mask_logits.shape[1]:
@@ -231,17 +297,12 @@ def select_masks(out, superpoints, score_thr=0.0, n_point_thr=100, topk=100, nms
             full_masks = binary_masks[:, superpoints].int()
             full_masks_sigmoid = topk_masks_sigmoid[:, superpoints] if need_sigmoid else None
         else:
-            # masks are per-point: regularize via majority vote inside each superpoint
-            superpoint_mask_percentage = torch_scatter.scatter(
-                binary_masks.cpu().T.float(),
-                superpoints.cpu(),
-                dim=0,
-                dim_size=superpoints.max() + 1,
-                reduce='mean'
-            ).T
-
-            superpoint_mask_percentage = superpoint_mask_percentage.to(binary_masks.device)
-            full_masks = (superpoint_mask_percentage > 0.5).int()[:, superpoints]  # (n_p, N)
+            # masks are per-point: snap them to superpoints with the configured
+            # voting scheme (see SUPERPOINT_VOTERS above)
+            full_masks = SUPERPOINT_VOTERS[voting_type](
+                binary_masks, topk_masks_sigmoid, superpoints,
+                int(superpoints.max()) + 1, **voting_cfg,
+            )
             full_masks_sigmoid = topk_masks_sigmoid if need_sigmoid else None  # already per-point
 
         # score_thr

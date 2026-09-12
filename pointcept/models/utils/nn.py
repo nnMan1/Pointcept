@@ -155,16 +155,25 @@ class SuperpointPooling(nn.Module):
             label_keys.append('segment')
 
          
+        # Majority label per superpoint, vectorized: the previous version looped
+        # over every superpoint in Python (one boolean mask + unique each), which
+        # costs seconds per batch once superpoints are fine-grained (~5k/scene).
+        # Here the (superpoint, label) pairs are histogrammed in one scatter and
+        # the winner is an argmax; identical result, O(N).
+        sp = data['seg_indices']
+        n_sp = int(sp.max().item()) + 1
         for key in label_keys:
-            label = []
-            for cls in data['seg_indices'].unique():
-               cluster_mask = data['seg_indices'] == cls
-          
-               unique_labels, counts = torch.unique(data[key][cluster_mask], return_counts=True)
-               majority_label = unique_labels[torch.argmax(counts)]
-               label.append(majority_label)
-
-            data[key] = torch.stack(label)
+            lab = data[key]
+            lo = int(lab.min().item())
+            shifted = (lab - lo).long()
+            n_lab = int(shifted.max().item()) + 1
+            counts = torch.zeros(n_sp, n_lab, device=lab.device, dtype=torch.float32)
+            counts.index_put_(
+                (sp.long(), shifted),
+                torch.ones(shifted.shape[0], device=lab.device, dtype=torch.float32),
+                accumulate=True,
+            )
+            data[key] = (counts.argmax(dim=1) + lo).to(lab.dtype)
 
         instance_segment = [] 
         instance_segment_offset = [0]
